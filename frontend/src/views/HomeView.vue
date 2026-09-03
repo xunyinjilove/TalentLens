@@ -41,6 +41,14 @@
               {{ $t('home.resumeList') }} ({{ resumeStore.resumes.length }})
             </span>
             <div class="section-btns">
+              <button
+                class="action-btn boss-btn"
+                @click="showBossDialog = true"
+                :title="$t('boss.searchBtn') || 'BOSS 直聘自动搜寻牛人并直接打分'"
+              >
+                <el-icon><Search /></el-icon>
+                <span>BOSS寻才</span>
+              </button>
               <button class="action-btn primary" @click="handleStartAnalysis" :disabled="resumeStore.isAnalyzing">
                 <el-icon v-if="!resumeStore.isAnalyzing"><VideoPlay /></el-icon>
                 <el-icon v-else class="spin"><Loading /></el-icon>
@@ -336,6 +344,17 @@
 
     <AIConfigGuide v-model="showConfigGuide" />
 
+    <!-- BOSS 直聘自动搜寻与智能评测弹窗 -->
+    <BossSearchDialog
+      v-model="showBossDialog"
+      :project-id="projectId"
+      :project-name="projectName"
+      :job-title="projectStore.currentProject?.job_config?.title || jobTitle"
+      :exp-years="projectStore.currentProject?.job_config?.experience_years"
+      :edu-level="projectStore.currentProject?.job_config?.education_level"
+      @refresh="handleRefreshProject"
+    />
+
     <!-- 开发者调试面板 (F12 切换) -->
     <DevPanel />
   </div>
@@ -348,7 +367,7 @@ import { useI18n } from 'vue-i18n'
 import {
   Setting, Briefcase, Document, VideoPlay, Delete, View,
   CircleCheck, Warning, ChatLineSquare, Clock, Loading, CircleClose,
-  RefreshRight, Download, Tickets, QuestionFilled, DocumentCopy, InfoFilled
+  RefreshRight, Download, Tickets, QuestionFilled, DocumentCopy, InfoFilled, Search
 } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import TitleBar from '../components/TitleBar.vue'
@@ -357,6 +376,7 @@ import ResumeCard from '../components/ResumeCard.vue'
 import LanguageSwitcher from '../components/LanguageSwitcher.vue'
 import AIConfigGuide from '../components/AIConfigGuide.vue'
 import DevPanel from '../components/DevPanel.vue'
+import BossSearchDialog from '../components/BossSearchDialog.vue'
 import { useResumeStore } from '../composables/useResumeStore'
 import { useProjectStore } from '../composables/useProjectStore'
 
@@ -375,8 +395,16 @@ const contentLoading = ref(false)
 
 const jobTitle = ref('高级Go开发工程师')
 const showConfigGuide = ref(false)
+const showBossDialog = ref(false)
 const animatedDetailScore = ref(0)
 let scoreAnimationFrame: number | null = null
+
+async function handleRefreshProject() {
+  if (projectId.value) {
+    await projectStore.refreshProject(projectId.value)
+    await resumeStore.loadProjectResumes(projectId.value)
+  }
+}
 
 function getCategoryClass(category?: string): string {
   if (!category) return 'cat-tech'
@@ -825,6 +853,23 @@ onMounted(async () => {
     &:disabled {
       opacity: 0.6;
       cursor: not-allowed;
+    }
+  }
+
+  &.boss-btn {
+    background: linear-gradient(135deg, #00b96b 0%, #059669 100%);
+    border-color: #059669;
+    color: #ffffff;
+    font-weight: 600;
+    box-shadow: 0 2px 6px rgba(0, 185, 107, 0.25);
+
+    &:hover {
+      background: linear-gradient(135deg, #059669 0%, #047857 100%);
+      transform: translateY(-1px);
+      box-shadow: 0 4px 10px rgba(0, 185, 107, 0.35);
+    }
+    &:active {
+      transform: translateY(0);
     }
   }
 }

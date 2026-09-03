@@ -300,5 +300,14 @@ export default {
     avgScore: 'Avg Score',
     recommendCount: 'Recommended',
     backToList: 'Back to Projects'
+  },
+
+  boss: {
+    dialogTitle: 'BOSS Zhipin Auto-Sourcing & AI Assessment',
+    searchBtn: 'Auto-source candidates from BOSS & score with AI',
+    startSearch: 'Start Sourcing',
+    stopSearch: 'Stop Sourcing',
+    targetCity: 'Target City',
+    candidateCount: 'Target Candidates'
   }
 }

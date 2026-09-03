@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -10,10 +11,12 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"math"
 	"regexp"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/ledongthuc/pdf"
@@ -26,7 +29,7 @@ import (
 
 // 版本信息
 const AppVersion = "1.2.0"
-const GitHubRepo = "1186258278/TalentLens"
+const GitHubRepo = "xunyinjilove/TalentLens"
 
 //go:embed all:frontend/dist
 var assets embed.FS
@@ -157,6 +160,8 @@ type App struct {
 	ctx             context.Context
 	config          Config
 	activeProjectID string // 当前活跃的项目ID（前端设置）
+	bossCmd         *exec.Cmd
+	bossMutex       sync.Mutex
 }
 
 func NewApp() *App {
@@ -874,6 +879,163 @@ func (a *App) StartProjectAnalysis(projectID string, cfg *AIConfig) {
 			"projectId": projectID,
 		})
 	}()
+}
+
+// CheckBossCookies 检查是否有保存的登录态
+func (a *App) CheckBossCookies() bool {
+	cookiePath := filepath.Join(a.getDataDir(), "boss_cookies.json")
+	_, err := os.Stat(cookiePath)
+	return err == nil
+}
+
+// StartBossSearch 启动 BOSS 直聘搜寻任务并实时接入候选人
+func (a *App) StartBossSearch(projectID string, keyword string, city string, expYears int, eduLevel string, count int) bool {
+	a.bossMutex.Lock()
+	if a.bossCmd != nil && a.bossCmd.Process != nil {
+		_ = a.bossCmd.Process.Kill()
+		a.bossCmd = nil
+	}
+	a.bossMutex.Unlock()
+
+	if count <= 0 {
+		count = 10
+	}
+	if city == "" {
+		city = "上海"
+	}
+	if keyword == "" {
+		p := a.GetProject(projectID)
+		if p != nil && p.JobConfig.Title != "" {
+			keyword = p.JobConfig.Title
+		} else {
+			keyword = "临床项目经理"
+		}
+	}
+
+	dataDir := filepath.Join(a.getDataDir(), "boss_candidates")
+	os.MkdirAll(dataDir, 0755)
+
+	scriptPath := filepath.Join(filepath.Dir(os.Args[0]), "scripts", "boss_agent.js")
+	if _, err := os.Stat(scriptPath); os.IsNotExist(err) {
+		// 开发阶段相对路径回退
+		scriptPath = filepath.Join("scripts", "boss_agent.js")
+	}
+
+	expStr := fmt.Sprintf("%d年", expYears)
+	if expYears <= 0 {
+		expStr = "不限"
+	}
+
+	cmd := exec.Command("node", scriptPath,
+		"--keyword", keyword,
+		"--city", city,
+		"--exp", expStr,
+		"--edu", eduLevel,
+		"--count", fmt.Sprintf("%d", count),
+		"--data-dir", dataDir,
+	)
+
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		log.Printf("[StartBossSearch] 无法创建管道: %v", err)
+		runtime.EventsEmit(a.ctx, "boss:error", map[string]interface{}{
+			"message": "启动搜寻失败: 无法创建执行管道",
+		})
+		return false
+	}
+
+	if err := cmd.Start(); err != nil {
+		log.Printf("[StartBossSearch] 启动 Node 进程失败: %v", err)
+		runtime.EventsEmit(a.ctx, "boss:error", map[string]interface{}{
+			"message": fmt.Sprintf("启动自动化引擎失败: 请确保系统已安装 Node.js (%v)", err),
+		})
+		return false
+	}
+
+	a.bossMutex.Lock()
+	a.bossCmd = cmd
+	a.bossMutex.Unlock()
+
+	go func() {
+		scanner := bufio.NewScanner(stdout)
+		for scanner.Scan() {
+			line := scanner.Text()
+			if strings.TrimSpace(line) == "" {
+				continue
+			}
+
+			var evt map[string]interface{}
+			if err := json.Unmarshal([]byte(line), &evt); err != nil {
+				continue
+			}
+
+			evtType, _ := evt["type"].(string)
+			switch evtType {
+			case "status":
+				runtime.EventsEmit(a.ctx, "boss:status", evt)
+			case "auth":
+				runtime.EventsEmit(a.ctx, "boss:auth", evt)
+			case "candidate":
+				// 将候选人注册进项目
+				if candObj, ok := evt["candidate"].(map[string]interface{}); ok {
+					candID, _ := candObj["id"].(string)
+					candName, _ := candObj["fileName"].(string)
+					candPath, _ := candObj["filePath"].(string)
+					candContent, _ := candObj["content"].(string)
+
+					r := &Resume{
+						ID:        candID,
+						ProjectID: projectID,
+						FileName:  candName,
+						FilePath:  candPath,
+						FileType:  ".txt",
+						FileSize:  int64(len(candContent)),
+						Content:   candContent,
+						Status:    "pending",
+						CreatedAt: time.Now(),
+					}
+					a.saveResume(r)
+
+					p := a.GetProject(projectID)
+					if p != nil {
+						p.ResumeIDs = append(p.ResumeIDs, candID)
+						a.UpdateProject(p)
+					}
+
+					runtime.EventsEmit(a.ctx, "resume:dropped", r)
+					runtime.EventsEmit(a.ctx, "boss:candidate_found", evt)
+				}
+			case "done":
+				runtime.EventsEmit(a.ctx, "boss:done", evt)
+				// 自动触发当前项目的 AI 智能分析
+				if a.config.AI.APIKey != "" {
+					go a.StartProjectAnalysis(projectID, &a.config.AI)
+				}
+			case "error":
+				runtime.EventsEmit(a.ctx, "boss:error", evt)
+			}
+		}
+
+		_ = cmd.Wait()
+		a.bossMutex.Lock()
+		a.bossCmd = nil
+		a.bossMutex.Unlock()
+	}()
+
+	return true
+}
+
+// StopBossSearch 停止搜寻
+func (a *App) StopBossSearch() bool {
+	a.bossMutex.Lock()
+	defer a.bossMutex.Unlock()
+	if a.bossCmd != nil && a.bossCmd.Process != nil {
+		_ = a.bossCmd.Process.Kill()
+		a.bossCmd = nil
+		log.Println("[StopBossSearch] 已终止 BOSS 搜寻任务")
+		return true
+	}
+	return false
 }
 
 // MigrateExistingResumes 将现有简历迁移到默认项目
