@@ -1,0 +1,61 @@
+# Build outputs
+build/bin/
+bin/
+*.exe
+!.gitkeep
+
+# Frontend
+node_modules/
+frontend/dist/
+
+# Dependencies (go.sum is kept for reproducible builds)
+
+# Environment & secrets
+.env
+.env.*
+*.key
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS files
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# Test & temp files
+test_build.exe
+*.log
+*.tmp
+
+# Wails auto-generated bindings (regenerated on every `wails build`)
+frontend/wailsjs/
+
+# Sample files (large binary images)
+samples/
+
+# Wails cache
+*.md5
+
+# Unused template assets
+frontend/README.md
+frontend/src/assets/images/logo-universal.png
+frontend/src/assets/fonts/
+
+# AI 上下文记忆文档（跨会话持久化，不提交）
+.context.md
+CONTEXT.local.md
+
+# 内部开发文档（不提交，docs/index.html 官网除外）
+docs/design/
+docs/api/
+docs/guides/
+docs/DEVELOPMENT.md
+docs/README.md
+
+# Cursor / editor
+.cursor/
