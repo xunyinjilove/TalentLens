@@ -47,7 +47,7 @@ Available on **Windows** and **macOS**.
 
 ### Download
 
-Download the latest release from the [Releases](https://github.com/1186258278/TalentLens/releases) page:
+Download the latest release from the [Releases](https://github.com/xunyinjilove/TalentLens/releases) page:
 
 - **Windows**: `TalentLens-windows-amd64.exe`
 - **macOS (Intel)**: `TalentLens-macos-amd64.zip`
@@ -90,7 +90,7 @@ Just download and run. No installation required.
 
 ```bash
 # Clone the repository
-git clone https://github.com/1186258278/TalentLens.git
+git clone https://github.com/xunyinjilove/TalentLens.git
 cd TalentLens
 
 # Install frontend dependencies
@@ -157,17 +157,3 @@ Contributions are welcome! Please read [CONTRIBUTING.md](CONTRIBUTING.md) for de
 
 This project is licensed under the **GNU General Public License v3.0** - see the [LICENSE](LICENSE) file for details.
 
----
-
-## About
-
-**TalentLens** is developed by **Wuhan QingChen TianXia Network Technology Co., Ltd.** (武汉晴辰天下网络科技有限公司)
-
-- Product Website: [https://talentlens.qt.cool](https://talentlens.qt.cool)
-- Company: [https://qingchencloud.com](https://qingchencloud.com)
-- Products: [https://qt.cool](https://qt.cool)
-- Brand: QingChen Cloud / 晴辰云
-
----
-
-<p align="center">Made with ❤️ by QingChen Cloud</p>
