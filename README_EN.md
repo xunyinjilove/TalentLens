@@ -43,6 +43,40 @@ Available on **Windows** and **macOS**.
 
 ---
 
+## 🌟 Core Improvements & Key Features
+
+Compared to the baseline version, this project has undergone extensive enterprise-grade feature enhancements:
+
+### 1. 🎯 AI-Powered Interview Assistant (5 Targeted Interview Questions)
+- **Dynamic Questioning**: Generates **5 tailored interview questions** based on candidate's real project experience, skill gaps, and strengths;
+- **Reference Answers & Assessment Points**: Provides standard reference answers and HR evaluation criteria for each question.
+
+### 2. 🧬 Biomedical & IVD (In Vitro Diagnostics) Job Library
+- Added dedicated **【Biomedical / IVD】** category with 13 real-world IVD position presets (`Clinical Project Manager`, `SCRA`, `Autoimmune R&D Manager`, `Product Application Specialist`, `IVD Product Manager`, `Field Service Engineer`, `QC Inspector`, etc.);
+- Preloaded with authentic job descriptions, qualifications, and core skill sets.
+
+### 3. 📊 Main Screen Job Requirements Dashboard
+- Embedded job requirements and template selector directly on the top of the main screen;
+- Quick-switch between 13 IVD presets or custom roles, with expandable inline editing for skill tags and detailed responsibilities.
+
+### 4. 💾 Custom Job Template Storage & Management
+- Save any configured job setup as a new template with one click (**【💾 Save as New Template】**);
+- Dedicated **【Custom Templates】** tab with active count badge and delete management.
+
+### 5. 📝 Deep Job Description Injection in AI Prompts
+- Added multi-line job description module (up to 3,000 characters);
+- Injected as core evaluation criteria in backend Go prompts to guarantee deep business alignment.
+
+### 6. 🏢 Comprehensive Recruitment Project Management
+- Rebuilt **【+ New Project】** workflow to include **Project Theme**, **Automatic Job Inheritance**, **Department**, **Target Headcount**, **Recruiter / HR**, and **Project Notes**;
+- Project cards upgraded to display department/job badges, headcount, recruiters, and real-time score statistics.
+
+### 7. ⚡ Custom Model Name Input & Latest LLM Support
+- Allows direct text input for custom model names;
+- Support for streaming models and latest provider integrations.
+
+---
+
 ## Quick Start
 
 ### Download
