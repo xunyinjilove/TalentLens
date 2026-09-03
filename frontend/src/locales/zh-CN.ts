@@ -300,5 +300,14 @@ export default {
     avgScore: '平均分',
     recommendCount: '推荐人数',
     backToList: '返回项目列表'
+  },
+
+  boss: {
+    dialogTitle: 'BOSS 直聘自动寻才与 AI 评测',
+    searchBtn: 'BOSS直聘自动寻才并直接打分',
+    startSearch: '立即开始搜寻',
+    stopSearch: '停止搜寻',
+    targetCity: '目标城市',
+    candidateCount: '计划搜寻牛人数'
   }
 }
