@@ -262,10 +262,7 @@ export default {
     download: '前往下载',
     updateError: '检查更新失败',
     links: '相关链接',
-    github: 'GitHub 仓库',
-    website: '产品官网',
-    company: '公司官网',
-    copyright: '武汉晴辰天下网络科技有限公司'
+    github: 'GitHub 仓库'
   },
 
   project: {

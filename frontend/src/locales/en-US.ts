@@ -262,10 +262,7 @@ export default {
     download: 'Download',
     updateError: 'Failed to check for updates',
     links: 'Links',
-    github: 'GitHub Repository',
-    website: 'Product Website',
-    company: 'Company Website',
-    copyright: 'Wuhan Qingchen Tianxia Network Technology Co., Ltd.'
+    github: 'GitHub Repository'
   },
 
   project: {

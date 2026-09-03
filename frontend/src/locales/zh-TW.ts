@@ -260,10 +260,7 @@ export default {
     download: '前往下載',
     updateError: '檢查更新失敗',
     links: '相關連結',
-    github: 'GitHub 倉庫',
-    website: '產品官網',
-    company: '公司官網',
-    copyright: '武漢晴辰天下網路科技有限公司'
+    github: 'GitHub 倉庫'
   },
 
   project: {

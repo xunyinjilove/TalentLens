@@ -47,7 +47,7 @@
 
 ### 下载安装
 
-从 [Releases](https://github.com/1186258278/TalentLens/releases) 页面下载最新版本：
+从 [Releases](https://github.com/xunyinjilove/TalentLens/releases) 页面下载最新版本：
 
 - **Windows**: `TalentLens-windows-amd64.exe`
 - **macOS (Intel)**: `TalentLens-macos-amd64.zip`
@@ -90,7 +90,7 @@
 
 ```bash
 # 克隆仓库
-git clone https://github.com/1186258278/TalentLens.git
+git clone https://github.com/xunyinjilove/TalentLens.git
 cd TalentLens
 
 # 安装前端依赖
@@ -157,17 +157,3 @@ TalentLens/
 
 本项目采用 **GNU General Public License v3.0** 开源协议，详见 [LICENSE](LICENSE)。
 
----
-
-## 关于
-
-**TalentLens** 由 **武汉晴辰天下网络科技有限公司** 开发维护。
-
-- 产品官网：[https://talentlens.qt.cool](https://talentlens.qt.cool)
-- 公司官网：[https://qingchencloud.com](https://qingchencloud.com)
-- 产品导航：[https://qt.cool](https://qt.cool)
-- 品牌：晴辰云 / 晴辰
-
----
-
-<p align="center">Made with ❤️ by QingChen Cloud</p>
