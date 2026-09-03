@@ -236,8 +236,7 @@ jobs:
 
           ---
 
-          官网: https://talentlens.qt.cool
-          文档: https://github.com/1186258278/TalentLens
+          仓库: https://github.com/xunyinjilove/TalentLens
           NOTES_EOF
 
       - name: Create Release
