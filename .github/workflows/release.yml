@@ -1,0 +1,253 @@
+name: Build & Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release tag (e.g. v1.0.0)'
+        required: true
+
+permissions:
+  contents: write
+
+env:
+  GO_VERSION: '1.24'
+  NODE_VERSION: '18'
+  APP_NAME: 'TalentLens'
+  # workflow_dispatch 用 inputs.tag，tag push 用 github.ref_name
+  RELEASE_TAG: ${{ github.event.inputs.tag || github.ref_name }}
+
+jobs:
+  # ==========================================
+  # 构建 Windows 版本
+  # ==========================================
+  build-windows:
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [amd64, arm64]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache-dependency-path: go.sum
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install Wails CLI
+        run: go install github.com/wailsapp/wails/v2/cmd/wails@latest
+
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: Build for Windows ${{ matrix.arch }}
+        run: wails build -platform windows/${{ matrix.arch }} -ldflags "-s -w"
+
+      - name: Package
+        shell: pwsh
+        run: |
+          $version = "${{ env.RELEASE_TAG }}" -replace '^v', ''
+          $artifact = "${{ env.APP_NAME }}-$version-windows-${{ matrix.arch }}.exe"
+          Copy-Item "build/bin/${{ env.APP_NAME }}.exe" "build/bin/$artifact"
+          echo "ARTIFACT=$artifact" >> $env:GITHUB_ENV
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-${{ matrix.arch }}
+          path: build/bin/${{ env.ARTIFACT }}
+          retention-days: 5
+
+  # ==========================================
+  # 构建 macOS 版本
+  # ==========================================
+  build-macos:
+    runs-on: macos-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [amd64, arm64]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache-dependency-path: go.sum
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install Wails CLI
+        run: go install github.com/wailsapp/wails/v2/cmd/wails@latest
+
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: Build for macOS ${{ matrix.arch }}
+        run: wails build -platform darwin/${{ matrix.arch }} -ldflags "-s -w"
+
+      - name: Package as DMG/ZIP
+        run: |
+          version=$(echo "${{ env.RELEASE_TAG }}" | sed 's/^v//')
+          cd build/bin
+          if [ -d "${{ env.APP_NAME }}.app" ]; then
+            zip -r "${{ env.APP_NAME }}-${version}-macos-${{ matrix.arch }}.zip" "${{ env.APP_NAME }}.app"
+          elif [ -f "${{ env.APP_NAME }}" ]; then
+            chmod +x "${{ env.APP_NAME }}"
+            zip "${{ env.APP_NAME }}-${version}-macos-${{ matrix.arch }}.zip" "${{ env.APP_NAME }}"
+          fi
+          echo "ARTIFACT=${{ env.APP_NAME }}-${version}-macos-${{ matrix.arch }}.zip" >> $GITHUB_ENV
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-${{ matrix.arch }}
+          path: build/bin/${{ env.ARTIFACT }}
+          retention-days: 5
+
+  # ==========================================
+  # 构建 Linux 版本
+  # ==========================================
+  build-linux:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-latest
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache-dependency-path: go.sum
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install Linux dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.1-dev
+
+      - name: Install Wails CLI
+        run: go install github.com/wailsapp/wails/v2/cmd/wails@latest
+
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: Build for Linux ${{ matrix.arch }}
+        run: wails build -platform linux/${{ matrix.arch }} -tags webkit2_41 -ldflags "-s -w"
+
+      - name: Package
+        run: |
+          version=$(echo "${{ env.RELEASE_TAG }}" | sed 's/^v//')
+          cd build/bin
+          chmod +x "${{ env.APP_NAME }}" 2>/dev/null || true
+          tar czf "${{ env.APP_NAME }}-${version}-linux-${{ matrix.arch }}.tar.gz" "${{ env.APP_NAME }}"
+          echo "ARTIFACT=${{ env.APP_NAME }}-${version}-linux-${{ matrix.arch }}.tar.gz" >> $GITHUB_ENV
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-${{ matrix.arch }}
+          path: build/bin/${{ env.ARTIFACT }}
+          retention-days: 5
+
+  # ==========================================
+  # 发布 Release
+  # ==========================================
+  release:
+    needs: [build-windows, build-macos, build-linux]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+
+      - name: Prepare release files
+        run: |
+          mkdir -p release
+          find dist -type f \( -name "*.exe" -o -name "*.zip" -o -name "*.tar.gz" \) -exec cp {} release/ \;
+          echo "=== Release files ==="
+          ls -lh release/
+
+      - name: Generate release body
+        run: |
+          version=$(echo "${{ env.RELEASE_TAG }}" | sed 's/^v//')
+          cat > release_notes.md << NOTES_EOF
+          ## TalentLens ${{ env.RELEASE_TAG }}
+
+          AI 驱动的智能简历筛选工具 | AI-Powered Resume Screening Tool
+
+          ### 下载 / Download
+
+          | 平台 | 架构 | 文件 |
+          |------|------|------|
+          | Windows | x64 | \`TalentLens-${version}-windows-amd64.exe\` |
+          | Windows | ARM64 | \`TalentLens-${version}-windows-arm64.exe\` |
+          | macOS | Intel | \`TalentLens-${version}-macos-amd64.zip\` |
+          | macOS | Apple Silicon | \`TalentLens-${version}-macos-arm64.zip\` |
+          | Linux | x64 | \`TalentLens-${version}-linux-amd64.tar.gz\` |
+          | Linux | ARM64 | \`TalentLens-${version}-linux-arm64.tar.gz\` |
+
+          ### 使用说明
+
+          - **Windows**: 下载 \`.exe\` 文件，双击运行
+          - **macOS**: 下载 \`.zip\` 解压后拖入 Applications
+          - **Linux**: 下载 \`.tar.gz\` 解压后运行
+
+          ---
+
+          官网: https://talentlens.qt.cool
+          文档: https://github.com/1186258278/TalentLens
+          NOTES_EOF
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ env.RELEASE_TAG }}
+          name: "TalentLens ${{ env.RELEASE_TAG }}"
+          body_path: release_notes.md
+          draft: false
+          prerelease: false
+          files: release/*
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
