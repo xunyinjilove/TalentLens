@@ -1,8 +1,8 @@
 <template>
   <el-dialog
     v-model="visible"
-    :title="$t('boss.dialogTitle') || '双模智能寻才与 AI 评测系统'"
-    width="640px"
+    :title="$t('boss.dialogTitle') || 'BOSS 直聘企业端直连与 AI 深度评测'"
+    width="580px"
     :close-on-click-modal="!searching"
     :close-on-press-escape="!searching"
     @close="handleClose"
@@ -24,43 +24,7 @@
 
       <!-- 搜索配置表单 -->
       <div class="search-form" v-if="!searching && searchLogs.length === 0">
-        <!-- 检索渠道双模切换卡片 -->
-        <div class="channel-section">
-          <label class="form-label">选择人才搜寻通道</label>
-          <div class="channel-selector">
-            <div
-              class="channel-card"
-              :class="{ active: form.mode === 'public' }"
-              @click="form.mode = 'public'"
-            >
-              <div class="channel-header">
-                <span class="channel-icon">🌐</span>
-                <span class="channel-title">全网公开渠道实时检索</span>
-                <el-tag size="small" type="success" effect="plain" class="channel-badge">免登录 · 推荐</el-tag>
-              </div>
-              <div class="channel-desc">
-                无需企业账号，实时抓取行业公开人才档案快照，支持任意岗位即搜即测并流转 AI 审核。
-              </div>
-            </div>
-
-            <div
-              class="channel-card"
-              :class="{ active: form.mode === 'boss' }"
-              @click="form.mode = 'boss'"
-            >
-              <div class="channel-header">
-                <span class="channel-icon">🏢</span>
-                <span class="channel-title">BOSS 直聘企业端直连</span>
-                <el-tag size="small" type="primary" effect="plain" class="channel-badge">需企业账号</el-tag>
-              </div>
-              <div class="channel-desc">
-                直连 BOSS 直聘企业后台，支持扫码鉴权、在线牛人检索、打招呼及在线索取完整附件简历。
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <div class="form-row" style="margin-top: 4px;">
+        <div class="form-row">
           <div class="form-item flex-2">
             <label class="form-label">搜索岗位关键词</label>
             <el-input v-model="form.keyword" placeholder="输入搜索关键词，如：临床项目经理" />
@@ -73,14 +37,14 @@
           </div>
         </div>
 
-        <div class="form-row" style="margin-top: 8px;">
+        <div class="form-row" style="margin-top: 10px;">
           <div class="form-item flex-1">
-            <label class="form-label">计划搜寻人才数</label>
+            <label class="form-label">计划搜寻牛人数</label>
             <el-select v-model="form.count" style="width: 100%">
-              <el-option :label="'5 位优质候选人'" :value="5" />
-              <el-option :label="'10 位优质候选人 (推荐)'" :value="10" />
-              <el-option :label="'15 位优质候选人'" :value="15" />
-              <el-option :label="'20 位优质候选人'" :value="20" />
+              <el-option :label="'5 位推荐牛人'" :value="5" />
+              <el-option :label="'10 位推荐牛人 (推荐)'" :value="10" />
+              <el-option :label="'15 位推荐牛人'" :value="15" />
+              <el-option :label="'20 位推荐牛人'" :value="20" />
             </el-select>
           </div>
           <div class="form-item flex-1">
@@ -94,11 +58,8 @@
 
         <div class="safety-tip">
           <el-icon><InfoFilled /></el-icon>
-          <span v-if="form.mode === 'public'">
-            【全网公开通道】：已开启自动化数据管道，检索结果将实时存入本地并启动多维度 AI 匹配与真实度核验。
-          </span>
-          <span v-else>
-            【BOSS直聘直连】：将唤起 Edge 浏览器连接 BOSS 招聘者后台，若未登录请点击下方「扫码登录」完成鉴权。
+          <span>
+            【BOSS 直聘企业直连】：系统将唤起 Edge 浏览器直连 BOSS 招聘后台。请使用【企业招聘者】账号扫码登录，系统将实时抓取推荐牛人并自动流转 AI 深度分析。
           </span>
         </div>
       </div>
@@ -145,7 +106,7 @@
       <div class="dialog-footer">
         <el-button v-if="!searching" @click="visible = false">取消</el-button>
         <el-button
-          v-if="!searching && searchLogs.length === 0 && form.mode === 'boss'"
+          v-if="!searching && searchLogs.length === 0"
           type="warning"
           plain
           @click="handleTestLogin"
@@ -161,7 +122,7 @@
           :disabled="!form.keyword.trim()"
         >
           <el-icon><Search /></el-icon>
-          {{ form.mode === 'public' ? '开始全网智能检索' : '连接 BOSS 直聘寻才' }}
+          连接 BOSS 直聘寻才
         </el-button>
         <el-button
           v-if="isFinished"
@@ -222,7 +183,6 @@ const searchLogs = ref<SearchLog[]>([])
 const cityOptions = ['上海', '北京', '深圳', '广州', '杭州', '南京', '武汉', '成都', '苏州', '全国']
 
 const form = reactive({
-  mode: 'public' as 'public' | 'boss',
   keyword: '',
   city: '上海',
   count: 10,
@@ -233,7 +193,6 @@ watch(() => props.modelValue, (val) => {
   visible.value = val
   if (val) {
     // 重置状态与表单初始值
-    form.mode = 'public'
     form.keyword = props.jobTitle || '临床项目经理'
     form.city = '上海'
     form.count = 10
@@ -298,14 +257,12 @@ async function handleStartSearch() {
     ElMessage.warning('当前运行在开发预览模式')
   }
 
-  const channelLabel = form.mode === 'public' ? '全网公开通道（免登录）' : 'BOSS直聘企业端'
-
   searching.value = true
   isFinished.value = false
   candidateCount.value = 0
   searchLogs.value = []
-  currentStatusText.value = `正在启动【${channelLabel}】搜寻引擎...`
-  addLog('status', `🚀 启动搜寻任务：[${form.city}] 岗位「${form.keyword}」，目标 ${form.count} 人，通道：${channelLabel}`)
+  currentStatusText.value = '正在启动 BOSS 直聘搜寻引擎...'
+  addLog('status', `🚀 启动搜寻任务：[${form.city}] 岗位「${form.keyword}」，目标 ${form.count} 人`)
 
   if (WailsApp && WailsApp.StartBossSearch) {
     try {
@@ -315,8 +272,7 @@ async function handleStartSearch() {
         form.city,
         props.expYears || 3,
         props.eduLevel || '本科',
-        form.count,
-        form.mode
+        form.count
       )
     } catch (err: any) {
       searching.value = false
@@ -324,23 +280,8 @@ async function handleStartSearch() {
       ElMessage.error('启动搜寻失败')
     }
   } else {
-    // Mock 模式模拟流水
-    setTimeout(() => {
-      addLog('status', `🔍 正在检索【${form.city}】关于「${form.keyword}」的优质人才档案...`)
-    }, 600)
-    for (let i = 1; i <= form.count; i++) {
-      setTimeout(() => {
-        candidateCount.value = i
-        addLog('candidate', `👤 成功提取候选人: 候选人_${i}（${form.keyword}，${props.expYears || 3}年经验，${props.eduLevel || '本科'}）`)
-        if (i === form.count) {
-          searching.value = false
-          isFinished.value = true
-          currentStatusText.value = '搜寻完成！'
-          addLog('done', `🎉 成功检索并导入 ${form.count} 位候选人，已自动启动 AI 智能评估！`)
-          emit('refresh')
-        }
-      }, 1000 + i * 400)
-    }
+    ElMessage.info('开发模式下需在客户端中运行 BOSS 直连引擎')
+    searching.value = false
   }
 }
 
@@ -386,7 +327,7 @@ onMounted(async () => {
     if (evt && evt.candidate) {
       candidateCount.value = evt.current || (candidateCount.value + 1)
       const c = evt.candidate
-      addLog('candidate', `👤 成功检索到候选人: ${c.name}（${c.school || c.education} · ${c.experience} · ${c.company || 'IVD医药企业'}）`)
+      addLog('candidate', `👤 成功检索到真实牛人: ${c.name}（${c.experience} · ${c.company || '在线履历'}）`)
       emit('refresh')
     }
   })
@@ -396,13 +337,13 @@ onMounted(async () => {
     isFinished.value = true
     currentStatusText.value = '搜寻完成，已启动 AI 深度分析！'
     addLog('done', evt.message || '🎉 搜寻完成，候选人已全部导入！')
-    ElMessage.success('候选人档案已全部抓取并导入，正在进行 AI 智能打分！')
+    ElMessage.success('BOSS 直聘候选人已全部导入，正在进行 AI 智能打分！')
     emit('refresh')
   })
 
   const offError = WailsRuntime.EventsOn('boss:error', (evt: any) => {
     searching.value = false
-    currentStatusText.value = '搜寻出错'
+    currentStatusText.value = '搜寻中止'
     addLog('error', evt.message || '搜寻过程中发生错误')
     ElMessage.error(evt.message || '搜寻失败')
   })
@@ -423,14 +364,14 @@ onUnmounted(() => {
 .boss-dialog-content {
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  gap: 16px;
 }
 
 .job-context-card {
   background: #f0f7ff;
   border: 1px solid #bae0ff;
   border-radius: $radius-md;
-  padding: 10px 14px;
+  padding: 12px 16px;
   display: flex;
   justify-content: space-between;
   align-items: center;
@@ -472,94 +413,24 @@ onUnmounted(() => {
 .search-form {
   display: flex;
   flex-direction: column;
-  gap: 10px;
-
-  .channel-section {
-    display: flex;
-    flex-direction: column;
-    gap: 6px;
-  }
-
-  .channel-selector {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 10px;
-
-    .channel-card {
-      border: 1.5px solid #e2e8f0;
-      border-radius: $radius-md;
-      padding: 10px 12px;
-      background: #f8fafc;
-      cursor: pointer;
-      transition: all 0.2s ease;
-      display: flex;
-      flex-direction: column;
-      gap: 5px;
-
-      &:hover {
-        border-color: #93c5fd;
-        background: #ffffff;
-      }
-
-      &.active {
-        border-color: #007aff;
-        background: #eff6ff;
-        box-shadow: 0 2px 8px rgba(0, 122, 255, 0.12);
-
-        .channel-title {
-          color: #007aff;
-          font-weight: 700;
-        }
-      }
-
-      .channel-header {
-        display: flex;
-        align-items: center;
-        gap: 6px;
-
-        .channel-icon {
-          font-size: 15px;
-        }
-
-        .channel-title {
-          font-size: 13px;
-          font-weight: 600;
-          color: #1e293b;
-          flex: 1;
-        }
-
-        .channel-badge {
-          font-size: 10.5px;
-          padding: 0 4px;
-          height: 18px;
-          line-height: 16px;
-        }
-      }
-
-      .channel-desc {
-        font-size: 11px;
-        color: #64748b;
-        line-height: 1.4;
-      }
-    }
-  }
+  gap: 12px;
 
   .form-row {
     display: flex;
-    gap: 12px;
+    gap: 14px;
   }
 
   .form-item {
     display: flex;
     flex-direction: column;
-    gap: 5px;
+    gap: 6px;
 
     &.flex-1 { flex: 1; }
     &.flex-2 { flex: 2; }
   }
 
   .form-label {
-    font-size: 12px;
+    font-size: 12.5px;
     font-weight: 600;
     color: $text-secondary;
   }
@@ -582,11 +453,11 @@ onUnmounted(() => {
     gap: 6px;
     background: #fafafa;
     border: 1px solid #f0f0f0;
-    padding: 8px 12px;
+    padding: 10px 12px;
     border-radius: $radius-sm;
     font-size: 11.5px;
     color: #64748b;
-    line-height: 1.45;
+    line-height: 1.5;
 
     .el-icon {
       color: $system-blue;
@@ -599,13 +470,13 @@ onUnmounted(() => {
 .searching-dashboard {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 14px;
 
   .progress-wrap {
     background: #ffffff;
     border: 1px solid $separator;
     border-radius: $radius-md;
-    padding: 12px 14px;
+    padding: 14px 16px;
 
     .progress-info {
       display: flex;
@@ -614,7 +485,7 @@ onUnmounted(() => {
       margin-bottom: 8px;
 
       .status-title {
-        font-size: 13px;
+        font-size: 13.5px;
         font-weight: 700;
         color: $text-primary;
       }
