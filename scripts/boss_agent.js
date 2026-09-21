@@ -1,6 +1,6 @@
 /**
  * boss_agent.js - BOSS 直聘账号登录检测、扫码鉴权与牛人抓取引擎
- * 准确判定登录状态与会话保持，支持手机验证码与微信扫码登录
+ * 严格判定登录状态，避免 about:blank 误判，直接唤起目标登录页
  */
 
 const fs = require('fs');
@@ -63,11 +63,11 @@ async function run() {
   const profileDir = path.join(options.dataDir, '..', 'boss_isolated_profile');
   if (!fs.existsSync(profileDir)) fs.mkdirSync(profileDir, { recursive: true });
 
-  sendMsg('status', { message: '🚀 正在唤起 Edge 浏览器并连接 BOSS 直聘...' });
-
   const targetUrl = options.testLogin
     ? 'https://www.zhipin.com/web/user/'
     : 'https://www.zhipin.com/web/boss/recommend';
+
+  sendMsg('status', { message: `🚀 正在唤起 Edge 浏览器打开 BOSS 直聘：${targetUrl} ...` });
 
   let browser = null;
 
@@ -75,13 +75,13 @@ async function run() {
     browser = await puppeteer.launch({
       executablePath: browserPath,
       headless: false,
-      userDataDir: profileDir,
       ignoreDefaultArgs: ['--enable-automation'],
       args: [
+        targetUrl, // 启动时直接打开目标页，避免停留在 about:blank
+        `--user-data-dir=${profileDir}`,
         '--no-first-run',
         '--no-default-browser-check',
         '--disable-blink-features=AutomationControlled',
-        '--no-sandbox',
         '--disable-infobars',
         '--disable-extensions',
         '--start-maximized'
@@ -99,85 +99,96 @@ async function run() {
     return;
   }
 
-  const page = (await browser.pages())[0] || (await browser.newPage());
+  // 获取页面实例
+  const pages = await browser.pages();
+  const page = pages[0] || (await browser.newPage());
 
-  await page.evaluateOnNewDocument(() => {
-    Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
-  });
-
-  sendMsg('status', { message: `🌐 正在打开 BOSS 直聘：${targetUrl} ...` });
-
+  // 等待页面加载完成
   try {
-    await page.goto(targetUrl, { waitUntil: 'domcontentloaded', timeout: 45000 });
+    if (!page.url().includes('zhipin.com')) {
+      await page.goto(targetUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
+    }
   } catch (e) {}
 
+  // 严格准确的登录检测函数
   const checkLoginState = async () => {
     try {
-      const cookies = await page.cookies('https://www.zhipin.com');
-      const hasAuthCookie = cookies.some(c => c.name === 'wt2' || c.name === 'zpd' || c.name.includes('token') || c.name === '__c');
+      const url = page.url();
+      
+      // 1. 如果还是空白页或者未进入 zhipin 域名，绝不算登录
+      if (!url || !url.includes('zhipin.com') || url.includes('about:blank')) {
+        return { isLoggedIn: false, isGeek: false, isBoss: false, userName: '', currentUrl: url };
+      }
 
-      const pageInfo = await page.evaluate(() => {
-        const url = window.location.href;
-        const isUserLoginPage = url.includes('/web/user') || url.includes('/login');
-        const hasPhoneInput = !!document.querySelector('input[type="tel"], input[placeholder*="手机号"], .login-box, .login-scan-box, .btn-sure');
+      // 2. 如果还在登录/注册页（包含 /web/user/ 或 /login），说明尚未登录
+      if (url.includes('/web/user') || url.includes('/login')) {
+        return { isLoggedIn: false, isGeek: false, isBoss: false, userName: '', currentUrl: url };
+      }
 
-        const isGeek = url.includes('/geek/') || !!document.querySelector('a[href*="geek"]');
-        const isBoss = url.includes('/boss/') || !!document.querySelector('a[href*="boss"]');
+      // 3. 检查页面中真实登录成功的特征
+      const result = await page.evaluate(() => {
+        const curUrl = window.location.href;
+        
+        // 如果还在用户登录/注册表单
+        const isLogin = curUrl.includes('/web/user') || curUrl.includes('/login') || !!document.querySelector('input[type="tel"], input[placeholder*="手机号"], .login-box, .login-scan-box, .btn-sure');
+        if (isLogin) {
+          return { isLoggedIn: false, isGeek: false, isBoss: false, userName: '', currentUrl: curUrl };
+        }
+
+        const hasUserNav = !!document.querySelector('.user-nav, .nav-figure, .header-user, .user-avatar, .nav-item-user, a[href*="logout"], .nav-user');
+        const isGeek = curUrl.includes('/geek/') || !!document.querySelector('a[href*="geek"]');
+        const isBoss = curUrl.includes('/boss/') || !!document.querySelector('a[href*="boss"]');
 
         let userName = '';
         const nameEl = document.querySelector('.user-name, .nav-figure-name, .header-user-name, .label-name, .user-nav .name');
         if (nameEl) userName = nameEl.innerText.trim();
 
-        const hasUserNav = !!document.querySelector('.user-nav, .nav-figure, .header-user, .user-avatar, .nav-item-user, .nav-user');
-
-        // 判定条件：不在登录表单页，且有用户态或离开登录页
-        const isLoggedIn = (!isUserLoginPage && !hasPhoneInput) || hasUserNav || (isGeek && !isUserLoginPage) || (isBoss && !isUserLoginPage);
+        const loggedIn = hasUserNav || isGeek || isBoss;
 
         return {
-          isLoggedIn,
+          isLoggedIn: loggedIn,
           isGeek,
           isBoss,
-          userName: userName || '已登录用户',
-          currentUrl: url
+          userName: userName || 'BOSS实名用户',
+          currentUrl: curUrl
         };
       });
 
-      if (hasAuthCookie && !pageInfo.currentUrl.includes('/web/user')) {
-        pageInfo.isLoggedIn = true;
-      }
-
-      return pageInfo;
+      return result;
     } catch (e) {
       return { isLoggedIn: false, isGeek: false, isBoss: false, userName: '', currentUrl: '' };
     }
   };
 
+  sendMsg('status', { message: '🔑 浏览器已打开，请在网页中完成手机短信或微信/App 扫码登录...' });
+  sendMsg('auth', { status: 'need_login', message: '正在等待您在浏览器窗口中完成登录（支持求职者/牛人或Boss账号）' });
+
   let loginState = await checkLoginState();
 
+  // 如果尚未登录，持续等待用户在浏览器中完成登录操作（最长等待 300 秒 = 5 分钟）
   if (!loginState.isLoggedIn) {
-    sendMsg('status', { message: '🔑 检测到尚未登录，请在弹出的浏览器中输入手机验证码或使用 BOSS App 扫码登录...' });
-    sendMsg('auth', { status: 'need_login', message: '请在浏览器窗口完成登录（支持求职者/牛人或Boss账号）' });
-
-    // 持续等待用户登录完成（最长等待 300 秒 = 5 分钟，绝不提前自动关闭）
     const startTime = Date.now();
     while (Date.now() - startTime < 300000) {
       await new Promise(r => setTimeout(r, 2000));
+      
       try {
-        if (browser.isConnected() === false) {
-          sendMsg('status', { message: '浏览器窗口已由用户关闭' });
+        if (!browser.isConnected()) {
+          sendMsg('status', { message: '浏览器窗口已关闭' });
           break;
         }
       } catch (e) {}
 
       loginState = await checkLoginState();
-      if (loginState.isLoggedIn) break;
+      if (loginState.isLoggedIn) {
+        break;
+      }
     }
   }
 
   if (loginState.isLoggedIn) {
     const roleText = loginState.isBoss ? '【Boss / 招聘者】' : '【牛人 / 求职者】';
     sendMsg('status', {
-      message: `🎉 登录成功！当前账号：${loginState.userName}，身份：${roleText}，登录态已成功持久化保存！`
+      message: `🎉 登录成功！当前账号：${loginState.userName}，身份：${roleText}，登录态已持久化保存！`
     });
     sendMsg('auth', {
       status: 'logged_in',
@@ -189,19 +200,19 @@ async function run() {
     if (options.testLogin) {
       sendMsg('done', {
         total: 0,
-        message: `✅ BOSS 登录测试完毕！身份识别为：${roleText}。浏览器窗口已为您保留，您可以随时查看。`
+        message: `✅ BOSS 登录测试完毕！身份识别为：${roleText}。浏览器窗口已为您保留，您可以自由浏览。`
       });
-      // 测试模式下保持浏览器常驻，不自动关闭
+      // 测试模式下保持浏览器常驻，不自动退出
       return;
     }
 
     if (!loginState.isBoss) {
       sendMsg('status', {
-        message: `💡 提示：当前登录的是${roleText}身份（企业端在线直搜牛人需要 Boss 招聘身份）。本次为您通过直连管道导入【${options.keyword}】候选人进行 AI 智能打分与 5 大面试题生成演示！`
+        message: `💡 提示：当前登录的是${roleText}身份（企业端在线直搜牛人需要 Boss 招聘身份）。本次为您通过直连通道导入【${options.keyword}】候选人进行 AI 智能打分与 5 大面试题生成演示！`
       });
     }
   } else {
-    sendMsg('status', { message: '⏳ 登录等待结束，正在转入候选人解析管道...' });
+    sendMsg('status', { message: '⏳ 登录流程结束，正在载入候选人数据...' });
   }
 
   await new Promise(r => setTimeout(r, 1500));

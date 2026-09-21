@@ -1,5 +1,6 @@
-2026/09/21-09:26:26.537 3028 Creating DB D:\HR\TalentLens-main\data\boss_isolated_profile\Default\EdgeCoupons/coupons_data.db since it was missing.
-2026/09/21-09:26:26.550 3028 Reusing MANIFEST D:\HR\TalentLens-main\data\boss_isolated_profile\Default\EdgeCoupons/coupons_data.db/MANIFEST-000001
-2026/09/21-09:26:26.990 1fd8 Level-0 table #5: started
-2026/09/21-09:26:27.001 1fd8 Level-0 table #5: 683273 bytes OK
-2026/09/21-09:26:27.005 1fd8 Delete type=0 #3
+2026/09/21-09:40:43.065 dd8 Reusing MANIFEST D:\HR\TalentLens-main\data\boss_isolated_profile\Default\EdgeCoupons/coupons_data.db/MANIFEST-000001
+2026/09/21-09:40:43.068 dd8 Recovering log #4
+2026/09/21-09:40:43.069 dd8 Reusing old log D:\HR\TalentLens-main\data\boss_isolated_profile\Default\EdgeCoupons/coupons_data.db/000004.log 
+2026/09/21-09:40:43.857 3ab4 Level-0 table #8: started
+2026/09/21-09:40:43.867 3ab4 Level-0 table #8: 683376 bytes OK
+2026/09/21-09:40:43.871 3ab4 Delete type=0 #4

@@ -1,2 +1,3 @@
-2026/09/21-09:26:19.430 4574 Creating DB D:\HR\TalentLens-main\data\boss_isolated_profile\Default\shared_proto_db\metadata since it was missing.
-2026/09/21-09:26:19.447 4574 Reusing MANIFEST D:\HR\TalentLens-main\data\boss_isolated_profile\Default\shared_proto_db\metadata/MANIFEST-000001
+2026/09/21-09:40:39.857 35e8 Reusing MANIFEST D:\HR\TalentLens-main\data\boss_isolated_profile\Default\shared_proto_db\metadata/MANIFEST-000001
+2026/09/21-09:40:39.858 35e8 Recovering log #3
+2026/09/21-09:40:39.889 35e8 Reusing old log D:\HR\TalentLens-main\data\boss_isolated_profile\Default\shared_proto_db\metadata/000003.log 
