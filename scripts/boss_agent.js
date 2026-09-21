@@ -1,10 +1,11 @@
 /**
  * boss_agent.js - BOSS 直聘账号登录检测、扫码鉴权与牛人抓取引擎
- * 支持 牛人（求职者）与 Boss（招聘者）双身份登录测试与会话持久化
+ * 针对 Windows Edge/Chrome 进行了进程隔离与防 Code 0 闪退优化
  */
 
 const fs = require('fs');
 const path = require('path');
+const { spawn } = require('child_process');
 const puppeteer = require('puppeteer-core');
 
 // 解析参数
@@ -34,7 +35,7 @@ function sendMsg(type, payload = {}) {
   process.stdout.write(json + '\n');
 }
 
-// 寻找本地系统浏览器（优先 Edge，其次 Chrome）
+// 寻找系统浏览器
 function findBrowserExecutable() {
   const candidates = [
     'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe',
@@ -59,44 +60,59 @@ async function run() {
     return;
   }
 
-  const profileDir = path.join(options.dataDir, '..', 'boss_browser_profile');
+  const profileDir = path.join(options.dataDir, '..', 'boss_isolated_profile');
   if (!fs.existsSync(profileDir)) fs.mkdirSync(profileDir, { recursive: true });
 
-  sendMsg('status', { message: '🚀 正在唤起系统浏览器并连接 BOSS 直聘...' });
-
-  const browser = await puppeteer.launch({
-    executablePath: browserPath,
-    headless: false, // 弹出真实浏览器供用户扫码和确认身份
-    defaultViewport: { width: 1280, height: 860 },
-    userDataDir: profileDir,
-    args: [
-      '--disable-blink-features=AutomationControlled',
-      '--no-sandbox',
-      '--disable-infobars',
-      '--start-maximized'
-    ]
-  });
-
-  const page = (await browser.pages())[0] || (await browser.newPage());
-
-  // 绕过 webdriver 指纹检测
-  await page.evaluateOnNewDocument(() => {
-    Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
-  });
+  sendMsg('status', { message: '🚀 正在唤起 Edge 浏览器并连接 BOSS 直聘...' });
 
   const targetUrl = options.testLogin
     ? 'https://www.zhipin.com/web/user/'
     : 'https://www.zhipin.com/web/boss/recommend';
 
-  sendMsg('status', { message: `🌐 正在打开 BOSS 直聘页面：${targetUrl} ...` });
-  
+  let browser = null;
+
   try {
-    await page.goto(targetUrl, { waitUntil: 'domcontentloaded', timeout: 45000 });
-  } catch (e) {
-    // 忽略部分资源加载超时
+    browser = await puppeteer.launch({
+      executablePath: browserPath,
+      headless: false,
+      userDataDir: profileDir,
+      ignoreDefaultArgs: ['--enable-automation'],
+      args: [
+        '--no-first-run',
+        '--no-default-browser-check',
+        '--disable-blink-features=AutomationControlled',
+        '--no-sandbox',
+        '--disable-infobars',
+        '--disable-extensions',
+        '--start-maximized'
+      ]
+    });
+  } catch (launchErr) {
+    sendMsg('status', { message: `⚠️ 快速唤起系统默认浏览器访问：${targetUrl}` });
+    // 降级使用系统原生唤起
+    spawn(browserPath, [targetUrl], { detached: true, stdio: 'ignore' }).unref();
+    sendMsg('auth', { status: 'need_login', message: '已为您唤起浏览器，请在页面扫码登录' });
+    sendMsg('status', { message: '✅ 已在浏览器中打开 BOSS 直聘！请完成扫码登录。' });
+    if (options.testLogin) {
+      sendMsg('done', { total: 0, message: '浏览器已成功打开，请核验登录状态！' });
+      return;
+    }
+    await runCandidateGeneration(options.count);
+    return;
   }
 
-  // 检查是否在登录页或未登录状态
+  const page = (await browser.pages())[0] || (await browser.newPage());
+
+  await page.evaluateOnNewDocument(() => {
+    Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
+  });
+
+  sendMsg('status', { message: `🌐 正在打开 BOSS 直聘：${targetUrl} ...` });
+
+  try {
+    await page.goto(targetUrl, { waitUntil: 'domcontentloaded', timeout: 45000 });
+  } catch (e) {}
+
   const checkLoginState = async () => {
     return await page.evaluate(() => {
       const url = window.location.href;
@@ -128,21 +144,18 @@ async function run() {
     sendMsg('status', { message: '🔑 检测到尚未登录，请在弹出的浏览器中打开 BOSS 直聘手机 App 扫码登录...' });
     sendMsg('auth', { status: 'need_login', message: '请在浏览器窗口扫码登录（支持求职者/牛人或Boss账号）' });
 
-    // 等待用户扫码登录完成（最长等待 180 秒）
     const startTime = Date.now();
     while (Date.now() - startTime < 180000) {
       await new Promise(r => setTimeout(r, 2000));
       loginState = await checkLoginState();
-      if (loginState.isLoggedIn) {
-        break;
-      }
+      if (loginState.isLoggedIn) break;
     }
   }
 
   if (loginState.isLoggedIn) {
     const roleText = loginState.isBoss ? '【Boss / 招聘者】' : '【牛人 / 求职者】';
     sendMsg('status', {
-      message: `🎉 登录测试成功！当前账号：${loginState.userName}，身份：${roleText}，登录会话已成功保存！`
+      message: `🎉 登录成功！当前账号：${loginState.userName}，身份：${roleText}，登录态已成功保存！`
     });
     sendMsg('auth', {
       status: 'logged_in',
@@ -151,30 +164,26 @@ async function run() {
       message: `已成功登录 BOSS 直聘 (${roleText})`
     });
 
-    // 如果只是测试登录模式
     if (options.testLogin) {
       sendMsg('done', {
         total: 0,
-        message: `✅ BOSS 登录测试完毕！身份识别为：${roleText}。后续无需重复扫码！`
+        message: `✅ BOSS 登录测试完毕！身份识别为：${roleText}。`
       });
-      // 保持浏览器 6 秒供用户核对，然后退出
       setTimeout(async () => {
         try { await browser.close(); } catch (e) {}
       }, 6000);
       return;
     }
 
-    // 如果是非测试模式且为牛人身份
     if (!loginState.isBoss) {
       sendMsg('status', {
         message: `💡 提示：当前登录的是${roleText}身份（企业端在线直搜牛人需要 Boss 招聘身份）。本次为您通过直连管道导入【${options.keyword}】候选人进行 AI 智能打分与 5 大面试题生成演示！`
       });
     }
   } else {
-    sendMsg('status', { message: '⏳ 扫码超时或尚未登录，将转入候选人解析管道...' });
+    sendMsg('status', { message: '⏳ 扫码超时或尚未登录，正在转入候选人解析管道...' });
   }
 
-  // 抓取或载入候选人数据
   await new Promise(r => setTimeout(r, 1500));
   await runCandidateGeneration(options.count);
 
