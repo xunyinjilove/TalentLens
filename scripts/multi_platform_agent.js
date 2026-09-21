@@ -4,6 +4,7 @@
 
 const fs = require('fs');
 const path = require('path');
+const { spawn } = require('child_process');
 const puppeteer = require('puppeteer-core');
 
 // 命令行参数解析
@@ -62,7 +63,7 @@ function findBrowserExecutable() {
   return null;
 }
 
-// 平台配置定义
+// 平台配置定义 (修正真实有效后台主页与登录检测)
 const PLATFORM_CONFIGS = {
   boss: {
     name: 'BOSS直聘',
@@ -81,7 +82,7 @@ const PLATFORM_CONFIGS = {
     code: 'zhaopin',
     icon: '💼',
     loginUrl: 'https://passport.zhaopin.com/login',
-    homeUrl: 'https://ihr.zhaopin.com/resumemanage/resumerecommend.html',
+    homeUrl: 'https://ihr.zhaopin.com/',
     profileFolder: 'zhaopin_isolated_profile',
     isLoggedIn: (url, docText) => {
       if (url.includes('passport.zhaopin.com/login')) return false;
@@ -93,11 +94,11 @@ const PLATFORM_CONFIGS = {
     code: '51job',
     icon: '📑',
     loginUrl: 'https://ehire.51job.com/MainLogin.aspx',
-    homeUrl: 'https://ehire.51job.com/Candidate/SearchResumeNew.aspx',
+    homeUrl: 'https://ehire.51job.com/',
     profileFolder: '51job_isolated_profile',
     isLoggedIn: (url, docText) => {
-      if (url.includes('MainLogin.aspx')) return false;
-      return url.includes('ehire.51job.com') && !url.includes('Login');
+      if (url.includes('MainLogin.aspx') || url.includes('login')) return false;
+      return url.includes('ehire.51job.com');
     }
   },
   liepin: {
@@ -105,10 +106,10 @@ const PLATFORM_CONFIGS = {
     code: 'liepin',
     icon: '🎯',
     loginUrl: 'https://lpt.liepin.com/user/login',
-    homeUrl: 'https://lpt.liepin.com/resume/search',
+    homeUrl: 'https://lpt.liepin.com/',
     profileFolder: 'liepin_isolated_profile',
     isLoggedIn: (url, docText) => {
-      if (url.includes('/user/login')) return false;
+      if (url.includes('/user/login') || url.includes('login')) return false;
       return url.includes('lpt.liepin.com') || url.includes('e.liepin.com');
     }
   }
@@ -126,6 +127,52 @@ function isDuplicateCandidate(name, company, exp) {
   return false;
 }
 
+// 弹性双模浏览器唤起 (Puppeteer 直接启动 + CDP 端口回退，彻底解决 Windows Edge Code 0 崩溃)
+async function launchPlatformBrowser(cfg, browserPath, profileDir) {
+  const commonArgs = [
+    `--user-data-dir=${profileDir}`,
+    '--no-first-run',
+    '--no-default-browser-check',
+    '--disable-infobars',
+    '--start-maximized'
+  ];
+
+  try {
+    const browser = await puppeteer.launch({
+      executablePath: browserPath,
+      headless: false,
+      ignoreDefaultArgs: ['--enable-automation'],
+      args: commonArgs
+    });
+    return browser;
+  } catch (err1) {
+    // 捕获 Code 0 / 进程冲突，回退到系统独立 CDP 端口调起
+    const debugPort = 9333 + Math.floor(Math.random() * 500);
+    const child = spawn(browserPath, [
+      `--remote-debugging-port=${debugPort}`,
+      `--user-data-dir=${profileDir}`,
+      '--no-first-run',
+      '--no-default-browser-check',
+      '--start-maximized',
+      cfg.homeUrl
+    ], { detached: true, stdio: 'ignore' });
+    child.unref();
+
+    for (let i = 0; i < 14; i++) {
+      await new Promise(r => setTimeout(r, 500));
+      try {
+        const browser = await puppeteer.connect({
+          browserURL: `http://127.0.0.1:${debugPort}`,
+          defaultViewport: null
+        });
+        return browser;
+      } catch (e) {}
+    }
+
+    throw new Error(`浏览器启动异常: ${err1.message}`);
+  }
+}
+
 // 统一抓取单个平台
 async function scrapePlatform(platformKey, browserPath, targetCount) {
   const cfg = PLATFORM_CONFIGS[platformKey];
@@ -141,21 +188,7 @@ async function scrapePlatform(platformKey, browserPath, targetCount) {
 
   let browser = null;
   try {
-    browser = await puppeteer.launch({
-      executablePath: browserPath,
-      headless: false,
-      ignoreDefaultArgs: ['--enable-automation'],
-      args: [
-        cfg.homeUrl,
-        `--user-data-dir=${profileDir}`,
-        '--no-first-run',
-        '--no-default-browser-check',
-        '--disable-blink-features=AutomationControlled',
-        '--disable-infobars',
-        '--disable-extensions',
-        '--start-maximized'
-      ]
-    });
+    browser = await launchPlatformBrowser(cfg, browserPath, profileDir);
   } catch (err) {
     sendMsg('error', {
       platform: platformKey,
@@ -168,7 +201,8 @@ async function scrapePlatform(platformKey, browserPath, targetCount) {
   const page = pages[0] || (await browser.newPage());
 
   try {
-    if (!page.url().includes(cfg.code === '51job' ? '51job.com' : cfg.code)) {
+    const currentUrl = page.url() || '';
+    if (!currentUrl.includes(cfg.code === '51job' ? '51job.com' : cfg.code) || currentUrl.includes('about:blank')) {
       await page.goto(cfg.homeUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
     }
   } catch (e) {}
@@ -200,7 +234,7 @@ async function scrapePlatform(platformKey, browserPath, targetCount) {
     });
     sendMsg('status', {
       platform: platformKey,
-      message: `👉 等待用户在浏览器中完成【${cfg.name}】企业端扫码或账号登录（最长等待 3 分钟）...`
+      message: `👉 请在已打开的浏览器中完成【${cfg.name}】企业端登录（系统将自动检测登录并继续）...`
     });
 
     const startTime = Date.now();
@@ -234,15 +268,15 @@ async function scrapePlatform(platformKey, browserPath, targetCount) {
   // DOM 元素提取逻辑
   let scraped = [];
   try {
-    await new Promise(r => setTimeout(r, 2000));
+    await new Promise(r => setTimeout(r, 2500));
 
     scraped = await page.evaluate((targetCount, kw, pName) => {
       const results = [];
-      // 通用卡片选择器
       const selectors = [
         '.candidate-card-wrap', '.candidate-card', '.card-inner', '.recommend-card',
         '.geek-item', '.candidate-item', '.user-card', '.resume-item', '.resume-list-item',
-        '.search-result-item', '.search-item', '.list-item', '[class*="candidate"]', '[class*="resume-card"]'
+        '.search-result-item', '.search-item', '.list-item', '[class*="candidate"]', '[class*="resume-card"]',
+        '.talent-card', '.user-item'
       ];
 
       const elements = document.querySelectorAll(selectors.join(', '));
@@ -251,16 +285,16 @@ async function scrapePlatform(platformKey, browserPath, targetCount) {
         const text = el.innerText || '';
         if (text.length < 25) continue;
 
-        const nameEl = el.querySelector('h3, h4, .name, .user-name, .geek-name, .title-text, .c-name');
-        const name = nameEl ? nameEl.innerText.trim() : `${pName}牛人_${i + 1}`;
+        const nameEl = el.querySelector('h3, h4, .name, .user-name, .geek-name, .title-text, .c-name, .title');
+        const name = nameEl ? nameEl.innerText.trim() : `${pName}候选人_${i + 1}`;
 
-        const infoEl = el.querySelector('.info, .labels, .base-info, .desc, .user-desc, .exp-edu');
+        const infoEl = el.querySelector('.info, .labels, .base-info, .desc, .user-desc, .exp-edu, .info-labels');
         const infoText = infoEl ? infoEl.innerText.trim().replace(/\n+/g, ' · ') : '';
 
-        const workEl = el.querySelector('.work, .work-exp, .company, .company-name, .position');
+        const workEl = el.querySelector('.work, .work-exp, .company, .company-name, .position, .experience');
         const workText = workEl ? workEl.innerText.trim() : '';
 
-        const tags = Array.from(el.querySelectorAll('.tag, .skill-tag, .tag-item, span.label'))
+        const tags = Array.from(el.querySelectorAll('.tag, .skill-tag, .tag-item, span.label, .skill-label'))
           .map(t => t.innerText.trim())
           .filter(Boolean);
 
@@ -281,7 +315,7 @@ async function scrapePlatform(platformKey, browserPath, targetCount) {
   if (!scraped || scraped.length === 0) {
     sendMsg('status', {
       platform: platformKey,
-      message: `ℹ️ 在【${cfg.name}】当前视图中未发现新牛人卡片，建议在打开的窗口中切换至招聘岗位列表。`
+      message: `ℹ️ 在【${cfg.name}】当前工作台视图中未发现新推荐卡片，建议在打开的窗口中切换至招聘岗位。`
     });
     return [];
   }
