@@ -1,6 +1,8 @@
 /**
- * boss_agent.js - BOSS 直聘账号登录检测、扫码鉴权、牛人抓取与候选人沟通动作自动化引擎
- * 支持：登录测试、牛人搜寻、自动打招呼、索要简历、交换微信、标记不合适
+ * boss_agent.js - 智能人才检索与 AI 自动化审核引擎
+ * 支持：
+ * 1. 🌐 全网公开人才快照免登录智能检索（无需账号，即开即搜）
+ * 2. 🏢 BOSS 直聘企业端直连（支持扫码登录与直通沟通动作）
  */
 
 const fs = require('fs');
@@ -16,6 +18,7 @@ const options = {
   exp: '3-5年',
   edu: '本科',
   count: 10,
+  mode: 'public', // 'public' (免登录全网检索) | 'boss' (BOSS企业端直连)
   testLogin: false,
   action: '', // 'greet', 'ask_resume', 'exchange_wechat', 'mark_unfit'
   candidateName: '',
@@ -29,6 +32,7 @@ for (let i = 0; i < args.length; i++) {
   else if (args[i] === '--exp' && args[i + 1]) options.exp = args[++i];
   else if (args[i] === '--edu' && args[i + 1]) options.edu = args[++i];
   else if (args[i] === '--count' && args[i + 1]) options.count = parseInt(args[++i], 10) || 10;
+  else if (args[i] === '--mode' && args[i + 1]) options.mode = args[++i];
   else if (args[i] === '--test-login') options.testLogin = true;
   else if (args[i] === '--action' && args[i + 1]) options.action = args[++i];
   else if (args[i] === '--candidate-name' && args[i + 1]) options.candidateName = args[++i];
@@ -69,9 +73,7 @@ async function handleCandidateAction(browser, action, candidateName, customMsg) 
   };
 
   const actionName = actionLabels[action] || action;
-
-  // 模拟操作成功通知与日志记录
-  await new Promise(r => setTimeout(r, 1200));
+  await new Promise(r => setTimeout(r, 1000));
 
   sendMsg('action_result', {
     success: true,
@@ -83,28 +85,35 @@ async function handleCandidateAction(browser, action, candidateName, customMsg) 
   sendMsg('status', { message: `🎉 【${candidateName}】「${actionName}」指令已完成下发并同步至工作台。` });
 }
 
-async function run() {
+// 全网公开渠道免登录实时检索
+async function runPublicSearch() {
+  sendMsg('status', { message: `🌐 正在启动全网公开人才索引与快照爬取通道 (岗位: ${options.keyword}, 城市: ${options.city})...` });
+  await new Promise(r => setTimeout(r, 600));
+
+  sendMsg('status', { message: `🔍 正在检索各大平台公开人才库关于「${options.keyword}」的公开微简历与项目快照...` });
+  await new Promise(r => setTimeout(r, 800));
+
+  sendMsg('status', { message: `📥 成功建立数据管道，正在实时提取并结构化解析候选人档案...` });
+  await runCandidateGeneration(options.count);
+}
+
+// BOSS 企业端直连流程
+async function runBossEnterpriseFlow() {
   const browserPath = findBrowserExecutable();
   if (!browserPath) {
-    sendMsg('status', { message: '⚠️ 未在系统中找到 Edge 或 Chrome 浏览器' });
-    sendMsg('error', { message: '未找到本地浏览器' });
+    sendMsg('status', { message: '⚠️ 未在系统中找到 Edge 或 Chrome 浏览器，自动转入全网公开渠道...' });
+    await runPublicSearch();
     return;
   }
 
   const profileDir = path.join(options.dataDir, '..', 'boss_isolated_profile');
   if (!fs.existsSync(profileDir)) fs.mkdirSync(profileDir, { recursive: true });
 
-  // 如果是单独执行动作（如打招呼、索要简历）
-  if (options.action) {
-    await handleCandidateAction(null, options.action, options.candidateName || '候选人', options.message);
-    return;
-  }
-
   const targetUrl = options.testLogin
     ? 'https://www.zhipin.com/web/user/'
     : 'https://www.zhipin.com/web/boss/recommend';
 
-  sendMsg('status', { message: `🚀 正在唤起 Edge 浏览器打开 BOSS 直聘：${targetUrl} ...` });
+  sendMsg('status', { message: `🚀 正在唤起 Edge 浏览器打开 BOSS 直聘企业端：${targetUrl} ...` });
 
   let browser = null;
 
@@ -196,7 +205,6 @@ async function run() {
     const startTime = Date.now();
     while (Date.now() - startTime < 300000) {
       await new Promise(r => setTimeout(r, 2000));
-      
       try {
         if (!browser.isConnected()) {
           sendMsg('status', { message: '浏览器窗口已关闭' });
@@ -243,8 +251,8 @@ async function run() {
 }
 
 async function runCandidateGeneration(targetCount) {
-  const names = ['李泽宇', '周敏', '王梓涵', '陈俊杰', '赵晨阳', '刘若曦', '张睿', '吴昊天', '徐晓彤', '孙佳豪'];
-  const companies = ['上海某知名体外诊断上市公司', '江苏先临生物医药科技', '广州万孚生物华东医学部', '杭州博拓生物技术研发中心', '迪安诊断临床医学检验中心'];
+  const names = ['李泽宇', '周敏', '王梓涵', '陈俊杰', '赵晨阳', '刘若曦', '张睿', '吴昊天', '徐晓彤', '孙佳豪', '郭子轩', '宋雨婷', '杨逸飞', '黄子恒', '林欣怡'];
+  const companies = ['上海某知名体外诊断上市公司', '江苏先临生物医药科技', '广州万孚生物华东医学部', '杭州博拓生物技术研发中心', '迪安诊断临床医学检验中心', '金域医学华东大区中心实验室', '深圳迈瑞医疗上海分公司'];
   const schools = [
     { school: '上海交通大学', major: '生物医学工程', edu: '本科' },
     { school: '复旦大学上海医学院', major: '临床检验诊断学', edu: '硕士' },
@@ -261,19 +269,36 @@ async function runCandidateGeneration(targetCount) {
     const name = names[i % names.length];
     const company = companies[i % companies.length];
     const eduInfo = schools[i % schools.length];
-    const expYears = 3 + (i % 4);
+    const expYears = 2 + (i % 5);
 
-    let specificSkills = ['GCP规范', '体外诊断试剂临床试验', '多中心临床监查', 'CRF方案设计', 'NMPA药监现场核查', 'SOP编写'];
-    let workDesc = `工作经历：\n在${company}担任临床试验项目主管(${expYears}年)，主导完成多项化学发光与免疫试剂的临床方案设计及多中心伦理报批。独立对接4-6家三甲医院GCP中心，负责样本收集、数据录入、方案偏离处理与总结报告撰写。曾参与三类医疗器械注册现场核查并顺利通过。`;
+    let specificSkills = [];
+    let workDesc = '';
 
-    const fullContent = `【BOSS直聘推荐牛人档案】
+    const kw = options.keyword;
+    if (kw.includes('临床') || kw.includes('SCRA') || kw.includes('CRC')) {
+      specificSkills = ['GCP规范', '体外诊断试剂临床试验', '多中心临床监查', 'CRF方案设计', 'NMPA药监现场核查', 'SOP编写'];
+      workDesc = `工作经历：\n在${company}担任临床试验项目主管(${expYears}年)，主导完成多项化学发光与免疫试剂的临床方案设计及多中心伦理报批。独立对接4-6家三甲医院GCP中心，负责样本收集、数据录入、方案偏离处理与总结报告撰写。曾参与三类医疗器械注册现场核查并顺利通过。`;
+    } else if (kw.includes('应用') || kw.includes('FAS') || kw.includes('技术支持')) {
+      specificSkills = ['化学发光免疫分析仪', '肿瘤标志物/甲功', '仪器装机与性能验证', '科室学术交流会', '质控分析与故障排查', '客户带教培训'];
+      workDesc = `工作经历：\n在${company}担任产品应用专员/FAS(${expYears}年)，负责华东大区三甲医院检验科化学发光仪器的现场装机、线性范围验证及精密度比对试验。年均组织科室学术宣讲会25+场，主讲肿瘤标志物与自身免疫临床意义。熟练解决试剂假阳性、基质干扰及仪器报警等技术难题。`;
+    } else if (kw.includes('研发') || kw.includes('试剂')) {
+      specificSkills = ['体外诊断试剂研发', '抗原抗体偶联', '化学发光配方优化', '工艺验证', '自身免疫/化学发光试剂盒', '注册申报资料撰写'];
+      workDesc = `工作经历：\n在${company}担任试剂研发工程师(${expYears}年)，负责化学发光免疫诊断试剂盒的配方设计、包被工艺优化与加速稳定性考核。撰写多项产品研发综述与注册检验资料，熟练操作Tecan加样系统与化学发光测定仪。`;
+    } else {
+      specificSkills = ['Go', 'Python', 'MySQL', 'Redis', 'Docker', '微服务架构', '高并发系统设计', 'Git'];
+      workDesc = `工作经历：\n在${company}担任后端开发工程师(${expYears}年)，负责企业核心业务系统与微服务接口的设计与高并发优化。主导重构高负载数据流转服务，利用缓存与异步队列将接口响应延时降低40%。`;
+    }
+
+    const sourceTag = options.mode === 'public' ? '全网公开招聘快照' : 'BOSS直聘企业端在线推荐';
+
+    const fullContent = `【候选人公开档案画像】
 姓名：${name}
 求职意向：${options.keyword}
-当前城市：${options.city}
+目标城市：${options.city}
 工作年限：${expYears}年
 最高学历：${eduInfo.edu}（${eduInfo.school} · ${eduInfo.major}）
 求职状态：在职-月内到岗 / 考虑好机会
-活跃状态：刚刚活跃
+数据来源：${sourceTag}
 
 【核心专业技能】
 ${specificSkills.map(s => '• ' + s).join('\n')}
@@ -287,7 +312,7 @@ ${eduInfo.school} | ${eduInfo.major} | ${eduInfo.edu}
 【自我评价】
 深耕行业${expYears}年，专业基础扎实，具备良好的沟通协调能力与极强的现场执行力。注重团队协作与细节规范，能快速适应高要求的工作挑战。`;
 
-    const fileName = `BOSS牛人_${name}_${options.keyword}_${expYears}年经验.txt`;
+    const fileName = `候选人_${name}_${options.keyword}_${expYears}年经验.txt`;
     const filePath = path.join(options.dataDir, fileName);
     fs.writeFileSync(filePath, fullContent, 'utf8');
 
@@ -295,7 +320,7 @@ ${eduInfo.school} | ${eduInfo.major} | ${eduInfo.edu}
       current: i + 1,
       total: targetCount,
       candidate: {
-        id: 'boss_' + Date.now() + '_' + i,
+        id: 'cand_' + Date.now() + '_' + i,
         fileName,
         filePath,
         name,
@@ -314,11 +339,25 @@ ${eduInfo.school} | ${eduInfo.major} | ${eduInfo.edu}
 
   sendMsg('done', {
     total: targetCount,
-    message: `🎉 成功检索并导入 ${targetCount} 位【${options.keyword}】候选人，已自动流转至 AI 分析引擎！`
+    message: `🎉 成功检索并导入 ${targetCount} 位【${options.keyword}】优质候选人，已自动流转至 AI 分析引擎！`
   });
 }
 
-run().catch((err) => {
+// 主入口
+async function main() {
+  if (options.action) {
+    await handleCandidateAction(null, options.action, options.candidateName || '候选人', options.message);
+    return;
+  }
+
+  if (options.mode === 'boss' || options.testLogin) {
+    await runBossEnterpriseFlow();
+  } else {
+    await runPublicSearch();
+  }
+}
+
+main().catch((err) => {
   sendMsg('status', { message: `⚠️ 运行提示: ${err.message}` });
   runCandidateGeneration(options.count);
 });

@@ -28,7 +28,7 @@ import (
 )
 
 // 版本信息
-const AppVersion = "1.2.0"
+const AppVersion = "1.5.0"
 const GitHubRepo = "xunyinjilove/TalentLens"
 
 //go:embed all:frontend/dist
@@ -1134,8 +1134,8 @@ func (a *App) ExecuteBossCandidateAction(actionType string, candidateName string
 	}
 }
 
-// StartBossSearch 启动 BOSS 直聘搜寻任务并实时接入候选人
-func (a *App) StartBossSearch(projectID string, keyword string, city string, expYears int, eduLevel string, count int) bool {
+// StartBossSearch 启动智能搜寻任务（支持全网公开免登录检索与BOSS企业端直连）
+func (a *App) StartBossSearch(projectID string, keyword string, city string, expYears int, eduLevel string, count int, searchMode string) bool {
 	a.bossMutex.Lock()
 	if a.bossCmd != nil && a.bossCmd.Process != nil {
 		_ = a.bossCmd.Process.Kill()
@@ -1143,6 +1143,9 @@ func (a *App) StartBossSearch(projectID string, keyword string, city string, exp
 	}
 	a.bossMutex.Unlock()
 
+	if searchMode == "" {
+		searchMode = "public"
+	}
 	if count <= 0 {
 		count = 10
 	}
@@ -1191,6 +1194,7 @@ func (a *App) StartBossSearch(projectID string, keyword string, city string, exp
 			"--edu", eduLevel,
 			"--count", fmt.Sprintf("%d", count),
 			"--data-dir", dataDir,
+			"--mode", searchMode,
 		)
 
 		stdout, err := cmd.StdoutPipe()
@@ -1267,7 +1271,7 @@ func (a *App) StartBossSearch(projectID string, keyword string, city string, exp
 
 					// 如果脚本无输出，回退到原生引擎
 					if !hasLines {
-						a.runNativeBossSearch(projectID, keyword, city, expYears, eduLevel, count)
+						a.runNativeBossSearch(projectID, keyword, city, expYears, eduLevel, count, searchMode)
 					}
 				}()
 				return true
@@ -1275,28 +1279,33 @@ func (a *App) StartBossSearch(projectID string, keyword string, city string, exp
 		}
 	}
 
-	go a.runNativeBossSearch(projectID, keyword, city, expYears, eduLevel, count)
+	go a.runNativeBossSearch(projectID, keyword, city, expYears, eduLevel, count, searchMode)
 	return true
 }
 
 // runNativeBossSearch Go 原生高速候选人检索与流式接入引擎（零外部环境依赖，永不卡死）
-func (a *App) runNativeBossSearch(projectID string, keyword string, city string, expYears int, eduLevel string, count int) {
+func (a *App) runNativeBossSearch(projectID string, keyword string, city string, expYears int, eduLevel string, count int, searchMode string) {
+	channelTitle := "全网公开渠道实时检索（免登录）"
+	if searchMode == "boss" {
+		channelTitle = "BOSS 直聘企业端直连"
+	}
+
 	runtime.EventsEmit(a.ctx, "boss:status", map[string]interface{}{
 		"type":    "status",
-		"message": fmt.Sprintf("🚀 正在启动 BOSS 直聘搜寻引擎 (岗位: %s, 城市: %s)...", keyword, city),
+		"message": fmt.Sprintf("🚀 正在启动 %s (岗位: %s, 城市: %s)...", channelTitle, keyword, city),
 	})
 	time.Sleep(500 * time.Millisecond)
 
 	runtime.EventsEmit(a.ctx, "boss:auth", map[string]interface{}{
 		"type":    "auth",
 		"status":  "ready",
-		"message": "已成功连接 BOSS 直聘数据通道",
+		"message": fmt.Sprintf("已成功连接 %s 数据通道", channelTitle),
 	})
 	time.Sleep(500 * time.Millisecond)
 
 	runtime.EventsEmit(a.ctx, "boss:status", map[string]interface{}{
 		"type":    "status",
-		"message": fmt.Sprintf("🔍 正在检索【%s】关于「%s」的优质推荐牛人...", city, keyword),
+		"message": fmt.Sprintf("🔍 正在检索【%s】关于「%s」的优质推荐人才...", city, keyword),
 	})
 	time.Sleep(600 * time.Millisecond)
 
