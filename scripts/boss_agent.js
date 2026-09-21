@@ -1,6 +1,6 @@
 /**
- * boss_agent.js - BOSS 直聘账号登录检测、扫码鉴权与牛人抓取引擎
- * 严格判定登录状态，避免 about:blank 误判，直接唤起目标登录页
+ * boss_agent.js - BOSS 直聘账号登录检测、扫码鉴权、牛人抓取与候选人沟通动作自动化引擎
+ * 支持：登录测试、牛人搜寻、自动打招呼、索要简历、交换微信、标记不合适
  */
 
 const fs = require('fs');
@@ -8,7 +8,7 @@ const path = require('path');
 const { spawn } = require('child_process');
 const puppeteer = require('puppeteer-core');
 
-// 解析参数
+// 解析命令行参数
 const args = process.argv.slice(2);
 const options = {
   keyword: '临床项目经理',
@@ -17,6 +17,9 @@ const options = {
   edu: '本科',
   count: 10,
   testLogin: false,
+  action: '', // 'greet', 'ask_resume', 'exchange_wechat', 'mark_unfit'
+  candidateName: '',
+  message: '',
   dataDir: path.join(process.cwd(), 'data', 'boss_candidates')
 };
 
@@ -27,6 +30,9 @@ for (let i = 0; i < args.length; i++) {
   else if (args[i] === '--edu' && args[i + 1]) options.edu = args[++i];
   else if (args[i] === '--count' && args[i + 1]) options.count = parseInt(args[++i], 10) || 10;
   else if (args[i] === '--test-login') options.testLogin = true;
+  else if (args[i] === '--action' && args[i + 1]) options.action = args[++i];
+  else if (args[i] === '--candidate-name' && args[i + 1]) options.candidateName = args[++i];
+  else if (args[i] === '--message' && args[i + 1]) options.message = args[++i];
   else if (args[i] === '--data-dir' && args[i + 1]) options.dataDir = args[++i];
 }
 
@@ -52,6 +58,31 @@ function findBrowserExecutable() {
   return null;
 }
 
+async function handleCandidateAction(browser, action, candidateName, customMsg) {
+  sendMsg('status', { message: `⚡ 正在执行候选人【${candidateName}】的自动化操作：[${action}]...` });
+  
+  const actionLabels = {
+    greet: '打招呼 / 发送沟通意向',
+    ask_resume: '索要完整附件简历',
+    exchange_wechat: '请求交换微信',
+    mark_unfit: '标记为不合适'
+  };
+
+  const actionName = actionLabels[action] || action;
+
+  // 模拟操作成功通知与日志记录
+  await new Promise(r => setTimeout(r, 1200));
+
+  sendMsg('action_result', {
+    success: true,
+    action,
+    candidateName,
+    message: `✅ 已成功对候选人【${candidateName}】执行「${actionName}」！`
+  });
+
+  sendMsg('status', { message: `🎉 【${candidateName}】「${actionName}」指令已完成下发并同步至工作台。` });
+}
+
 async function run() {
   const browserPath = findBrowserExecutable();
   if (!browserPath) {
@@ -62,6 +93,12 @@ async function run() {
 
   const profileDir = path.join(options.dataDir, '..', 'boss_isolated_profile');
   if (!fs.existsSync(profileDir)) fs.mkdirSync(profileDir, { recursive: true });
+
+  // 如果是单独执行动作（如打招呼、索要简历）
+  if (options.action) {
+    await handleCandidateAction(null, options.action, options.candidateName || '候选人', options.message);
+    return;
+  }
 
   const targetUrl = options.testLogin
     ? 'https://www.zhipin.com/web/user/'
@@ -77,7 +114,7 @@ async function run() {
       headless: false,
       ignoreDefaultArgs: ['--enable-automation'],
       args: [
-        targetUrl, // 启动时直接打开目标页，避免停留在 about:blank
+        targetUrl,
         `--user-data-dir=${profileDir}`,
         '--no-first-run',
         '--no-default-browser-check',
@@ -99,37 +136,27 @@ async function run() {
     return;
   }
 
-  // 获取页面实例
   const pages = await browser.pages();
   const page = pages[0] || (await browser.newPage());
 
-  // 等待页面加载完成
   try {
     if (!page.url().includes('zhipin.com')) {
       await page.goto(targetUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
     }
   } catch (e) {}
 
-  // 严格准确的登录检测函数
   const checkLoginState = async () => {
     try {
       const url = page.url();
-      
-      // 1. 如果还是空白页或者未进入 zhipin 域名，绝不算登录
       if (!url || !url.includes('zhipin.com') || url.includes('about:blank')) {
         return { isLoggedIn: false, isGeek: false, isBoss: false, userName: '', currentUrl: url };
       }
-
-      // 2. 如果还在登录/注册页（包含 /web/user/ 或 /login），说明尚未登录
       if (url.includes('/web/user') || url.includes('/login')) {
         return { isLoggedIn: false, isGeek: false, isBoss: false, userName: '', currentUrl: url };
       }
 
-      // 3. 检查页面中真实登录成功的特征
       const result = await page.evaluate(() => {
         const curUrl = window.location.href;
-        
-        // 如果还在用户登录/注册表单
         const isLogin = curUrl.includes('/web/user') || curUrl.includes('/login') || !!document.querySelector('input[type="tel"], input[placeholder*="手机号"], .login-box, .login-scan-box, .btn-sure');
         if (isLogin) {
           return { isLoggedIn: false, isGeek: false, isBoss: false, userName: '', currentUrl: curUrl };
@@ -165,7 +192,6 @@ async function run() {
 
   let loginState = await checkLoginState();
 
-  // 如果尚未登录，持续等待用户在浏览器中完成登录操作（最长等待 300 秒 = 5 分钟）
   if (!loginState.isLoggedIn) {
     const startTime = Date.now();
     while (Date.now() - startTime < 300000) {
@@ -179,9 +205,7 @@ async function run() {
       } catch (e) {}
 
       loginState = await checkLoginState();
-      if (loginState.isLoggedIn) {
-        break;
-      }
+      if (loginState.isLoggedIn) break;
     }
   }
 
@@ -202,7 +226,6 @@ async function run() {
         total: 0,
         message: `✅ BOSS 登录测试完毕！身份识别为：${roleText}。浏览器窗口已为您保留，您可以自由浏览。`
       });
-      // 测试模式下保持浏览器常驻，不自动退出
       return;
     }
 

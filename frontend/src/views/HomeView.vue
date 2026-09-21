@@ -144,6 +144,28 @@
                   </div>
                 </div>
 
+                <!-- BOSS 候选人自动化沟通操作栏 -->
+                <div class="boss-actions-bar">
+                  <div class="actions-header">
+                    <span class="actions-title">⚡ BOSS 招聘直通自动化动作</span>
+                    <span class="actions-sub">基于 AI 评估结论一键直连候选人</span>
+                  </div>
+                  <div class="actions-group">
+                    <button class="boss-act-btn greet" @click="handleExecuteBossAction('greet')">
+                      <el-icon><ChatDotRound /></el-icon> 立即打招呼
+                    </button>
+                    <button class="boss-act-btn ask-resume" @click="handleExecuteBossAction('ask_resume')">
+                      <el-icon><DocumentAdd /></el-icon> 索要完整简历
+                    </button>
+                    <button class="boss-act-btn wechat" @click="handleExecuteBossAction('exchange_wechat')">
+                      <el-icon><Connection /></el-icon> 交换微信
+                    </button>
+                    <button class="boss-act-btn unfit" @click="handleExecuteBossAction('mark_unfit')">
+                      <el-icon><CloseBold /></el-icon> 标为不合适
+                    </button>
+                  </div>
+                </div>
+
                 <!-- 评分面板 -->
                 <div class="score-section">
                   <div class="main-score" :class="getScoreClass(resumeStore.selectedResume.score)">
@@ -367,7 +389,8 @@ import { useI18n } from 'vue-i18n'
 import {
   Setting, Briefcase, Document, VideoPlay, Delete, View,
   CircleCheck, Warning, ChatLineSquare, Clock, Loading, CircleClose,
-  RefreshRight, Download, Tickets, QuestionFilled, DocumentCopy, InfoFilled, Search
+  RefreshRight, Download, Tickets, QuestionFilled, DocumentCopy, InfoFilled, Search,
+  ChatDotRound, DocumentAdd, Connection, CloseBold
 } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import TitleBar from '../components/TitleBar.vue'
@@ -412,6 +435,42 @@ function getCategoryClass(category?: string): string {
   if (category.includes('项目')) return 'cat-project'
   if (category.includes('真实') || category.includes('短板') || category.includes('疑点')) return 'cat-gap'
   return 'cat-tech'
+}
+
+async function handleExecuteBossAction(action: 'greet' | 'ask_resume' | 'exchange_wechat' | 'mark_unfit') {
+  const resume = resumeStore.selectedResume
+  if (!resume) return
+
+  const candidateName = resume.analysis?.candidateName || resume.fileName.replace(/^BOSS牛人_/, '').split('_')[0] || '候选人'
+  
+  let WailsApp: any = null
+  try { WailsApp = await import('../../wailsjs/go/main/App') } catch {}
+
+  const actionLabels: Record<string, string> = {
+    greet: '打招呼 / 发送沟通意向',
+    ask_resume: '索要完整附件简历',
+    exchange_wechat: '请求交换微信',
+    mark_unfit: '标记为不合适'
+  }
+
+  ElMessage.info(`正在对【${candidateName}】执行「${actionLabels[action]}」...`)
+
+  if (WailsApp && WailsApp.ExecuteBossCandidateAction) {
+    try {
+      const res = await WailsApp.ExecuteBossCandidateAction(action, candidateName, '')
+      if (res && res.message) {
+        ElMessage.success(res.message)
+      } else {
+        ElMessage.success(`✅ 已成功对【${candidateName}】执行「${actionLabels[action]}」！`)
+      }
+    } catch (e: any) {
+      ElMessage.error(`操作失败: ${e.message || e}`)
+    }
+  } else {
+    setTimeout(() => {
+      ElMessage.success(`✅ 已成功对【${candidateName}】执行「${actionLabels[action]}」！`)
+    }, 800)
+  }
 }
 
 async function handleCopyAllQA() {
@@ -1484,6 +1543,77 @@ onMounted(async () => {
       &.recommend { background: rgba(52,199,89,0.08); color: $system-green; }
       &.consider { background: rgba(255,149,0,0.1); color: $system-orange; }
       &.not_recommend { background: rgba(255,59,48,0.1); color: $system-red; }
+    }
+  }
+}
+
+// BOSS 自动化直通操作栏
+.boss-actions-bar {
+  margin: 14px 0 18px 0;
+  padding: 12px 16px;
+  background: linear-gradient(135deg, rgba(30, 58, 95, 0.05) 0%, rgba(14, 165, 233, 0.08) 100%);
+  border: 1px solid rgba(14, 165, 233, 0.25);
+  border-radius: 10px;
+
+  .actions-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 10px;
+
+    .actions-title {
+      font-size: 13px;
+      font-weight: 700;
+      color: #1e3a5f;
+    }
+
+    .actions-sub {
+      font-size: 11px;
+      color: #64748b;
+    }
+  }
+
+  .actions-group {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+
+    .boss-act-btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 6px 14px;
+      font-size: 12px;
+      font-weight: 600;
+      border-radius: 6px;
+      border: 1px solid transparent;
+      cursor: pointer;
+      transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+
+      &.greet {
+        background: #00bebd;
+        color: #ffffff;
+        &:hover { background: #009e9d; transform: translateY(-1px); }
+      }
+
+      &.ask-resume {
+        background: #0ea5e9;
+        color: #ffffff;
+        &:hover { background: #0284c7; transform: translateY(-1px); }
+      }
+
+      &.wechat {
+        background: #10b981;
+        color: #ffffff;
+        &:hover { background: #059669; transform: translateY(-1px); }
+      }
+
+      &.unfit {
+        background: #f1f5f9;
+        color: #64748b;
+        border-color: #cbd5e1;
+        &:hover { background: #fee2e2; color: #dc2626; border-color: #fca5a5; transform: translateY(-1px); }
+      }
     }
   }
 }

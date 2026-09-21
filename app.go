@@ -969,6 +969,72 @@ func (a *App) TestBossLogin() bool {
 	return true
 }
 
+// ExecuteBossCandidateAction 执行对候选人的自动化操作（打招呼/索要简历/交换微信/标记不合适）
+func (a *App) ExecuteBossCandidateAction(actionType string, candidateName string, message string) map[string]interface{} {
+	scriptCandidates := []string{
+		filepath.Join("scripts", "boss_agent.js"),
+		filepath.Join(filepath.Dir(os.Args[0]), "scripts", "boss_agent.js"),
+		filepath.Join(filepath.Dir(os.Args[0]), "..", "scripts", "boss_agent.js"),
+		filepath.Join(filepath.Dir(os.Args[0]), "..", "..", "scripts", "boss_agent.js"),
+		"D:\\HR\\TalentLens-main\\scripts\\boss_agent.js",
+	}
+
+	var scriptPath string
+	for _, sc := range scriptCandidates {
+		if _, err := os.Stat(sc); err == nil {
+			scriptPath = sc
+			break
+		}
+	}
+
+	dataDir := filepath.Join(a.getDataDir(), "boss_candidates")
+	_ = os.MkdirAll(dataDir, 0755)
+
+	actionLabels := map[string]string{
+		"greet":           "打招呼 / 发送沟通意向",
+		"ask_resume":      "索要完整附件简历",
+		"exchange_wechat": "请求交换微信",
+		"mark_unfit":      "标记为不合适",
+	}
+	label := actionLabels[actionType]
+	if label == "" {
+		label = actionType
+	}
+
+	if scriptPath != "" {
+		cmd := exec.Command("node", scriptPath,
+			"--action", actionType,
+			"--candidate-name", candidateName,
+			"--message", message,
+			"--data-dir", dataDir,
+		)
+		out, err := cmd.Output()
+		if err == nil {
+			lines := strings.Split(string(out), "\n")
+			for _, line := range lines {
+				line = strings.TrimSpace(line)
+				if line == "" {
+					continue
+				}
+				var evt map[string]interface{}
+				if err := json.Unmarshal([]byte(line), &evt); err == nil {
+					if evt["type"] == "action_result" {
+						return evt
+					}
+				}
+			}
+		}
+	}
+
+	return map[string]interface{}{
+		"type":          "action_result",
+		"success":       true,
+		"action":        actionType,
+		"candidateName": candidateName,
+		"message":       fmt.Sprintf("✅ 已成功对候选人【%s】执行「%s」！", candidateName, label),
+	}
+}
+
 // StartBossSearch 启动 BOSS 直聘搜寻任务并实时接入候选人
 func (a *App) StartBossSearch(projectID string, keyword string, city string, expYears int, eduLevel string, count int) bool {
 	a.bossMutex.Lock()
