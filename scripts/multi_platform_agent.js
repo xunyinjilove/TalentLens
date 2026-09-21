@@ -1,0 +1,396 @@
+/**
+ * multi_platform_agent.js - 4合1 多招聘平台（BOSS直聘、智联招聘、前程无忧、猎聘）企业端直连与自动化抓取引擎
+ */
+
+const fs = require('fs');
+const path = require('path');
+const puppeteer = require('puppeteer-core');
+
+// 命令行参数解析
+const args = process.argv.slice(2);
+const options = {
+  platforms: ['boss'], // 支持 boss, zhaopin, 51job, liepin
+  keyword: '临床项目经理',
+  city: '上海',
+  exp: '3-5年',
+  edu: '本科',
+  count: 10,
+  testLoginPlatform: '', // 单独测试某平台登录
+  dataDir: path.join(process.cwd(), 'data', 'candidates_multi')
+};
+
+for (let i = 0; i < args.length; i++) {
+  if (args[i] === '--platforms' && args[i + 1]) {
+    options.platforms = args[++i].split(',').map(s => s.trim()).filter(Boolean);
+  } else if (args[i] === '--keyword' && args[i + 1]) {
+    options.keyword = args[++i];
+  } else if (args[i] === '--city' && args[i + 1]) {
+    options.city = args[++i];
+  } else if (args[i] === '--exp' && args[i + 1]) {
+    options.exp = args[++i];
+  } else if (args[i] === '--edu' && args[i + 1]) {
+    options.edu = args[++i];
+  } else if (args[i] === '--count' && args[i + 1]) {
+    options.count = parseInt(args[++i], 10) || 10;
+  } else if (args[i] === '--test-login' && args[i + 1]) {
+    options.testLoginPlatform = args[++i];
+  } else if (args[i] === '--data-dir' && args[i + 1]) {
+    options.dataDir = args[++i];
+  }
+}
+
+// 标准输出 JSON 协议
+function sendMsg(type, payload = {}) {
+  const json = JSON.stringify({ type, timestamp: Date.now(), ...payload });
+  process.stdout.write(json + '\n');
+}
+
+// 寻找系统 Edge 或 Chrome
+function findBrowserExecutable() {
+  const candidates = [
+    'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe',
+    'C:\\Program Files\\Microsoft\\Edge\\Application\\msedge.exe',
+    'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
+    'C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe',
+    (process.env.LOCALAPPDATA || '') + '\\Microsoft\\Edge SxS\\Application\\msedge.exe',
+    (process.env.LOCALAPPDATA || '') + '\\Google\\Chrome\\Application\\chrome.exe'
+  ];
+
+  for (const p of candidates) {
+    if (p && fs.existsSync(p)) return p;
+  }
+  return null;
+}
+
+// 平台配置定义
+const PLATFORM_CONFIGS = {
+  boss: {
+    name: 'BOSS直聘',
+    code: 'boss',
+    icon: '🏢',
+    loginUrl: 'https://www.zhipin.com/web/user/',
+    homeUrl: 'https://www.zhipin.com/web/boss/recommend',
+    profileFolder: 'boss_isolated_profile',
+    isLoggedIn: (url, docText) => {
+      if (url.includes('/login') || url.includes('/web/user')) return false;
+      return url.includes('/boss/') || url.includes('recommend') || docText.includes('推荐牛人') || docText.includes('职位管理');
+    }
+  },
+  zhaopin: {
+    name: '智联招聘',
+    code: 'zhaopin',
+    icon: '💼',
+    loginUrl: 'https://passport.zhaopin.com/login',
+    homeUrl: 'https://ihr.zhaopin.com/resumemanage/resumerecommend.html',
+    profileFolder: 'zhaopin_isolated_profile',
+    isLoggedIn: (url, docText) => {
+      if (url.includes('passport.zhaopin.com/login')) return false;
+      return url.includes('ihr.zhaopin.com') || url.includes('rd5.zhaopin.com') || docText.includes('简历管理') || docText.includes('人才搜索');
+    }
+  },
+  '51job': {
+    name: '前程无忧',
+    code: '51job',
+    icon: '📑',
+    loginUrl: 'https://ehire.51job.com/MainLogin.aspx',
+    homeUrl: 'https://ehire.51job.com/Candidate/SearchResumeNew.aspx',
+    profileFolder: '51job_isolated_profile',
+    isLoggedIn: (url, docText) => {
+      if (url.includes('MainLogin.aspx')) return false;
+      return url.includes('ehire.51job.com') && !url.includes('Login');
+    }
+  },
+  liepin: {
+    name: '猎聘网',
+    code: 'liepin',
+    icon: '🎯',
+    loginUrl: 'https://lpt.liepin.com/user/login',
+    homeUrl: 'https://lpt.liepin.com/resume/search',
+    profileFolder: 'liepin_isolated_profile',
+    isLoggedIn: (url, docText) => {
+      if (url.includes('/user/login')) return false;
+      return url.includes('lpt.liepin.com') || url.includes('e.liepin.com');
+    }
+  }
+};
+
+// 内存去重缓存
+const seenCandidateKeys = new Set();
+
+function isDuplicateCandidate(name, company, exp) {
+  const cleanName = (name || '').replace(/[\s\*]/g, '');
+  const cleanComp = (company || '').replace(/[\s\(\)（）某]/g, '');
+  const key = `${cleanName}_${cleanComp}`;
+  if (seenCandidateKeys.has(key)) return true;
+  seenCandidateKeys.add(key);
+  return false;
+}
+
+// 统一抓取单个平台
+async function scrapePlatform(platformKey, browserPath, targetCount) {
+  const cfg = PLATFORM_CONFIGS[platformKey];
+  if (!cfg) return [];
+
+  sendMsg('status', {
+    platform: platformKey,
+    message: `${cfg.icon} 正在连接【${cfg.name}】企业端后台通道...`
+  });
+
+  const profileDir = path.join(options.dataDir, '..', cfg.profileFolder);
+  if (!fs.existsSync(profileDir)) fs.mkdirSync(profileDir, { recursive: true });
+
+  let browser = null;
+  try {
+    browser = await puppeteer.launch({
+      executablePath: browserPath,
+      headless: false,
+      ignoreDefaultArgs: ['--enable-automation'],
+      args: [
+        cfg.homeUrl,
+        `--user-data-dir=${profileDir}`,
+        '--no-first-run',
+        '--no-default-browser-check',
+        '--disable-blink-features=AutomationControlled',
+        '--disable-infobars',
+        '--disable-extensions',
+        '--start-maximized'
+      ]
+    });
+  } catch (err) {
+    sendMsg('error', {
+      platform: platformKey,
+      message: `❌ 无法启动 ${cfg.name} 浏览器直连: ${err.message}`
+    });
+    return [];
+  }
+
+  const pages = await browser.pages();
+  const page = pages[0] || (await browser.newPage());
+
+  try {
+    if (!page.url().includes(cfg.code === '51job' ? '51job.com' : cfg.code)) {
+      await page.goto(cfg.homeUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
+    }
+  } catch (e) {}
+
+  // 登录态检测
+  const checkAuth = async () => {
+    try {
+      const curUrl = page.url() || '';
+      const docText = await page.evaluate(() => document.body ? document.body.innerText : '');
+      const logged = cfg.isLoggedIn(curUrl, docText);
+      return { logged, curUrl };
+    } catch (e) {
+      return { logged: false, curUrl: '' };
+    }
+  };
+
+  sendMsg('status', {
+    platform: platformKey,
+    message: `🔑 正在验证【${cfg.name}】企业端登录态...`
+  });
+
+  let authResult = await checkAuth();
+
+  if (!authResult.logged) {
+    sendMsg('auth', {
+      platform: platformKey,
+      status: 'need_login',
+      message: `请在打开的浏览器中，扫码登录【${cfg.name}】企业招聘账号`
+    });
+    sendMsg('status', {
+      platform: platformKey,
+      message: `👉 等待用户在浏览器中完成【${cfg.name}】企业端扫码或账号登录（最长等待 3 分钟）...`
+    });
+
+    const startTime = Date.now();
+    while (Date.now() - startTime < 180000) {
+      await new Promise(r => setTimeout(r, 2500));
+      try {
+        if (!browser.isConnected()) {
+          sendMsg('status', { platform: platformKey, message: `【${cfg.name}】窗口已关闭` });
+          return [];
+        }
+      } catch (e) {}
+
+      authResult = await checkAuth();
+      if (authResult.logged) break;
+    }
+  }
+
+  if (!authResult.logged) {
+    sendMsg('error', {
+      platform: platformKey,
+      message: `⚠️ 未检测到【${cfg.name}】企业登录态，已跳过该渠道。`
+    });
+    return [];
+  }
+
+  sendMsg('status', {
+    platform: platformKey,
+    message: `🎉 【${cfg.name}】企业后台连接成功！正在检索「${options.keyword}」(${options.city})...`
+  });
+
+  // DOM 元素提取逻辑
+  let scraped = [];
+  try {
+    await new Promise(r => setTimeout(r, 2000));
+
+    scraped = await page.evaluate((targetCount, kw, pName) => {
+      const results = [];
+      // 通用卡片选择器
+      const selectors = [
+        '.candidate-card-wrap', '.candidate-card', '.card-inner', '.recommend-card',
+        '.geek-item', '.candidate-item', '.user-card', '.resume-item', '.resume-list-item',
+        '.search-result-item', '.search-item', '.list-item', '[class*="candidate"]', '[class*="resume-card"]'
+      ];
+
+      const elements = document.querySelectorAll(selectors.join(', '));
+      for (let i = 0; i < elements.length && results.length < targetCount; i++) {
+        const el = elements[i];
+        const text = el.innerText || '';
+        if (text.length < 25) continue;
+
+        const nameEl = el.querySelector('h3, h4, .name, .user-name, .geek-name, .title-text, .c-name');
+        const name = nameEl ? nameEl.innerText.trim() : `${pName}牛人_${i + 1}`;
+
+        const infoEl = el.querySelector('.info, .labels, .base-info, .desc, .user-desc, .exp-edu');
+        const infoText = infoEl ? infoEl.innerText.trim().replace(/\n+/g, ' · ') : '';
+
+        const workEl = el.querySelector('.work, .work-exp, .company, .company-name, .position');
+        const workText = workEl ? workEl.innerText.trim() : '';
+
+        const tags = Array.from(el.querySelectorAll('.tag, .skill-tag, .tag-item, span.label'))
+          .map(t => t.innerText.trim())
+          .filter(Boolean);
+
+        results.push({
+          name,
+          infoText,
+          workText,
+          skills: tags,
+          rawCardText: text
+        });
+      }
+      return results;
+    }, targetCount, options.keyword, cfg.name);
+  } catch (evalErr) {
+    sendMsg('status', { platform: platformKey, message: `⚠️ DOM 解析提示: ${evalErr.message}` });
+  }
+
+  if (!scraped || scraped.length === 0) {
+    sendMsg('status', {
+      platform: platformKey,
+      message: `ℹ️ 在【${cfg.name}】当前视图中未发现新牛人卡片，建议在打开的窗口中切换至招聘岗位列表。`
+    });
+    return [];
+  }
+
+  // 整理并存储
+  const platformSavedList = [];
+  for (let i = 0; i < scraped.length; i++) {
+    const item = scraped[i];
+    
+    // 跨渠道排重
+    const isDup = isDuplicateCandidate(item.name, item.workText, item.infoText);
+    const dupTag = isDup ? '【跨平台重合 · 已标记聚合】' : '';
+
+    const candID = `${platformKey}_${Date.now()}_${i}`;
+    const formattedContent = `【${cfg.name} 真实推荐牛人档案】${dupTag}
+姓名 / 称谓：${item.name}
+来源渠道：${cfg.name}
+检索岗位：${options.keyword}
+目标城市：${options.city}
+基本画像：${item.infoText || '详见卡片信息'}
+任职履历快照：${item.workText || '详见卡片完整信息'}
+
+【核心专业技能】
+${item.skills && item.skills.length > 0 ? item.skills.map(s => '• ' + s).join('\n') : '• 岗位专业技能'}
+
+【${cfg.name} 在线卡片完整正文】
+${item.rawCardText}
+`;
+
+    const fileName = `【${cfg.name}】${item.name}_${options.keyword}.txt`;
+    const filePath = path.join(options.dataDir, fileName);
+    fs.writeFileSync(filePath, formattedContent, 'utf8');
+
+    const candData = {
+      id: candID,
+      platform: platformKey,
+      platformName: cfg.name,
+      fileName,
+      filePath,
+      name: item.name,
+      jobTitle: options.keyword,
+      experience: item.infoText || '在线经验',
+      education: '详见微简历',
+      company: item.workText || '行业企业',
+      skills: item.skills || [],
+      content: formattedContent
+    };
+
+    platformSavedList.push(candData);
+
+    sendMsg('candidate', {
+      platform: platformKey,
+      platformName: cfg.name,
+      current: i + 1,
+      total: scraped.length,
+      candidate: candData
+    });
+
+    await new Promise(r => setTimeout(r, 300));
+  }
+
+  sendMsg('status', {
+    platform: platformKey,
+    message: `✅ 【${cfg.name}】成功抓取并导入 ${platformSavedList.length} 位真实牛人档案！`
+  });
+
+  return platformSavedList;
+}
+
+// 主入口
+async function main() {
+  const browserPath = findBrowserExecutable();
+  if (!browserPath) {
+    sendMsg('error', { message: '❌ 未在系统中检测到 Edge 或 Chrome 浏览器，无法启动直连引擎。' });
+    return;
+  }
+
+  if (!fs.existsSync(options.dataDir)) {
+    fs.mkdirSync(options.dataDir, { recursive: true });
+  }
+
+  // 独立测试某平台登录
+  if (options.testLoginPlatform) {
+    const cfg = PLATFORM_CONFIGS[options.testLoginPlatform];
+    if (!cfg) {
+      sendMsg('error', { message: `未知平台: ${options.testLoginPlatform}` });
+      return;
+    }
+    await scrapePlatform(options.testLoginPlatform, browserPath, 0);
+    sendMsg('done', { total: 0, message: `【${cfg.name}】登录态测试完毕` });
+    return;
+  }
+
+  sendMsg('status', {
+    message: `🚀 启动全渠道聚合检索引擎，计划调度平台：${options.platforms.map(p => PLATFORM_CONFIGS[p]?.name || p).join('、')}，目标岗位「${options.keyword}」...`
+  });
+
+  let allResults = [];
+  for (const plat of options.platforms) {
+    const res = await scrapePlatform(plat, browserPath, options.count);
+    allResults = allResults.concat(res);
+  }
+
+  sendMsg('done', {
+    total: allResults.length,
+    message: `🎉 全渠道聚合检索完毕！共从 ${options.platforms.length} 大平台成功采集 ${allResults.length} 份真实人才档案，已自动流转至 AI 深度评测引擎！`
+  });
+}
+
+main().catch(err => {
+  sendMsg('error', { message: `❌ 聚合引擎运行异常: ${err.message}` });
+});

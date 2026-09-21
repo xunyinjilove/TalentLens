@@ -1,8 +1,8 @@
 <template>
   <el-dialog
     v-model="visible"
-    :title="$t('boss.dialogTitle') || 'BOSS 直聘企业端直连与 AI 深度评测'"
-    width="580px"
+    :title="'🌐 4合1 全渠道智能矩阵寻才与 AI 评测系统'"
+    width="680px"
     :close-on-click-modal="!searching"
     :close-on-press-escape="!searching"
     @close="handleClose"
@@ -24,7 +24,44 @@
 
       <!-- 搜索配置表单 -->
       <div class="search-form" v-if="!searching && searchLogs.length === 0">
-        <div class="form-row">
+        <!-- 4 大平台矩阵选择与独立登录管理面板 -->
+        <div class="platform-grid-section">
+          <div class="section-title-row">
+            <label class="form-label">选择调度招聘渠道（支持多选并发）</label>
+            <span class="channel-hint">已勾选 {{ selectedPlatformCodes.length }} / 4 个渠道</span>
+          </div>
+
+          <div class="platform-grid">
+            <div
+              v-for="p in platformList"
+              :key="p.code"
+              class="platform-card"
+              :class="{ active: p.selected }"
+              @click="togglePlatform(p)"
+            >
+              <div class="platform-top">
+                <el-checkbox v-model="p.selected" @click.stop />
+                <span class="platform-icon">{{ p.icon }}</span>
+                <span class="platform-name">{{ p.name }}</span>
+                <el-tag size="small" :type="p.tagType" effect="plain" class="platform-tag">
+                  {{ p.badge }}
+                </el-tag>
+              </div>
+              <div class="platform-desc">{{ p.desc }}</div>
+              <div class="platform-action">
+                <button
+                  class="login-test-btn"
+                  @click.stop="handleTestPlatform(p.code, p.name)"
+                  title="单独在 Edge 浏览器中扫码或登录该平台企业端"
+                >
+                  <el-icon><Key /></el-icon> 扫码 / 登录
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="form-row" style="margin-top: 6px;">
           <div class="form-item flex-2">
             <label class="form-label">搜索岗位关键词</label>
             <el-input v-model="form.keyword" placeholder="输入搜索关键词，如：临床项目经理" />
@@ -37,14 +74,14 @@
           </div>
         </div>
 
-        <div class="form-row" style="margin-top: 10px;">
+        <div class="form-row" style="margin-top: 8px;">
           <div class="form-item flex-1">
-            <label class="form-label">计划搜寻牛人数</label>
-            <el-select v-model="form.count" style="width: 100%">
-              <el-option :label="'5 位推荐牛人'" :value="5" />
-              <el-option :label="'10 位推荐牛人 (推荐)'" :value="10" />
-              <el-option :label="'15 位推荐牛人'" :value="15" />
-              <el-option :label="'20 位推荐牛人'" :value="20" />
+            <label class="form-label">单渠道目标采集数</label>
+            <el-select v-model="form.countPerPlatform" style="width: 100%">
+              <el-option :label="'5 人 / 平台'" :value="5" />
+              <el-option :label="'10 人 / 平台 (推荐)'" :value="10" />
+              <el-option :label="'15 人 / 平台'" :value="15" />
+              <el-option :label="'20 人 / 平台'" :value="20" />
             </el-select>
           </div>
           <div class="form-item flex-1">
@@ -59,7 +96,7 @@
         <div class="safety-tip">
           <el-icon><InfoFilled /></el-icon>
           <span>
-            【BOSS 直聘企业直连】：系统将唤起 Edge 浏览器直连 BOSS 招聘后台。请使用【企业招聘者】账号扫码登录，系统将实时抓取推荐牛人并自动流转 AI 深度分析。
+            【全渠道直连说明】：系统将通过隔离浏览器直连已勾选平台的企业后台，若某平台未登录将引导扫码。跨平台重合的候选人将自动识别聚合。
           </span>
         </div>
       </div>
@@ -69,10 +106,10 @@
         <div class="progress-wrap">
           <div class="progress-info">
             <span class="status-title">{{ currentStatusText }}</span>
-            <span class="progress-num">{{ candidateCount }} / {{ form.count }} 人</span>
+            <span class="progress-num">{{ candidateCount }} / {{ expectedTotalCount }} 人</span>
           </div>
           <el-progress
-            :percentage="Math.min(100, Math.round((candidateCount / form.count) * 100))"
+            :percentage="Math.min(100, Math.round((candidateCount / Math.max(1, expectedTotalCount)) * 100))"
             :status="isFinished ? 'success' : ''"
             :indeterminate="searching && candidateCount === 0"
             :stroke-width="10"
@@ -105,24 +142,15 @@
     <template #footer>
       <div class="dialog-footer">
         <el-button v-if="!searching" @click="visible = false">取消</el-button>
-        <el-button
-          v-if="!searching && searchLogs.length === 0"
-          type="warning"
-          plain
-          @click="handleTestLogin"
-        >
-          <el-icon><Key /></el-icon>
-          测试/扫码企业登录
-        </el-button>
-        <el-button v-if="searching" type="danger" plain @click="handleStop">停止搜寻</el-button>
+        <el-button v-if="searching" type="danger" plain @click="handleStop">停止检索</el-button>
         <el-button
           v-if="!searching && searchLogs.length === 0"
           type="primary"
           @click="handleStartSearch"
-          :disabled="!form.keyword.trim()"
+          :disabled="!form.keyword.trim() || selectedPlatformCodes.length === 0"
         >
           <el-icon><Search /></el-icon>
-          连接 BOSS 直聘寻才
+          启动矩阵并发检索 (已选 {{ selectedPlatformCodes.length }} 个平台)
         </el-button>
         <el-button
           v-if="isFinished"
@@ -138,7 +166,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, watch, nextTick, onMounted, onUnmounted } from 'vue'
+import { ref, reactive, computed, watch, nextTick, onMounted, onUnmounted } from 'vue'
 import { ElMessage } from 'element-plus'
 import {
   Search,
@@ -182,11 +210,63 @@ const searchLogs = ref<SearchLog[]>([])
 
 const cityOptions = ['上海', '北京', '深圳', '广州', '杭州', '南京', '武汉', '成都', '苏州', '全国']
 
+// 4 大招聘平台配置
+const platformList = reactive([
+  {
+    code: 'boss',
+    name: 'BOSS直聘',
+    icon: '🏢',
+    desc: '企业直连推荐牛人，微简历与在线沟通',
+    selected: true,
+    badge: '直聘热门',
+    tagType: 'success' as const
+  },
+  {
+    code: 'zhaopin',
+    name: '智联招聘',
+    icon: '💼',
+    desc: 'iHR 人才搜索库与智能推荐人才',
+    selected: true,
+    badge: '白领大盘',
+    tagType: 'primary' as const
+  },
+  {
+    code: '51job',
+    name: '前程无忧',
+    icon: '📑',
+    desc: 'eHire 招聘管理系统与简历库检索',
+    selected: true,
+    badge: '老牌综合',
+    tagType: 'warning' as const
+  },
+  {
+    code: 'liepin',
+    name: '猎聘网',
+    icon: '🎯',
+    desc: 'LPT 企业中高端人才库与精准搜索',
+    selected: true,
+    badge: '中高端',
+    tagType: 'danger' as const
+  }
+])
+
+const selectedPlatformCodes = computed(() => {
+  return platformList.filter(p => p.selected).map(p => p.code)
+})
+
+function togglePlatform(p: any) {
+  p.selected = !p.selected
+}
+
 const form = reactive({
   keyword: '',
   city: '上海',
-  count: 10,
+  countPerPlatform: 5,
   autoAnalyze: true
+})
+
+const expectedTotalCount = computed(() => {
+  return selectedPlatformCodes.value.length * form.countPerPlatform
 })
 
 watch(() => props.modelValue, (val) => {
@@ -195,7 +275,7 @@ watch(() => props.modelValue, (val) => {
     // 重置状态与表单初始值
     form.keyword = props.jobTitle || '临床项目经理'
     form.city = '上海'
-    form.count = 10
+    form.countPerPlatform = 5
     searching.value = false
     isFinished.value = false
     candidateCount.value = 0
@@ -222,8 +302,8 @@ function addLog(type: SearchLog['type'], message: string) {
   })
 }
 
-// 独立测试扫码登录与鉴权 (针对 BOSS 直聘企业端)
-async function handleTestLogin() {
+// 独立测试某平台登录
+async function handleTestPlatform(platformCode: string, platformName: string) {
   let WailsApp: any = null
   try { WailsApp = await import('../../wailsjs/go/main/App') } catch {}
 
@@ -231,10 +311,17 @@ async function handleTestLogin() {
   isFinished.value = false
   candidateCount.value = 0
   searchLogs.value = []
-  currentStatusText.value = '正在唤起浏览器进行登录测试...'
-  addLog('status', '🔑 正在启动 Edge 浏览器打开 BOSS 直聘企业端鉴权页...')
+  currentStatusText.value = `正在唤起 Edge 打开【${platformName}】企业后台...`
+  addLog('status', `🔑 正在启动 Edge 浏览器连接【${platformName}】鉴权页...`)
 
-  if (WailsApp && WailsApp.TestBossLogin) {
+  if (WailsApp && WailsApp.TestPlatformLogin) {
+    try {
+      await WailsApp.TestPlatformLogin(platformCode)
+    } catch (err: any) {
+      searching.value = false
+      addLog('error', `启动测试失败: ${err.message || err}`)
+    }
+  } else if (WailsApp && WailsApp.TestBossLogin && platformCode === 'boss') {
     try {
       await WailsApp.TestBossLogin()
     } catch (err: any) {
@@ -243,28 +330,50 @@ async function handleTestLogin() {
     }
   } else {
     setTimeout(() => {
-      addLog('status', '✅ 登录态测试通道正常连接！')
+      addLog('status', `✅ 【${platformName}】登录测试通道已就绪！`)
       searching.value = false
       isFinished.value = true
     }, 1500)
   }
 }
 
-// 启动搜索
+// 启动多平台并发搜索
 async function handleStartSearch() {
   let WailsApp: any = null
   try { WailsApp = await import('../../wailsjs/go/main/App') } catch {
     ElMessage.warning('当前运行在开发预览模式')
   }
 
+  const plats = selectedPlatformCodes.value
+  if (plats.length === 0) {
+    ElMessage.warning('请至少勾选一个招聘平台！')
+    return
+  }
+
   searching.value = true
   isFinished.value = false
   candidateCount.value = 0
   searchLogs.value = []
-  currentStatusText.value = '正在启动 BOSS 直聘搜寻引擎...'
-  addLog('status', `🚀 启动搜寻任务：[${form.city}] 岗位「${form.keyword}」，目标 ${form.count} 人`)
+  currentStatusText.value = '正在启动矩阵式检索引擎...'
+  addLog('status', `🚀 启动多平台聚合寻才：[${form.city}] 岗位「${form.keyword}」，调度平台：${plats.join('、')}，单平台目标 ${form.countPerPlatform} 人`)
 
-  if (WailsApp && WailsApp.StartBossSearch) {
+  if (WailsApp && WailsApp.StartMultiPlatformSearch) {
+    try {
+      await WailsApp.StartMultiPlatformSearch(
+        props.projectId,
+        form.keyword.trim(),
+        form.city,
+        props.expYears || 3,
+        props.eduLevel || '本科',
+        form.countPerPlatform,
+        plats
+      )
+    } catch (err: any) {
+      searching.value = false
+      addLog('error', `启动失败: ${err.message || err}`)
+      ElMessage.error('启动搜寻失败')
+    }
+  } else if (WailsApp && WailsApp.StartBossSearch) {
     try {
       await WailsApp.StartBossSearch(
         props.projectId,
@@ -272,7 +381,7 @@ async function handleStartSearch() {
         form.city,
         props.expYears || 3,
         props.eduLevel || '本科',
-        form.count
+        form.countPerPlatform
       )
     } catch (err: any) {
       searching.value = false
@@ -280,7 +389,7 @@ async function handleStartSearch() {
       ElMessage.error('启动搜寻失败')
     }
   } else {
-    ElMessage.info('开发模式下需在客户端中运行 BOSS 直连引擎')
+    ElMessage.info('开发模式下需在客户端中运行多平台直连引擎')
     searching.value = false
   }
 }
@@ -308,7 +417,7 @@ function handleClose() {
   }
 }
 
-// 绑定 Wails 事件监听
+// 绑定 Wails 事件监听 (同时监听 platform:* 与 boss:* 保持全兼容)
 let unsubscribeList: Array<() => void> = []
 
 onMounted(async () => {
@@ -316,39 +425,53 @@ onMounted(async () => {
   try { WailsRuntime = await import('../../wailsjs/runtime/runtime') } catch {}
   if (!WailsRuntime) return
 
-  const offStatus = WailsRuntime.EventsOn('boss:status', (evt: any) => {
+  const handleStatus = (evt: any) => {
     if (evt && evt.message) {
       currentStatusText.value = evt.message
       addLog('status', evt.message)
     }
-  })
+  }
 
-  const offCandidate = WailsRuntime.EventsOn('boss:candidate_found', (evt: any) => {
+  const handleCandidate = (evt: any) => {
     if (evt && evt.candidate) {
-      candidateCount.value = evt.current || (candidateCount.value + 1)
+      candidateCount.value = candidateCount.value + 1
       const c = evt.candidate
-      addLog('candidate', `👤 成功检索到真实牛人: ${c.name}（${c.experience} · ${c.company || '在线履历'}）`)
+      const pName = c.platformName || evt.platformName || '招聘平台'
+      addLog('candidate', `👤 [${pName}] 成功提取牛人: ${c.name}（${c.experience} · ${c.company || '在线履历'}）`)
       emit('refresh')
     }
-  })
+  }
 
-  const offDone = WailsRuntime.EventsOn('boss:done', (evt: any) => {
+  const handleDone = (evt: any) => {
     searching.value = false
     isFinished.value = true
-    currentStatusText.value = '搜寻完成，已启动 AI 深度分析！'
-    addLog('done', evt.message || '🎉 搜寻完成，候选人已全部导入！')
-    ElMessage.success('BOSS 直聘候选人已全部导入，正在进行 AI 智能打分！')
+    currentStatusText.value = '全渠道检索完成，已启动 AI 分析！'
+    addLog('done', evt.message || '🎉 候选人已全部采集并导入！')
+    ElMessage.success('多平台候选人已全部导入，正在进行 AI 智能打分！')
     emit('refresh')
-  })
+  }
 
-  const offError = WailsRuntime.EventsOn('boss:error', (evt: any) => {
+  const handleError = (evt: any) => {
     searching.value = false
-    currentStatusText.value = '搜寻中止'
-    addLog('error', evt.message || '搜寻过程中发生错误')
-    ElMessage.error(evt.message || '搜寻失败')
-  })
+    currentStatusText.value = '检索提示'
+    addLog('error', evt.message || '检索过程中发生提示')
+    ElMessage.error(evt.message || '操作未完成')
+  }
 
-  unsubscribeList = [offStatus, offCandidate, offDone, offError]
+  const offPlatformStatus = WailsRuntime.EventsOn('platform:status', handleStatus)
+  const offPlatformCandidate = WailsRuntime.EventsOn('platform:candidate_found', handleCandidate)
+  const offPlatformDone = WailsRuntime.EventsOn('platform:done', handleDone)
+  const offPlatformError = WailsRuntime.EventsOn('platform:error', handleError)
+
+  const offBossStatus = WailsRuntime.EventsOn('boss:status', handleStatus)
+  const offBossCandidate = WailsRuntime.EventsOn('boss:candidate_found', handleCandidate)
+  const offBossDone = WailsRuntime.EventsOn('boss:done', handleDone)
+  const offBossError = WailsRuntime.EventsOn('boss:error', handleError)
+
+  unsubscribeList = [
+    offPlatformStatus, offPlatformCandidate, offPlatformDone, offPlatformError,
+    offBossStatus, offBossCandidate, offBossDone, offBossError
+  ]
 })
 
 onUnmounted(() => {
@@ -364,14 +487,14 @@ onUnmounted(() => {
 .boss-dialog-content {
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: 14px;
 }
 
 .job-context-card {
   background: #f0f7ff;
   border: 1px solid #bae0ff;
   border-radius: $radius-md;
-  padding: 12px 16px;
+  padding: 10px 14px;
   display: flex;
   justify-content: space-between;
   align-items: center;
@@ -415,22 +538,130 @@ onUnmounted(() => {
   flex-direction: column;
   gap: 12px;
 
+  .platform-grid-section {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+
+    .section-title-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+
+      .channel-hint {
+        font-size: 11.5px;
+        color: #0958d9;
+        font-weight: 600;
+      }
+    }
+
+    .platform-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+
+      .platform-card {
+        border: 1.5px solid #e2e8f0;
+        border-radius: $radius-md;
+        padding: 10px 12px;
+        background: #f8fafc;
+        cursor: pointer;
+        transition: all 0.2s ease;
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+
+        &:hover {
+          border-color: #93c5fd;
+          background: #ffffff;
+        }
+
+        &.active {
+          border-color: #007aff;
+          background: #eff6ff;
+          box-shadow: 0 2px 8px rgba(0, 122, 255, 0.12);
+
+          .platform-name {
+            color: #007aff;
+            font-weight: 700;
+          }
+        }
+
+        .platform-top {
+          display: flex;
+          align-items: center;
+          gap: 6px;
+
+          .platform-icon {
+            font-size: 15px;
+          }
+
+          .platform-name {
+            font-size: 13px;
+            font-weight: 600;
+            color: #1e293b;
+            flex: 1;
+          }
+
+          .platform-tag {
+            font-size: 10.5px;
+            padding: 0 4px;
+            height: 18px;
+            line-height: 16px;
+          }
+        }
+
+        .platform-desc {
+          font-size: 11px;
+          color: #64748b;
+          line-height: 1.35;
+        }
+
+        .platform-action {
+          display: flex;
+          justify-content: flex-end;
+          margin-top: 2px;
+
+          .login-test-btn {
+            background: #ffffff;
+            border: 1px solid #cbd5e1;
+            border-radius: 4px;
+            padding: 2px 8px;
+            font-size: 11px;
+            color: #475569;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            gap: 3px;
+            transition: all 0.15s ease;
+
+            &:hover {
+              color: #007aff;
+              border-color: #007aff;
+              background: #f0f7ff;
+            }
+          }
+        }
+      }
+    }
+  }
+
   .form-row {
     display: flex;
-    gap: 14px;
+    gap: 12px;
   }
 
   .form-item {
     display: flex;
     flex-direction: column;
-    gap: 6px;
+    gap: 5px;
 
     &.flex-1 { flex: 1; }
     &.flex-2 { flex: 2; }
   }
 
   .form-label {
-    font-size: 12.5px;
+    font-size: 12px;
     font-weight: 600;
     color: $text-secondary;
   }
@@ -453,11 +684,11 @@ onUnmounted(() => {
     gap: 6px;
     background: #fafafa;
     border: 1px solid #f0f0f0;
-    padding: 10px 12px;
+    padding: 8px 12px;
     border-radius: $radius-sm;
     font-size: 11.5px;
     color: #64748b;
-    line-height: 1.5;
+    line-height: 1.45;
 
     .el-icon {
       color: $system-blue;
@@ -470,13 +701,13 @@ onUnmounted(() => {
 .searching-dashboard {
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  gap: 12px;
 
   .progress-wrap {
     background: #ffffff;
     border: 1px solid $separator;
     border-radius: $radius-md;
-    padding: 14px 16px;
+    padding: 12px 14px;
 
     .progress-info {
       display: flex;
@@ -485,7 +716,7 @@ onUnmounted(() => {
       margin-bottom: 8px;
 
       .status-title {
-        font-size: 13.5px;
+        font-size: 13px;
         font-weight: 700;
         color: $text-primary;
       }

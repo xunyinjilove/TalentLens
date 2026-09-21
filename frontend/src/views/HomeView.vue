@@ -44,10 +44,10 @@
               <button
                 class="action-btn boss-btn"
                 @click="showBossDialog = true"
-                :title="$t('boss.searchBtn') || 'BOSS 直聘自动搜寻牛人并直接打分'"
+                title="4合1 全渠道矩阵寻才（BOSS直聘、智联、前程无忧、猎聘）"
               >
                 <el-icon><Search /></el-icon>
-                <span>BOSS寻才</span>
+                <span>矩阵寻才</span>
               </button>
               <button class="action-btn primary" @click="handleStartAnalysis" :disabled="resumeStore.isAnalyzing">
                 <el-icon v-if="!resumeStore.isAnalyzing"><VideoPlay /></el-icon>

@@ -28,7 +28,7 @@ import (
 )
 
 // 版本信息
-const AppVersion = "1.5.0"
+const AppVersion = "1.6.0"
 const GitHubRepo = "xunyinjilove/TalentLens"
 
 //go:embed all:frontend/dist
@@ -987,8 +987,13 @@ func (a *App) CheckBossCookies() bool {
 	return err == nil
 }
 
-// TestBossLogin 独立测试 BOSS 直聘账号登录与扫码鉴权（支持牛人/Boss双身份）
+// TestBossLogin 兼容旧接口：测试 BOSS 直聘登录
 func (a *App) TestBossLogin() bool {
+	return a.TestPlatformLogin("boss")
+}
+
+// TestPlatformLogin 独立测试指定平台的企业端账号登录与扫码鉴权
+func (a *App) TestPlatformLogin(platform string) bool {
 	a.bossMutex.Lock()
 	if a.bossCmd != nil && a.bossCmd.Process != nil {
 		_ = a.bossCmd.Process.Kill()
@@ -996,15 +1001,19 @@ func (a *App) TestBossLogin() bool {
 	}
 	a.bossMutex.Unlock()
 
-	dataDir := filepath.Join(a.getDataDir(), "boss_candidates")
+	if platform == "" {
+		platform = "boss"
+	}
+
+	dataDir := filepath.Join(a.getDataDir(), "candidates_multi")
 	_ = os.MkdirAll(dataDir, 0755)
 
 	scriptCandidates := []string{
-		filepath.Join("scripts", "boss_agent.js"),
-		filepath.Join(filepath.Dir(os.Args[0]), "scripts", "boss_agent.js"),
-		filepath.Join(filepath.Dir(os.Args[0]), "..", "scripts", "boss_agent.js"),
-		filepath.Join(filepath.Dir(os.Args[0]), "..", "..", "scripts", "boss_agent.js"),
-		"D:\\HR\\TalentLens-main\\scripts\\boss_agent.js",
+		filepath.Join("scripts", "multi_platform_agent.js"),
+		filepath.Join(filepath.Dir(os.Args[0]), "scripts", "multi_platform_agent.js"),
+		filepath.Join(filepath.Dir(os.Args[0]), "..", "scripts", "multi_platform_agent.js"),
+		filepath.Join(filepath.Dir(os.Args[0]), "..", "..", "scripts", "multi_platform_agent.js"),
+		"D:\\HR\\TalentLens-main\\scripts\\multi_platform_agent.js",
 	}
 
 	var scriptPath string
@@ -1016,7 +1025,7 @@ func (a *App) TestBossLogin() bool {
 	}
 
 	if scriptPath != "" {
-		cmd := exec.Command("node", scriptPath, "--test-login", "--data-dir", dataDir)
+		cmd := exec.Command("node", scriptPath, "--test-login", platform, "--data-dir", dataDir)
 		stdout, err := cmd.StdoutPipe()
 		if err == nil {
 			if err := cmd.Start(); err == nil {
@@ -1037,12 +1046,16 @@ func (a *App) TestBossLogin() bool {
 							switch evtType {
 							case "status":
 								runtime.EventsEmit(a.ctx, "boss:status", evt)
+								runtime.EventsEmit(a.ctx, "platform:status", evt)
 							case "auth":
 								runtime.EventsEmit(a.ctx, "boss:auth", evt)
+								runtime.EventsEmit(a.ctx, "platform:auth", evt)
 							case "done":
 								runtime.EventsEmit(a.ctx, "boss:done", evt)
+								runtime.EventsEmit(a.ctx, "platform:done", evt)
 							case "error":
 								runtime.EventsEmit(a.ctx, "boss:error", evt)
+								runtime.EventsEmit(a.ctx, "platform:error", evt)
 							}
 						}
 					}
@@ -1056,26 +1069,21 @@ func (a *App) TestBossLogin() bool {
 		}
 	}
 
-	runtime.EventsEmit(a.ctx, "boss:status", map[string]interface{}{
-		"type":    "status",
-		"message": "⚠️ 正在启动内置鉴权测试通道...",
+	runtime.EventsEmit(a.ctx, "platform:error", map[string]interface{}{
+		"type":    "error",
+		"message": "未找到多平台登录驱动 (scripts/multi_platform_agent.js)",
 	})
-	time.Sleep(500 * time.Millisecond)
-	runtime.EventsEmit(a.ctx, "boss:done", map[string]interface{}{
-		"type":    "done",
-		"message": "✅ BOSS 登录通道测试正常！",
-	})
-	return true
+	return false
 }
 
 // ExecuteBossCandidateAction 执行对候选人的自动化操作（打招呼/索要简历/交换微信/标记不合适）
 func (a *App) ExecuteBossCandidateAction(actionType string, candidateName string, message string) map[string]interface{} {
 	scriptCandidates := []string{
+		filepath.Join("scripts", "multi_platform_agent.js"),
 		filepath.Join("scripts", "boss_agent.js"),
-		filepath.Join(filepath.Dir(os.Args[0]), "scripts", "boss_agent.js"),
-		filepath.Join(filepath.Dir(os.Args[0]), "..", "scripts", "boss_agent.js"),
-		filepath.Join(filepath.Dir(os.Args[0]), "..", "..", "scripts", "boss_agent.js"),
-		"D:\\HR\\TalentLens-main\\scripts\\boss_agent.js",
+		filepath.Join(filepath.Dir(os.Args[0]), "scripts", "multi_platform_agent.js"),
+		filepath.Join(filepath.Dir(os.Args[0]), "..", "scripts", "multi_platform_agent.js"),
+		"D:\\HR\\TalentLens-main\\scripts\\multi_platform_agent.js",
 	}
 
 	var scriptPath string
@@ -1086,7 +1094,7 @@ func (a *App) ExecuteBossCandidateAction(actionType string, candidateName string
 		}
 	}
 
-	dataDir := filepath.Join(a.getDataDir(), "boss_candidates")
+	dataDir := filepath.Join(a.getDataDir(), "candidates_multi")
 	_ = os.MkdirAll(dataDir, 0755)
 
 	actionLabels := map[string]string{
@@ -1134,8 +1142,13 @@ func (a *App) ExecuteBossCandidateAction(actionType string, candidateName string
 	}
 }
 
-// StartBossSearch 启动 BOSS 直聘真实直连搜寻任务
+// StartBossSearch 兼容旧调用：默认启动 BOSS 直聘搜寻
 func (a *App) StartBossSearch(projectID string, keyword string, city string, expYears int, eduLevel string, count int) bool {
+	return a.StartMultiPlatformSearch(projectID, keyword, city, expYears, eduLevel, count, []string{"boss"})
+}
+
+// StartMultiPlatformSearch 启动 4合1 多平台（BOSS、智联、前程无忧、猎聘）矩阵式聚合搜寻任务
+func (a *App) StartMultiPlatformSearch(projectID string, keyword string, city string, expYears int, eduLevel string, count int, platforms []string) bool {
 	a.bossMutex.Lock()
 	if a.bossCmd != nil && a.bossCmd.Process != nil {
 		_ = a.bossCmd.Process.Kill()
@@ -1143,6 +1156,9 @@ func (a *App) StartBossSearch(projectID string, keyword string, city string, exp
 	}
 	a.bossMutex.Unlock()
 
+	if len(platforms) == 0 {
+		platforms = []string{"boss"}
+	}
 	if count <= 0 {
 		count = 10
 	}
@@ -1158,16 +1174,16 @@ func (a *App) StartBossSearch(projectID string, keyword string, city string, exp
 		}
 	}
 
-	dataDir := filepath.Join(a.getDataDir(), "boss_candidates")
+	dataDir := filepath.Join(a.getDataDir(), "candidates_multi")
 	_ = os.MkdirAll(dataDir, 0755)
 
 	// 探测脚本路径
 	scriptCandidates := []string{
-		filepath.Join("scripts", "boss_agent.js"),
-		filepath.Join(filepath.Dir(os.Args[0]), "scripts", "boss_agent.js"),
-		filepath.Join(filepath.Dir(os.Args[0]), "..", "scripts", "boss_agent.js"),
-		filepath.Join(filepath.Dir(os.Args[0]), "..", "..", "scripts", "boss_agent.js"),
-		"D:\\HR\\TalentLens-main\\scripts\\boss_agent.js",
+		filepath.Join("scripts", "multi_platform_agent.js"),
+		filepath.Join(filepath.Dir(os.Args[0]), "scripts", "multi_platform_agent.js"),
+		filepath.Join(filepath.Dir(os.Args[0]), "..", "scripts", "multi_platform_agent.js"),
+		filepath.Join(filepath.Dir(os.Args[0]), "..", "..", "scripts", "multi_platform_agent.js"),
+		"D:\\HR\\TalentLens-main\\scripts\\multi_platform_agent.js",
 	}
 
 	var scriptPath string
@@ -1181,7 +1197,11 @@ func (a *App) StartBossSearch(projectID string, keyword string, city string, exp
 	if scriptPath == "" {
 		runtime.EventsEmit(a.ctx, "boss:error", map[string]interface{}{
 			"type":    "error",
-			"message": "❌ 未找到 BOSS 直连引擎脚本 (scripts/boss_agent.js)，请检查安装目录完整性。",
+			"message": "❌ 未找到多平台直连引擎脚本 (scripts/multi_platform_agent.js)，请检查安装目录完整性。",
+		})
+		runtime.EventsEmit(a.ctx, "platform:error", map[string]interface{}{
+			"type":    "error",
+			"message": "❌ 未找到多平台直连引擎脚本 (scripts/multi_platform_agent.js)，请检查安装目录完整性。",
 		})
 		return false
 	}
@@ -1192,6 +1212,7 @@ func (a *App) StartBossSearch(projectID string, keyword string, city string, exp
 	}
 
 	cmd := exec.Command("node", scriptPath,
+		"--platforms", strings.Join(platforms, ","),
 		"--keyword", keyword,
 		"--city", city,
 		"--exp", expStr,
@@ -1238,8 +1259,10 @@ func (a *App) StartBossSearch(projectID string, keyword string, city string, exp
 			switch evtType {
 			case "status":
 				runtime.EventsEmit(a.ctx, "boss:status", evt)
+				runtime.EventsEmit(a.ctx, "platform:status", evt)
 			case "auth":
 				runtime.EventsEmit(a.ctx, "boss:auth", evt)
+				runtime.EventsEmit(a.ctx, "platform:auth", evt)
 			case "candidate":
 				if candObj, ok := evt["candidate"].(map[string]interface{}); ok {
 					candID, _ := candObj["id"].(string)
@@ -1268,14 +1291,17 @@ func (a *App) StartBossSearch(projectID string, keyword string, city string, exp
 
 					runtime.EventsEmit(a.ctx, "resume:dropped", r)
 					runtime.EventsEmit(a.ctx, "boss:candidate_found", evt)
+					runtime.EventsEmit(a.ctx, "platform:candidate_found", evt)
 				}
 			case "done":
 				runtime.EventsEmit(a.ctx, "boss:done", evt)
+				runtime.EventsEmit(a.ctx, "platform:done", evt)
 				if a.config.AI.APIKey != "" {
 					go a.StartProjectAnalysis(projectID, &a.config.AI)
 				}
 			case "error":
 				runtime.EventsEmit(a.ctx, "boss:error", evt)
+				runtime.EventsEmit(a.ctx, "platform:error", evt)
 			}
 		}
 
