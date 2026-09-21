@@ -154,6 +154,7 @@ const fileTypeText = computed(() => {
   if (ext === '.pdf') return t('file.pdf')
   if (ext === '.docx' || ext === '.doc') return t('file.word')
   if (['.jpg', '.jpeg', '.png', '.bmp', '.gif', '.webp'].includes(ext)) return t('file.image')
+  if (ext === '.txt') return '微简历 / TXT'
   return t('file.unknown')
 })
 

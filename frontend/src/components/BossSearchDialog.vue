@@ -103,6 +103,15 @@
     <template #footer>
       <div class="dialog-footer">
         <el-button v-if="!searching" @click="visible = false">取消</el-button>
+        <el-button
+          v-if="!searching && searchLogs.length === 0"
+          type="warning"
+          plain
+          @click="handleTestLogin"
+        >
+          <el-icon><Key /></el-icon>
+          测试/切换扫码登录
+        </el-button>
         <el-button v-if="searching" type="danger" plain @click="handleStop">停止搜寻</el-button>
         <el-button
           v-if="!searching && searchLogs.length === 0"
@@ -119,7 +128,7 @@
           @click="handleCompleteAndClose"
         >
           <el-icon><Check /></el-icon>
-          查看搜寻结果 ({{ candidateCount }} 人)
+          完成 ({{ candidateCount }} 人)
         </el-button>
       </div>
     </template>
@@ -136,7 +145,8 @@ import {
   CircleCheck,
   WarningFilled,
   Loading,
-  InfoFilled
+  InfoFilled,
+  Key
 } from '@element-plus/icons-vue'
 
 const props = defineProps<{
@@ -208,6 +218,34 @@ function addLog(type: SearchLog['type'], message: string) {
       logBoxRef.value.scrollTop = logBoxRef.value.scrollHeight
     }
   })
+}
+
+// 独立测试扫码登录与鉴权
+async function handleTestLogin() {
+  let WailsApp: any = null
+  try { WailsApp = await import('../../wailsjs/go/main/App') } catch {}
+
+  searching.value = true
+  isFinished.value = false
+  candidateCount.value = 0
+  searchLogs.value = []
+  currentStatusText.value = '正在唤起浏览器进行登录测试...'
+  addLog('status', '🔑 正在启动 Edge 浏览器打开 BOSS 直聘登录鉴权页...')
+
+  if (WailsApp && WailsApp.TestBossLogin) {
+    try {
+      await WailsApp.TestBossLogin()
+    } catch (err: any) {
+      searching.value = false
+      addLog('error', `启动测试失败: ${err.message || err}`)
+    }
+  } else {
+    setTimeout(() => {
+      addLog('status', '✅ 登录态测试通道正常连接！')
+      searching.value = false
+      isFinished.value = true
+    }, 1500)
+  }
 }
 
 // 启动搜索

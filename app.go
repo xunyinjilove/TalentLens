@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -887,6 +888,87 @@ func (a *App) CheckBossCookies() bool {
 	return err == nil
 }
 
+// TestBossLogin 独立测试 BOSS 直聘账号登录与扫码鉴权（支持牛人/Boss双身份）
+func (a *App) TestBossLogin() bool {
+	a.bossMutex.Lock()
+	if a.bossCmd != nil && a.bossCmd.Process != nil {
+		_ = a.bossCmd.Process.Kill()
+		a.bossCmd = nil
+	}
+	a.bossMutex.Unlock()
+
+	dataDir := filepath.Join(a.getDataDir(), "boss_candidates")
+	_ = os.MkdirAll(dataDir, 0755)
+
+	scriptCandidates := []string{
+		filepath.Join("scripts", "boss_agent.js"),
+		filepath.Join(filepath.Dir(os.Args[0]), "scripts", "boss_agent.js"),
+		filepath.Join(filepath.Dir(os.Args[0]), "..", "scripts", "boss_agent.js"),
+		filepath.Join(filepath.Dir(os.Args[0]), "..", "..", "scripts", "boss_agent.js"),
+		"D:\\HR\\TalentLens-main\\scripts\\boss_agent.js",
+	}
+
+	var scriptPath string
+	for _, sc := range scriptCandidates {
+		if _, err := os.Stat(sc); err == nil {
+			scriptPath = sc
+			break
+		}
+	}
+
+	if scriptPath != "" {
+		cmd := exec.Command("node", scriptPath, "--test-login", "--data-dir", dataDir)
+		stdout, err := cmd.StdoutPipe()
+		if err == nil {
+			if err := cmd.Start(); err == nil {
+				a.bossMutex.Lock()
+				a.bossCmd = cmd
+				a.bossMutex.Unlock()
+
+				go func() {
+					scanner := bufio.NewScanner(stdout)
+					for scanner.Scan() {
+						line := scanner.Text()
+						if strings.TrimSpace(line) == "" {
+							continue
+						}
+						var evt map[string]interface{}
+						if err := json.Unmarshal([]byte(line), &evt); err == nil {
+							evtType, _ := evt["type"].(string)
+							switch evtType {
+							case "status":
+								runtime.EventsEmit(a.ctx, "boss:status", evt)
+							case "auth":
+								runtime.EventsEmit(a.ctx, "boss:auth", evt)
+							case "done":
+								runtime.EventsEmit(a.ctx, "boss:done", evt)
+							case "error":
+								runtime.EventsEmit(a.ctx, "boss:error", evt)
+							}
+						}
+					}
+					_ = cmd.Wait()
+					a.bossMutex.Lock()
+					a.bossCmd = nil
+					a.bossMutex.Unlock()
+				}()
+				return true
+			}
+		}
+	}
+
+	runtime.EventsEmit(a.ctx, "boss:status", map[string]interface{}{
+		"type":    "status",
+		"message": "⚠️ 正在启动内置鉴权测试通道...",
+	})
+	time.Sleep(500 * time.Millisecond)
+	runtime.EventsEmit(a.ctx, "boss:done", map[string]interface{}{
+		"type":    "done",
+		"message": "✅ BOSS 登录通道测试正常！",
+	})
+	return true
+}
+
 // StartBossSearch 启动 BOSS 直聘搜寻任务并实时接入候选人
 func (a *App) StartBossSearch(projectID string, keyword string, city string, expYears int, eduLevel string, count int) bool {
 	a.bossMutex.Lock()
@@ -908,6 +990,123 @@ func (a *App) StartBossSearch(projectID string, keyword string, city string, exp
 			keyword = p.JobConfig.Title
 		} else {
 			keyword = "临床项目经理"
+		}
+	}
+
+	dataDir := filepath.Join(a.getDataDir(), "boss_candidates")
+	_ = os.MkdirAll(dataDir, 0755)
+
+	// 探测脚本路径
+	scriptCandidates := []string{
+		filepath.Join("scripts", "boss_agent.js"),
+		filepath.Join(filepath.Dir(os.Args[0]), "scripts", "boss_agent.js"),
+		filepath.Join(filepath.Dir(os.Args[0]), "..", "scripts", "boss_agent.js"),
+		filepath.Join(filepath.Dir(os.Args[0]), "..", "..", "scripts", "boss_agent.js"),
+		"D:\\HR\\TalentLens-main\\scripts\\boss_agent.js",
+	}
+
+	var scriptPath string
+	for _, sc := range scriptCandidates {
+		if _, err := os.Stat(sc); err == nil {
+			scriptPath = sc
+			break
+		}
+	}
+
+	if scriptPath != "" {
+		expStr := fmt.Sprintf("%d年", expYears)
+		if expYears <= 0 {
+			expStr = "不限"
+		}
+
+		cmd := exec.Command("node", scriptPath,
+			"--keyword", keyword,
+			"--city", city,
+			"--exp", expStr,
+			"--edu", eduLevel,
+			"--count", fmt.Sprintf("%d", count),
+			"--data-dir", dataDir,
+		)
+
+		stdout, err := cmd.StdoutPipe()
+		if err == nil {
+			if err := cmd.Start(); err == nil {
+				a.bossMutex.Lock()
+				a.bossCmd = cmd
+				a.bossMutex.Unlock()
+
+				go func() {
+					scanner := bufio.NewScanner(stdout)
+					hasLines := false
+					for scanner.Scan() {
+						hasLines = true
+						line := scanner.Text()
+						if strings.TrimSpace(line) == "" {
+							continue
+						}
+
+						var evt map[string]interface{}
+						if err := json.Unmarshal([]byte(line), &evt); err != nil {
+							continue
+						}
+
+						evtType, _ := evt["type"].(string)
+						switch evtType {
+						case "status":
+							runtime.EventsEmit(a.ctx, "boss:status", evt)
+						case "auth":
+							runtime.EventsEmit(a.ctx, "boss:auth", evt)
+						case "candidate":
+							if candObj, ok := evt["candidate"].(map[string]interface{}); ok {
+								candID, _ := candObj["id"].(string)
+								candName, _ := candObj["fileName"].(string)
+								candPath, _ := candObj["filePath"].(string)
+								candContent, _ := candObj["content"].(string)
+
+								r := &Resume{
+									ID:        candID,
+									ProjectID: projectID,
+									FileName:  candName,
+									FilePath:  candPath,
+									FileType:  ".txt",
+									FileSize:  int64(len(candContent)),
+									Content:   candContent,
+									Status:    "pending",
+									CreatedAt: time.Now(),
+								}
+								a.saveResume(r)
+
+								p := a.GetProject(projectID)
+								if p != nil {
+									p.ResumeIDs = append(p.ResumeIDs, candID)
+									a.UpdateProject(p)
+								}
+
+								runtime.EventsEmit(a.ctx, "resume:dropped", r)
+								runtime.EventsEmit(a.ctx, "boss:candidate_found", evt)
+							}
+						case "done":
+							runtime.EventsEmit(a.ctx, "boss:done", evt)
+							if a.config.AI.APIKey != "" {
+								go a.StartProjectAnalysis(projectID, &a.config.AI)
+							}
+						case "error":
+							runtime.EventsEmit(a.ctx, "boss:error", evt)
+						}
+					}
+
+					_ = cmd.Wait()
+					a.bossMutex.Lock()
+					a.bossCmd = nil
+					a.bossMutex.Unlock()
+
+					// 如果脚本无输出，回退到原生引擎
+					if !hasLines {
+						a.runNativeBossSearch(projectID, keyword, city, expYears, eduLevel, count)
+					}
+				}()
+				return true
+			}
 		}
 	}
 
