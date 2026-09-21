@@ -75,20 +75,34 @@ type Project struct {
 	UpdatedAt  time.Time `json:"updated_at"`
 }
 
+// ConsistencyResult 双源真实度与一致性核验结果
+type ConsistencyResult struct {
+	Status  string   `json:"status"`  // "consistent" | "warning" | "conflict"
+	Summary string   `json:"summary"` // 一致性核验总结
+	Details []string `json:"details"` // 具体核验详情
+}
+
 // Resume 简历结构
 type Resume struct {
-	ID        string          `json:"id"`
-	ProjectID string          `json:"project_id"`
-	FileName  string          `json:"file_name"`
-	FilePath  string          `json:"file_path"`
-	FileType  string          `json:"file_type"`
-	FileSize  int64           `json:"file_size"`
-	Content   string          `json:"content"`
-	Status       string          `json:"status"`
-	Score        int             `json:"score"`
-	ErrorMessage string          `json:"error_message,omitempty"`
-	Analysis     *AnalysisResult `json:"analysis,omitempty"`
-	CreatedAt    time.Time       `json:"created_at"`
+	ID                 string             `json:"id"`
+	ProjectID          string             `json:"project_id"`
+	FileName           string             `json:"file_name"`
+	FilePath           string             `json:"file_path"`
+	FileType           string             `json:"file_type"`
+	FileSize           int64              `json:"file_size"`
+	Content            string             `json:"content"`
+	Status             string             `json:"status"`
+	Score              int                `json:"score"`
+	InitialScore       int                `json:"initial_score,omitempty"`
+	FinalScore         int                `json:"final_score,omitempty"`
+	HasAttachment      bool               `json:"has_attachment,omitempty"`
+	AttachmentPath     string             `json:"attachment_path,omitempty"`
+	AttachmentFileName string             `json:"attachment_file_name,omitempty"`
+	AttachmentContent  string             `json:"attachment_content,omitempty"`
+	IsMergedAnalysis   bool               `json:"is_merged_analysis,omitempty"`
+	ErrorMessage       string             `json:"error_message,omitempty"`
+	Analysis           *AnalysisResult    `json:"analysis,omitempty"`
+	CreatedAt          time.Time          `json:"created_at"`
 }
 
 // AnalysisResult AI分析结果
@@ -98,6 +112,11 @@ type AnalysisResult struct {
 	ExperienceMatch float64 `json:"experience_match"`
 	EducationMatch  float64 `json:"education_match"`
 	Recommendation  string `json:"recommendation"`
+
+	// 结合分析演进与双源核验
+	ConsistencyCheck  *ConsistencyResult `json:"consistency_check,omitempty"`
+	ScoreDiff         int                `json:"score_diff,omitempty"`
+	ScoreChangeReason string             `json:"score_change_reason,omitempty"`
 
 	// 详细分析维度
 	SkillDetail      string `json:"skill_detail"`
@@ -599,6 +618,86 @@ func (a *App) GetFreshResumeContent(id string) (string, error) {
 
 	// 回退到已有内容
 	return resume.Content, nil
+}
+
+// SelectAndAttachResumeFile 弹出系统文件选择框为候选人选择并绑定 PDF/Word 完整附件简历
+func (a *App) SelectAndAttachResumeFile(resumeID string) (string, error) {
+	selection, err := runtime.OpenFileDialog(a.ctx, runtime.OpenDialogOptions{
+		Title: "选择该候选人的完整附件简历 (PDF/Word/TXT)",
+		Filters: []runtime.FileFilter{
+			{
+				DisplayName: "简历文件 (*.pdf;*.docx;*.doc;*.txt)",
+				Pattern:     "*.pdf;*.docx;*.doc;*.txt",
+			},
+		},
+	})
+	if err != nil {
+		return "", err
+	}
+	if selection == "" {
+		return "", nil
+	}
+
+	_, err = a.AttachResumeFile(resumeID, selection)
+	if err != nil {
+		return "", err
+	}
+	return selection, nil
+}
+
+// AttachResumeFile 绑定附件简历文件并自动触发双源结合深度终审
+func (a *App) AttachResumeFile(resumeID string, attachmentPath string) (*AnalysisResult, error) {
+	path := filepath.Join(a.getDataDir(), "resumes", resumeID+".json")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("候选人档案不存在")
+	}
+
+	var resume Resume
+	if err := json.Unmarshal(data, &resume); err != nil {
+		return nil, fmt.Errorf("档案解析失败")
+	}
+
+	// 提取附件文件文本
+	attachmentText := a.extractText(attachmentPath)
+	if strings.TrimSpace(attachmentText) == "" {
+		return nil, fmt.Errorf("未能从附件文件中提取到有效文本")
+	}
+
+	// 保存初筛分数与附件状态
+	if resume.InitialScore == 0 && resume.Score > 0 {
+		resume.InitialScore = resume.Score
+	}
+	resume.HasAttachment = true
+	resume.AttachmentPath = attachmentPath
+	resume.AttachmentFileName = filepath.Base(attachmentPath)
+	resume.AttachmentContent = attachmentText
+	resume.IsMergedAnalysis = true
+	resume.Status = "pending"
+	a.saveResume(&resume)
+
+	runtime.EventsEmit(a.ctx, "resume:updated", &resume)
+
+	// 获取关联项目的岗位配置
+	var jobCfg *JobConfig
+	if resume.ProjectID != "" {
+		p := a.GetProject(resume.ProjectID)
+		if p != nil {
+			jobCfg = &p.JobConfig
+		}
+	}
+	if jobCfg == nil {
+		jobCfg = &a.config.Job
+	}
+
+	// 立即调用 AI 进行结合深度终审
+	if a.config.AI.APIKey != "" {
+		go func() {
+			_, _ = a.AnalyzeResume(resumeID, &a.config.AI, jobCfg)
+		}()
+	}
+
+	return nil, nil
 }
 
 // ============================================
@@ -1667,7 +1766,16 @@ func (a *App) AnalyzeResume(resumeID string, cfg *AIConfig, jobCfg *JobConfig) (
 	})
 	resume.Status = "done"
 	resume.ErrorMessage = ""
-	resume.Score = int(math.Round(analysis.OverallScore))
+	scoreInt := int(math.Round(analysis.OverallScore))
+	if resume.IsMergedAnalysis {
+		resume.FinalScore = scoreInt
+		if resume.InitialScore > 0 && analysis.ScoreDiff == 0 {
+			analysis.ScoreDiff = resume.FinalScore - resume.InitialScore
+		}
+	} else {
+		resume.InitialScore = scoreInt
+	}
+	resume.Score = scoreInt
 	resume.Analysis = analysis
 	a.saveResume(&resume)
 
@@ -1730,6 +1838,27 @@ func (a *App) buildAnalysisPrompt(resume *Resume, jobCfg *JobConfig) string {
 		"你的评分必须严谨且前后一致，遵循统一的评分标准。\n" +
 		"你的分析要全面、专业、有深度，就像撰写一份正式的候选人评估报告。"
 
+	resumeBlock := ""
+	mergedInstruction := ""
+	if resume.IsMergedAnalysis && resume.AttachmentContent != "" {
+		resumeBlock = fmt.Sprintf(
+			"### 材料一：BOSS 直聘在线微简历与沟通背景记录\n```\n%s\n```\n\n"+
+				"### 材料二：候选人后续提交的完整附件简历（PDF/Word 全文）\n```\n%s\n```",
+			a.truncateContent(resume.Content, 5000),
+			a.truncateContent(resume.AttachmentContent, 10000),
+		)
+		mergedInstruction = `
+### 结合分析（双源交叉核验与深度终审）特别要求：
+1. 综合分析材料一（微简历）与材料二（完整附件简历）：
+   - 重点进行「真实度与一致性核验 (consistency_check)」：核查微简历中宣称的岗位、年限、核心项目与附件简历中的具体时间线、职责和业绩是否吻合，是否存在虚报、断层或冲突。
+   - consistency_check 包含：status ("consistent" | "warning" | "conflict")，summary (一两句话核验总结)，details (具体核验条目列表)。
+2. 结合两份材料输出最终精确评分 (overall_score, skill_match, experience_match, education_match)，并在 score_change_reason 中简述终审分相比初筛分的变化原因。
+3. interview_qa 生成 5 道深度复试题（针对附件简历中披露的具体详尽项目背景提问）。
+`
+	} else {
+		resumeBlock = fmt.Sprintf("文件名: %s\n```\n%s\n```", resume.FileName, a.truncateContent(resume.Content, 10000))
+	}
+
 	userPrompt := fmt.Sprintf(
 		"## 招聘岗位信息\n"+
 			"- 岗位名称: %s\n"+
@@ -1738,11 +1867,11 @@ func (a *App) buildAnalysisPrompt(resume *Resume, jobCfg *JobConfig) string {
 			"- 核心必备技能: %s\n"+
 			"%s"+
 			"- 补充要求:\n- %s\n\n"+
-			"## 候选人简历\n"+
-			"文件名: %s\n"+
-			"```\n%s\n```\n\n"+
+			"## 候选人简历材料\n"+
+			"%s\n\n"+
+			"%s\n\n"+
 			"## 分析任务\n\n"+
-			"请对这份简历进行全方位、深度的专业分析。\n\n"+
+			"请对候选人简历进行全方位、深度的专业分析。\n\n"+
 			"### 评分标准（严格执行）\n\n"+
 			"**技能匹配度 (skill_match)**:\n"+
 			"- 90-100: 完全掌握所有核心技能，且有相关高级技能加分\n"+
@@ -1777,6 +1906,12 @@ func (a *App) buildAnalysisPrompt(resume *Resume, jobCfg *JobConfig) string {
 			"  \"skill_match\": 82,\n"+
 			"  \"experience_match\": 75,\n"+
 			"  \"education_match\": 80,\n"+
+			"  \"consistency_check\": {\n"+
+			"    \"status\": \"consistent\",\n"+
+			"    \"summary\": \"双源时间线与经历描述吻合，附件详版对微简历项目进行了有效展开佐证\",\n"+
+			"    \"details\": [\"经历时间线无冲突\", \"技能宣称与项目事实相符\"]\n"+
+			"  },\n"+
+			"  \"score_change_reason\": \"附件提供了更丰富的实际量化成果与项目细节，提升了技能匹配确信度\",\n"+
 			"  \"skill_detail\": \"逐项说明每个核心技能的掌握情况，如：Go(精通，有3年生产经验)、MySQL(熟练，简历中有分库分表经验)、Redis(了解，未提及具体使用场景)\",\n"+
 			"  \"experience_detail\": \"详细分析工作经历与岗位的匹配程度，包括行业相关度、项目复杂度、职责范围等\",\n"+
 			"  \"education_detail\": \"分析学历背景、专业对口程度、是否有相关认证或培训\",\n"+
@@ -1838,8 +1973,8 @@ func (a *App) buildAnalysisPrompt(resume *Resume, jobCfg *JobConfig) string {
 		skills,
 		jobDescBlock,
 		requirements,
-		resume.FileName,
-		a.truncateContent(resume.Content, 10000),
+		resumeBlock,
+		mergedInstruction,
 	)
 
 	// 使用 system + user 消息格式

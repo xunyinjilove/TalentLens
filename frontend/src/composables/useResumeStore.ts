@@ -38,6 +38,12 @@ export interface Resume {
   content?: string
   status: 'pending' | 'analyzing' | 'done' | 'error'
   score?: number
+  initial_score?: number
+  final_score?: number
+  has_attachment?: boolean
+  attachment_file_name?: string
+  attachment_path?: string
+  is_merged_analysis?: boolean
   errorMessage?: string
   analysis?: {
     overallScore: number
@@ -58,6 +64,13 @@ export interface Resume {
     recommendation: string
     interviewSuggestions: string[]
     interviewQA?: Array<{ category: string; question: string; reference_answer: string }>
+    consistency_check?: {
+      status: 'consistent' | 'warning' | 'conflict'
+      summary: string
+      details: string[]
+    }
+    score_diff?: number
+    score_change_reason?: string
   }
   createdAt: string
   analyzedAt?: string

@@ -122,13 +122,27 @@
           <div v-show="rightTab === 'detail'" class="preview-content">
             <div v-if="resumeStore.selectedResume" class="resume-detail">
               <!-- 基本信息 -->
+              <!-- 基本信息 -->
               <div class="detail-header">
                 <el-icon class="file-icon"><Document /></el-icon>
                 <div class="file-info">
-                  <h3>{{ resumeStore.selectedResume.fileName }}</h3>
+                  <div class="file-title-row">
+                    <h3>{{ resumeStore.selectedResume.fileName }}</h3>
+                    <span v-if="resumeStore.selectedResume.is_merged_analysis || resumeStore.selectedResume.has_attachment" class="header-merged-tag">
+                      ⭐ 深度终审版
+                    </span>
+                  </div>
                   <span class="file-meta">
                     {{ formatFileSize(resumeStore.selectedResume.fileSize) }} · {{ getFileTypeLabel(resumeStore.selectedResume.fileType) }}
+                    <span v-if="resumeStore.selectedResume.attachment_file_name" class="attach-meta">
+                      · 📎 已绑定附件: {{ resumeStore.selectedResume.attachment_file_name }}
+                    </span>
                   </span>
+                </div>
+                <div class="header-attach-btn-wrap">
+                  <button class="attach-upload-btn" @click="handleAttachResume(resumeStore.selectedResume.id)" title="选择或更新该候选人的完整 PDF/Word 简历并执行双源深度终审">
+                    <el-icon><Paperclip /></el-icon> {{ resumeStore.selectedResume.has_attachment ? '更新完整附件' : '📎 补充完整附件简历' }}
+                  </button>
                 </div>
               </div>
 
@@ -141,6 +155,45 @@
                     <span v-if="resumeStore.selectedResume.analysis.currentRole">{{ resumeStore.selectedResume.analysis.currentRole }}</span>
                     <span v-if="resumeStore.selectedResume.analysis.workYears">{{ resumeStore.selectedResume.analysis.workYears }}经验</span>
                     <span v-if="resumeStore.selectedResume.analysis.education">{{ resumeStore.selectedResume.analysis.education }}</span>
+                  </div>
+                </div>
+
+                <!-- 双源结合分析：初筛 ➔ 终审演进与一致性核验看板 -->
+                <div v-if="resumeStore.selectedResume.is_merged_analysis || resumeStore.selectedResume.analysis?.consistency_check" class="merged-evolution-card">
+                  <div class="evo-header">
+                    <div class="evo-title">
+                      <el-icon><Compass /></el-icon>
+                      <span>初筛 ➔ 终审演进看板</span>
+                    </div>
+                    <div class="evo-scores" v-if="resumeStore.selectedResume.initial_score">
+                      <span class="evo-init-score">初筛: {{ resumeStore.selectedResume.initial_score }}分</span>
+                      <span class="evo-arrow">➔</span>
+                      <span class="evo-final-score">终审: {{ resumeStore.selectedResume.score }}分</span>
+                      <span class="evo-diff" :class="(resumeStore.selectedResume.score - resumeStore.selectedResume.initial_score) >= 0 ? 'up' : 'down'">
+                        {{ (resumeStore.selectedResume.score - resumeStore.selectedResume.initial_score) >= 0 ? '+' : '' }}{{ resumeStore.selectedResume.score - resumeStore.selectedResume.initial_score }}分
+                      </span>
+                    </div>
+                  </div>
+
+                  <!-- 真实度与一致性核验 (Reality Check) -->
+                  <div v-if="resumeStore.selectedResume.analysis?.consistency_check" class="consistency-box" :class="resumeStore.selectedResume.analysis.consistency_check.status">
+                    <div class="consistency-head">
+                      <span class="consistency-status-tag" :class="resumeStore.selectedResume.analysis.consistency_check.status">
+                        {{ getConsistencyStatusText(resumeStore.selectedResume.analysis.consistency_check.status) }}
+                      </span>
+                      <span class="consistency-summary">{{ resumeStore.selectedResume.analysis.consistency_check.summary }}</span>
+                    </div>
+                    <ul v-if="resumeStore.selectedResume.analysis.consistency_check.details && resumeStore.selectedResume.analysis.consistency_check.details.length > 0" class="consistency-details">
+                      <li v-for="(detail, dIdx) in resumeStore.selectedResume.analysis.consistency_check.details" :key="dIdx">
+                        <el-icon><Check /></el-icon> {{ detail }}
+                      </li>
+                    </ul>
+                  </div>
+
+                  <!-- 终审评分依据说明 -->
+                  <div v-if="resumeStore.selectedResume.analysis?.score_change_reason" class="score-reason-box">
+                    <span class="reason-label">💡 终审评分依据：</span>
+                    <span class="reason-text">{{ resumeStore.selectedResume.analysis.score_change_reason }}</span>
                   </div>
                 </div>
 
@@ -162,6 +215,9 @@
                     </button>
                     <button class="boss-act-btn unfit" @click="handleExecuteBossAction('mark_unfit')">
                       <el-icon><CloseBold /></el-icon> 标为不合适
+                    </button>
+                    <button class="boss-act-btn attach" @click="handleAttachResume(resumeStore.selectedResume.id)">
+                      <el-icon><Paperclip /></el-icon> 补充附件结合分析
                     </button>
                   </div>
                 </div>
@@ -390,7 +446,7 @@ import {
   Setting, Briefcase, Document, VideoPlay, Delete, View,
   CircleCheck, Warning, ChatLineSquare, Clock, Loading, CircleClose,
   RefreshRight, Download, Tickets, QuestionFilled, DocumentCopy, InfoFilled, Search,
-  ChatDotRound, DocumentAdd, Connection, CloseBold
+  ChatDotRound, DocumentAdd, Connection, CloseBold, Paperclip, Compass, Check
 } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import TitleBar from '../components/TitleBar.vue'
@@ -435,6 +491,34 @@ function getCategoryClass(category?: string): string {
   if (category.includes('项目')) return 'cat-project'
   if (category.includes('真实') || category.includes('短板') || category.includes('疑点')) return 'cat-gap'
   return 'cat-tech'
+}
+
+function getConsistencyStatusText(status?: string): string {
+  if (status === 'consistent') return '✅ 双源吻合（真实度高）'
+  if (status === 'warning') return '⚠️ 存在疑点或细节出入'
+  if (status === 'conflict') return '❌ 存在明显冲突'
+  return '🔍 真实度核验完成'
+}
+
+async function handleAttachResume(resumeId: string) {
+  let WailsApp: any = null
+  try { WailsApp = await import('../../wailsjs/go/main/App') } catch {}
+
+  if (WailsApp && WailsApp.SelectAndAttachResumeFile) {
+    try {
+      const selected = await WailsApp.SelectAndAttachResumeFile(resumeId)
+      if (selected) {
+        ElMessage.success(`已绑定完整附件：${selected.split('\\').pop() || selected}，正在启动双源交叉核验与深度终审...`)
+        if (projectId.value) {
+          await resumeStore.loadProjectResumes(projectId.value)
+        }
+      }
+    } catch (err: any) {
+      ElMessage.error(`绑定附件失败: ${err.message || err}`)
+    }
+  } else {
+    ElMessage.info('开发模式：模拟绑定完整附件简历并启动终审')
+  }
 }
 
 async function handleExecuteBossAction(action: 'greet' | 'ask_resume' | 'exchange_wechat' | 'mark_unfit') {
@@ -1547,6 +1631,158 @@ onMounted(async () => {
   }
 }
 
+// 头部终审标签与附件信息
+.file-title-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+
+  .header-merged-tag {
+    font-size: 11px;
+    font-weight: 700;
+    color: #b45309;
+    background: #fef3c7;
+    border: 1px solid #fde68a;
+    padding: 2px 8px;
+    border-radius: 12px;
+  }
+}
+
+.attach-meta {
+  color: #0284c7;
+  font-weight: 500;
+}
+
+.header-attach-btn-wrap {
+  margin-left: auto;
+
+  .attach-upload-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 14px;
+    background: #f0fdf4;
+    border: 1px solid #bbf7d0;
+    color: #16a34a;
+    font-size: 12px;
+    font-weight: 600;
+    border-radius: 6px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+
+    &:hover {
+      background: #dcfce7;
+      border-color: #86efac;
+      transform: translateY(-1px);
+    }
+  }
+}
+
+// 初筛 ➔ 终审阶段演进看板
+.merged-evolution-card {
+  margin: 12px 0 16px 0;
+  padding: 14px 18px;
+  background: linear-gradient(135deg, #fffbeb 0%, #fef3c7 100%);
+  border: 1px solid #fde68a;
+  border-radius: 12px;
+  box-shadow: 0 2px 8px rgba(217, 119, 6, 0.08);
+
+  .evo-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 10px;
+
+    .evo-title {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 13px;
+      font-weight: 700;
+      color: #92400e;
+    }
+
+    .evo-scores {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 13px;
+
+      .evo-init-score { color: #64748b; font-weight: 500; }
+      .evo-arrow { color: #94a3b8; font-size: 11px; }
+      .evo-final-score { color: #b45309; font-weight: 700; }
+      .evo-diff {
+        font-size: 11px;
+        font-weight: 700;
+        padding: 2px 8px;
+        border-radius: 10px;
+        &.up { background: #dcfce7; color: #16a34a; }
+        &.down { background: #fee2e2; color: #dc2626; }
+      }
+    }
+  }
+
+  .consistency-box {
+    padding: 10px 14px;
+    background: #ffffff;
+    border-radius: 8px;
+    border: 1px solid rgba(217, 119, 6, 0.2);
+    margin-bottom: 8px;
+
+    &.consistent { border-left: 4px solid #16a34a; }
+    &.warning { border-left: 4px solid #d97706; }
+    &.conflict { border-left: 4px solid #dc2626; }
+
+    .consistency-head {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 6px;
+
+      .consistency-status-tag {
+        font-size: 11px;
+        font-weight: 700;
+        padding: 2px 8px;
+        border-radius: 4px;
+        &.consistent { background: #dcfce7; color: #15803d; }
+        &.warning { background: #fef3c7; color: #b45309; }
+        &.conflict { background: #fee2e2; color: #b91c1c; }
+      }
+
+      .consistency-summary {
+        font-size: 12px;
+        font-weight: 600;
+        color: #1e293b;
+      }
+    }
+
+    .consistency-details {
+      list-style: none;
+      padding: 0;
+      margin: 4px 0 0 0;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+
+      li {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        font-size: 11px;
+        color: #475569;
+        .el-icon { color: #16a34a; font-size: 12px; }
+      }
+    }
+  }
+
+  .score-reason-box {
+    font-size: 11px;
+    color: #78350f;
+    line-height: 1.5;
+    .reason-label { font-weight: 600; }
+  }
+}
+
 // BOSS 自动化直通操作栏
 .boss-actions-bar {
   margin: 14px 0 18px 0;
@@ -1613,6 +1849,13 @@ onMounted(async () => {
         color: #64748b;
         border-color: #cbd5e1;
         &:hover { background: #fee2e2; color: #dc2626; border-color: #fca5a5; transform: translateY(-1px); }
+      }
+
+      &.attach {
+        background: #f0fdf4;
+        color: #15803d;
+        border-color: #86efac;
+        &:hover { background: #dcfce7; border-color: #4ade80; transform: translateY(-1px); }
       }
     }
   }

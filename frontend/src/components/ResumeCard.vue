@@ -17,6 +17,9 @@
       <div class="card-header">
         <el-icon class="file-icon"><Document /></el-icon>
         <span class="file-name">{{ resume.fileName }}</span>
+        <span v-if="(resume as any).is_merged_analysis || (resume as any).has_attachment" class="merged-badge" title="已完成微简历与完整附件结合终审">
+          ⭐ 终审
+        </span>
       </div>
 
       <div class="card-body">
@@ -380,6 +383,17 @@ $radius-md: 10px;
       text-overflow: ellipsis;
       white-space: nowrap;
       letter-spacing: 0.2px;
+    }
+
+    .merged-badge {
+      font-size: 10px;
+      font-weight: 600;
+      color: #b45309;
+      background: #fef3c7;
+      border: 1px solid #fde68a;
+      padding: 1px 6px;
+      border-radius: 10px;
+      flex-shrink: 0;
     }
   }
 
