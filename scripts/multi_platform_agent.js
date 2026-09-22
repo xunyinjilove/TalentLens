@@ -63,7 +63,7 @@ function findBrowserExecutable() {
   return null;
 }
 
-// 平台配置定义 (修正真实有效后台主页与登录检测)
+// 平台配置定义
 const PLATFORM_CONFIGS = {
   boss: {
     name: 'BOSS直聘',
@@ -71,11 +71,7 @@ const PLATFORM_CONFIGS = {
     icon: '🏢',
     loginUrl: 'https://www.zhipin.com/web/user/',
     homeUrl: 'https://www.zhipin.com/web/boss/recommend',
-    profileFolder: 'boss_isolated_profile',
-    isLoggedIn: (url, docText) => {
-      if (url.includes('/login') || url.includes('/web/user')) return false;
-      return url.includes('/boss/') || url.includes('recommend') || docText.includes('推荐牛人') || docText.includes('职位管理');
-    }
+    profileFolder: 'boss_isolated_profile'
   },
   zhaopin: {
     name: '智联招聘',
@@ -83,11 +79,7 @@ const PLATFORM_CONFIGS = {
     icon: '💼',
     loginUrl: 'https://passport.zhaopin.com/login',
     homeUrl: 'https://ihr.zhaopin.com/',
-    profileFolder: 'zhaopin_isolated_profile',
-    isLoggedIn: (url, docText) => {
-      if (url.includes('passport.zhaopin.com/login')) return false;
-      return url.includes('ihr.zhaopin.com') || url.includes('rd5.zhaopin.com') || docText.includes('简历管理') || docText.includes('人才搜索');
-    }
+    profileFolder: 'zhaopin_isolated_profile'
   },
   '51job': {
     name: '前程无忧',
@@ -95,11 +87,7 @@ const PLATFORM_CONFIGS = {
     icon: '📑',
     loginUrl: 'https://ehire.51job.com/MainLogin.aspx',
     homeUrl: 'https://ehire.51job.com/',
-    profileFolder: '51job_isolated_profile',
-    isLoggedIn: (url, docText) => {
-      if (url.includes('MainLogin.aspx') || url.includes('login')) return false;
-      return url.includes('ehire.51job.com');
-    }
+    profileFolder: '51job_isolated_profile'
   },
   liepin: {
     name: '猎聘网',
@@ -107,11 +95,7 @@ const PLATFORM_CONFIGS = {
     icon: '🎯',
     loginUrl: 'https://lpt.liepin.com/user/login',
     homeUrl: 'https://lpt.liepin.com/',
-    profileFolder: 'liepin_isolated_profile',
-    isLoggedIn: (url, docText) => {
-      if (url.includes('/user/login') || url.includes('login')) return false;
-      return url.includes('lpt.liepin.com') || url.includes('e.liepin.com');
-    }
+    profileFolder: 'liepin_isolated_profile'
   }
 };
 
@@ -127,7 +111,7 @@ function isDuplicateCandidate(name, company, exp) {
   return false;
 }
 
-// 弹性双模浏览器唤起 (Puppeteer 直接启动 + CDP 端口回退，彻底解决 Windows Edge Code 0 崩溃)
+// 弹性双模浏览器唤起 (Puppeteer 直接启动 + CDP 端口回退)
 async function launchPlatformBrowser(cfg, browserPath, profileDir) {
   const commonArgs = [
     `--user-data-dir=${profileDir}`,
@@ -146,7 +130,6 @@ async function launchPlatformBrowser(cfg, browserPath, profileDir) {
     });
     return browser;
   } catch (err1) {
-    // 捕获 Code 0 / 进程冲突，回退到系统独立 CDP 端口调起
     const debugPort = 9333 + Math.floor(Math.random() * 500);
     const child = spawn(browserPath, [
       `--remote-debugging-port=${debugPort}`,
@@ -207,15 +190,77 @@ async function scrapePlatform(platformKey, browserPath, targetCount) {
     }
   } catch (e) {}
 
-  // 登录态检测
+  // 严格 DOM 登录态检测函数
   const checkAuth = async () => {
     try {
       const curUrl = page.url() || '';
-      const docText = await page.evaluate(() => document.body ? document.body.innerText : '');
-      const logged = cfg.isLoggedIn(curUrl, docText);
-      return { logged, curUrl };
+      if (!curUrl || curUrl.includes('about:blank')) {
+        return { logged: false, curUrl, reason: 'blank_url' };
+      }
+
+      const domAuth = await page.evaluate((code) => {
+        const url = window.location.href;
+        const text = document.body ? document.body.innerText : '';
+
+        // 404 检测
+        if (text.includes('当前页面未找到') || text.includes('页面不存在') || text.includes('404') || document.title.includes('404')) {
+          return { logged: false, reason: '404_error' };
+        }
+
+        // 猎聘网
+        if (code === 'liepin') {
+          const isLoginUrl = url.includes('/user/login') || url.includes('/login') || url.includes('/passport');
+          const hasLoginForm = !!document.querySelector('input[name*="user_login"], input[type="password"], .login-container, .login-box, .scan-box, .login-form');
+          if (isLoginUrl || hasLoginForm) {
+            return { logged: false, reason: 'login_form_present' };
+          }
+          const hasUserInfo = !!document.querySelector('.header-user-info, .user-name, .company-name, a[href*="logout"], .nav-user, .lpt-header-user, .user-avatar, .user-nav, .enterprise-info');
+          const hasRecNav = text.includes('职位管理') || text.includes('人才搜索') || text.includes('沟通') || text.includes('候选人');
+          return { logged: hasUserInfo || (url.includes('lpt.liepin.com') && hasRecNav), reason: 'ok' };
+        }
+
+        // BOSS直聘
+        if (code === 'boss') {
+          const isLoginUrl = url.includes('/login') || url.includes('/web/user');
+          const hasLoginForm = !!document.querySelector('input[type="tel"], input[placeholder*="手机号"], .login-box, .login-scan-box, .btn-sure');
+          if (isLoginUrl || hasLoginForm) {
+            return { logged: false, reason: 'login_form_present' };
+          }
+          const hasUserInfo = !!document.querySelector('.user-nav, .nav-figure, .header-user, .user-avatar, .nav-item-user, a[href*="logout"], .nav-user, .user-name');
+          const hasRecNav = url.includes('/boss/') || url.includes('recommend') || text.includes('推荐牛人') || text.includes('职位管理');
+          return { logged: hasUserInfo || hasRecNav, reason: 'ok' };
+        }
+
+        // 智联招聘
+        if (code === 'zhaopin') {
+          const isLoginUrl = url.includes('passport.zhaopin.com') || url.includes('/login');
+          const hasLoginForm = !!document.querySelector('input[type="password"], .login-box, .passport-login, .login-form');
+          if (isLoginUrl || hasLoginForm) {
+            return { logged: false, reason: 'login_form_present' };
+          }
+          const hasUserInfo = !!document.querySelector('.user-info, .header-user, .c-user-name, a[href*="logout"], .user-avatar, .header-user-name');
+          const hasRecNav = (url.includes('ihr.zhaopin.com') || url.includes('rd5.zhaopin.com')) && (text.includes('简历管理') || text.includes('人才搜索') || text.includes('职位管理'));
+          return { logged: hasUserInfo || hasRecNav, reason: 'ok' };
+        }
+
+        // 前程无忧
+        if (code === '51job') {
+          const isLoginUrl = url.includes('MainLogin.aspx') || url.includes('login');
+          const hasLoginForm = !!document.querySelector('#txtMemberName, #txtUserName, #txtPassword, input[name*="password"], .login-box');
+          if (isLoginUrl || hasLoginForm) {
+            return { logged: false, reason: 'login_form_present' };
+          }
+          const hasUserInfo = !!document.querySelector('#lblUserName, #divHead, .user-name, a[href*="Logout"], #spanCompanyName, .header-user');
+          const hasRecNav = url.includes('ehire.51job.com') && (text.includes('简历管理') || text.includes('搜索简历') || text.includes('职位管理'));
+          return { logged: hasUserInfo || hasRecNav, reason: 'ok' };
+        }
+
+        return { logged: false, reason: 'unknown_code' };
+      }, cfg.code);
+
+      return { logged: domAuth.logged, curUrl, reason: domAuth.reason };
     } catch (e) {
-      return { logged: false, curUrl: '' };
+      return { logged: false, curUrl: '', reason: e.message };
     }
   };
 
@@ -230,32 +275,34 @@ async function scrapePlatform(platformKey, browserPath, targetCount) {
     sendMsg('auth', {
       platform: platformKey,
       status: 'need_login',
-      message: `请在打开的浏览器中，扫码登录【${cfg.name}】企业招聘账号`
+      message: `请在打开的浏览器中，扫码或账号登录【${cfg.name}】企业端`
     });
     sendMsg('status', {
       platform: platformKey,
-      message: `👉 请在已打开的浏览器中完成【${cfg.name}】企业端登录（系统将自动检测登录并继续）...`
+      message: `👉 等待用户在打开的 Edge 浏览器中登录【${cfg.name}】（检测到登录成功后将自动继续抓取）...`
     });
 
     const startTime = Date.now();
-    while (Date.now() - startTime < 180000) {
-      await new Promise(r => setTimeout(r, 2500));
+    while (Date.now() - startTime < 300000) { // 5分钟等待
+      await new Promise(r => setTimeout(r, 2000));
       try {
         if (!browser.isConnected()) {
-          sendMsg('status', { platform: platformKey, message: `【${cfg.name}】窗口已关闭` });
+          sendMsg('status', { platform: platformKey, message: `【${cfg.name}】浏览器窗口已关闭` });
           return [];
         }
       } catch (e) {}
 
       authResult = await checkAuth();
-      if (authResult.logged) break;
+      if (authResult.logged) {
+        break;
+      }
     }
   }
 
   if (!authResult.logged) {
     sendMsg('error', {
       platform: platformKey,
-      message: `⚠️ 未检测到【${cfg.name}】企业登录态，已跳过该渠道。`
+      message: `⚠️ 未检测到【${cfg.name}】企业登录态（或超时未登录），已跳过该渠道。`
     });
     return [];
   }
