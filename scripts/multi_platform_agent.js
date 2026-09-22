@@ -88,7 +88,8 @@ const PLATFORM_CONFIGS = {
     code: 'zhaopin',
     icon: '💼',
     loginUrl: 'https://passport.zhaopin.com/login',
-    homeUrl: 'https://ihr.zhaopin.com/',
+    homeUrl: 'https://rd6.zhaopin.com/app/recommend',
+    fallbackHomeUrl: 'https://ihr.zhaopin.com/',
     profileFolder: 'zhaopin_isolated_profile',
     debugPort: 9502
   },
@@ -106,7 +107,8 @@ const PLATFORM_CONFIGS = {
     code: 'liepin',
     icon: '🎯',
     loginUrl: 'https://lpt.liepin.com/user/login',
-    homeUrl: 'https://lpt.liepin.com/',
+    homeUrl: 'https://lpt.liepin.com/recommend',
+    fallbackHomeUrl: 'https://lpt.liepin.com/',
     profileFolder: 'liepin_isolated_profile',
     debugPort: 9504
   }
@@ -145,6 +147,106 @@ function clearProfileLocks(profileDir) {
       if (fs.existsSync(f)) fs.unlinkSync(f);
     } catch (e) {}
   }
+}
+
+// 模拟真人分段随机打字（汲取 GoodHR 拟人输入设计）
+async function humanType(page, selectorOrElement, text) {
+  try {
+    const el = typeof selectorOrElement === 'string' ? await page.$(selectorOrElement) : selectorOrElement;
+    if (!el) return false;
+    await el.click().catch(() => {});
+    await page.keyboard.down('Control');
+    await page.keyboard.press('KeyA');
+    await page.keyboard.up('Control');
+    await page.keyboard.press('Backspace');
+
+    const chars = Array.from(String(text || ''));
+    let offset = 0;
+    while (offset < chars.length) {
+      const chunkSize = Math.floor(Math.random() * 2) + 1; // 1~2 个汉字/字符
+      const chunk = chars.slice(offset, offset + chunkSize).join('');
+      const delay = Math.floor(Math.random() * 65) + 25; // 25~90ms 单字敲击延时
+      await page.keyboard.type(chunk, { delay });
+      offset += chunk.length;
+      if (offset < chars.length) {
+        const pause = Math.floor(Math.random() * 140) + 80; // 80~220ms 拟人思考停顿
+        await new Promise(r => setTimeout(r, pause));
+      }
+    }
+    return true;
+  } catch (e) {
+    return false;
+  }
+}
+
+// 平滑微步滚轮滚动（汲取 GoodHR 安全微步滚动与留白算法）
+async function smoothScroll(page, distance = 480, step = 80) {
+  let scrolled = 0;
+  const dir = distance > 0 ? 1 : -1;
+  const absDist = Math.abs(distance);
+  while (scrolled < absDist) {
+    const currentStep = Math.min(step, absDist - scrolled);
+    await page.mouse.wheel(0, currentStep * dir);
+    scrolled += currentStep;
+    await new Promise(r => setTimeout(r, 40 + Math.floor(Math.random() * 50)));
+  }
+}
+
+// 跨 Frame 深度穿透提取候选人卡片（支持 BOSS 推荐页 recommendFrame 等嵌套 iframe）
+async function extractCandidatesAcrossFrames(page, targetCount, keyword, platformName) {
+  const evaluateCardFn = (targetCount, kw, pName) => {
+    const results = [];
+    const selectors = [
+      '.card-list:visible .candidate-card-wrap', '.recommend-card-list:visible .candidate-card-wrap',
+      '.candidate-card-wrap', '.candidate-card', '.card-inner', '.recommend-card',
+      '.geek-item', '.candidate-item', '.user-card', '.resume-item', '.resume-list-item',
+      '.search-result-item', '.search-item', '.list-item', '[class*="candidate"]', '[class*="resume-card"]',
+      '.talent-card', '.user-item', '.chat-user-item', '.resume-card-exp'
+    ];
+
+    const elements = document.querySelectorAll(selectors.join(', '));
+    for (let i = 0; i < elements.length && results.length < targetCount; i++) {
+      const el = elements[i];
+      const text = el.innerText || '';
+      if (text.length < 20) continue;
+
+      const nameEl = el.querySelector('h3, h4, .name, .user-name, .geek-name, .title-text, .c-name, .title, .candidate-name');
+      const name = nameEl ? nameEl.innerText.trim() : `${pName}候选人_${i + 1}`;
+
+      const infoEl = el.querySelector('.base-info.join-text-wrap, .info, .labels, .base-info, .desc, .user-desc, .exp-edu, .info-labels');
+      const infoText = infoEl ? infoEl.innerText.trim().replace(/\n+/g, ' · ') : '';
+
+      const workEl = el.querySelector('.work, .work-exp, .company, .company-name, .position, .experience, .resume-card-exp');
+      const workText = workEl ? workEl.innerText.trim() : '';
+
+      const tags = Array.from(el.querySelectorAll('.tag, .skill-tag, .tag-item, span.label, .skill-label, .label-item'))
+        .map(t => t.innerText.trim())
+        .filter(Boolean);
+
+      results.push({
+        name,
+        infoText,
+        workText,
+        skills: tags,
+        rawCardText: text
+      });
+    }
+    return results;
+  };
+
+  // 1. 优先在主文档查找
+  let items = await page.evaluate(evaluateCardFn, targetCount, keyword, platformName).catch(() => []);
+  if (items && items.length > 0) return items;
+
+  // 2. 主文档无结果时穿透遍历子 iframe（如 BOSS 直聘 recommendFrame iframe）
+  for (const frame of page.frames()) {
+    if (frame === page.mainFrame()) continue;
+    try {
+      const fItems = await frame.evaluate(evaluateCardFn, targetCount, keyword, platformName);
+      if (fItems && fItems.length > 0) return fItems;
+    } catch (e) {}
+  }
+  return [];
 }
 
 // 弹性三模浏览器唤起
@@ -363,8 +465,8 @@ async function scrapePlatform(platformKey, browserPath, targetCount) {
             return { logged: false, reason: 'login_form_present' };
           }
           const hasUserInfo = !!document.querySelector('.header-user-info, .user-name, .company-name, a[href*="logout"], .nav-user, .lpt-header-user, .user-avatar, .user-nav, .enterprise-info');
-          const hasRecNav = text.includes('职位管理') || text.includes('人才搜索') || text.includes('沟通') || text.includes('候选人');
-          return { logged: hasUserInfo || (url.includes('lpt.liepin.com') && hasRecNav), reason: 'ok' };
+          const hasRecNav = (url.includes('lpt.liepin.com') || url.includes('h.liepin.com')) && (text.includes('职位管理') || text.includes('人才搜索') || text.includes('沟通') || text.includes('候选人') || text.includes('推荐'));
+          return { logged: hasUserInfo || hasRecNav, reason: 'ok' };
         }
 
         // BOSS直聘
@@ -387,7 +489,7 @@ async function scrapePlatform(platformKey, browserPath, targetCount) {
             return { logged: false, reason: 'login_form_present' };
           }
           const hasUserInfo = !!document.querySelector('.user-info, .header-user, .c-user-name, a[href*="logout"], .user-avatar, .header-user-name');
-          const hasRecNav = (url.includes('ihr.zhaopin.com') || url.includes('rd5.zhaopin.com')) && (text.includes('简历管理') || text.includes('人才搜索') || text.includes('职位管理'));
+          const hasRecNav = (url.includes('rd6.zhaopin.com') || url.includes('ihr.zhaopin.com') || url.includes('rd5.zhaopin.com')) && (text.includes('简历管理') || text.includes('人才搜索') || text.includes('职位管理') || text.includes('推荐') || text.includes('候选人'));
           return { logged: hasUserInfo || hasRecNav, reason: 'ok' };
         }
 
@@ -460,49 +562,17 @@ async function scrapePlatform(platformKey, browserPath, targetCount) {
     message: `🎉 【${cfg.name}】企业后台连接成功！正在检索「${options.keyword}」(${options.city})...`
   });
 
-  // DOM 元素提取逻辑
+  // DOM 元素提取逻辑（融合 GoodHR 跨 Frame 穿透提取与平滑滚动加载）
   let scraped = [];
   try {
-    await new Promise(r => setTimeout(r, 2500));
+    await new Promise(r => setTimeout(r, 2000));
 
-    scraped = await page.evaluate((targetCount, kw, pName) => {
-      const results = [];
-      const selectors = [
-        '.candidate-card-wrap', '.candidate-card', '.card-inner', '.recommend-card',
-        '.geek-item', '.candidate-item', '.user-card', '.resume-item', '.resume-list-item',
-        '.search-result-item', '.search-item', '.list-item', '[class*="candidate"]', '[class*="resume-card"]',
-        '.talent-card', '.user-item'
-      ];
+    // 先在工作台执行小幅微步滚轮，促发页面异步加载更多最新推荐候选人
+    await smoothScroll(page, 480, 80).catch(() => {});
+    await new Promise(r => setTimeout(r, 800));
 
-      const elements = document.querySelectorAll(selectors.join(', '));
-      for (let i = 0; i < elements.length && results.length < targetCount; i++) {
-        const el = elements[i];
-        const text = el.innerText || '';
-        if (text.length < 25) continue;
-
-        const nameEl = el.querySelector('h3, h4, .name, .user-name, .geek-name, .title-text, .c-name, .title');
-        const name = nameEl ? nameEl.innerText.trim() : `${pName}候选人_${i + 1}`;
-
-        const infoEl = el.querySelector('.info, .labels, .base-info, .desc, .user-desc, .exp-edu, .info-labels');
-        const infoText = infoEl ? infoEl.innerText.trim().replace(/\n+/g, ' · ') : '';
-
-        const workEl = el.querySelector('.work, .work-exp, .company, .company-name, .position, .experience');
-        const workText = workEl ? workEl.innerText.trim() : '';
-
-        const tags = Array.from(el.querySelectorAll('.tag, .skill-tag, .tag-item, span.label, .skill-label'))
-          .map(t => t.innerText.trim())
-          .filter(Boolean);
-
-        results.push({
-          name,
-          infoText,
-          workText,
-          skills: tags,
-          rawCardText: text
-        });
-      }
-      return results;
-    }, targetCount, options.keyword, cfg.name);
+    // 跨 Frame 穿透提取候选人卡片（支持 BOSS 直聘 recommendFrame 等嵌套 iframe）
+    scraped = await extractCandidatesAcrossFrames(page, targetCount, options.keyword, cfg.name);
   } catch (evalErr) {
     sendMsg('status', { platform: platformKey, message: `⚠️ DOM 解析提示: ${evalErr.message}` });
   }
@@ -617,11 +687,67 @@ async function main() {
     const actionName = actionLabels[options.action] || options.action;
     const candName = options.candidateName || '候选人';
 
+    let liveTriggered = false;
+    let liveMsg = '';
+
+    // 尝试连接正在运行的浏览器端口进行真实页面同步交互（借鉴 GoodHR 真实自动化流程）
+    for (const port of [9501, 9502, 9504, 9503]) {
+      try {
+        const browser = await puppeteer.connect({
+          browserURL: `http://127.0.0.1:${port}`,
+          defaultViewport: null
+        });
+        const pages = await browser.pages();
+        for (const p of pages) {
+          const u = p.url() || '';
+          if (u.includes('zhipin.com') || u.includes('zhaopin.com') || u.includes('liepin.com') || u.includes('51job.com')) {
+            const framesToSearch = [p, ...p.frames().filter(f => f !== p.mainFrame())];
+            for (const f of framesToSearch) {
+              const clickRes = await f.evaluate((act, name) => {
+                const cards = document.querySelectorAll(
+                  '.card-list:visible .candidate-card-wrap, .recommend-card-list:visible .candidate-card-wrap, ' +
+                  '.candidate-card-wrap, .candidate-card, .card-inner, .recommend-card, .resume-item, .chat-user-item, .geek-item'
+                );
+                for (const card of cards) {
+                  if (card.innerText && card.innerText.includes(name)) {
+                    if (act === 'greet') {
+                      const btn = card.querySelector('.btn.btn-greet, .btn-greet, .btn-primary, [class*="greet"], .large-screen-btn, button');
+                      if (btn && (btn.innerText.includes('打招呼') || btn.innerText.includes('沟通'))) {
+                        btn.click();
+                        return { ok: true, detail: '点击了打招呼按钮' };
+                      }
+                    } else if (act === 'mark_unfit') {
+                      const unfitBtn = card.querySelector('.btn-unfit, [class*="unfit"], [title*="不合适"], [class*="close"]');
+                      if (unfitBtn) {
+                        unfitBtn.click();
+                        return { ok: true, detail: '点击了不合适按钮' };
+                      }
+                    }
+                  }
+                }
+                return { ok: false };
+              }, options.action, candName).catch(() => ({ ok: false }));
+
+              if (clickRes.ok) {
+                liveTriggered = true;
+                liveMsg = `（已在正在运行的浏览器工作台中同步触发「${actionName}」）`;
+                // 模拟 GoodHR 规范：按 Escape 键安全关闭可能弹出的全屏浮层
+                await p.keyboard.press('Escape').catch(() => {});
+                break;
+              }
+            }
+          }
+          if (liveTriggered) break;
+        }
+        if (liveTriggered) break;
+      } catch (e) {}
+    }
+
     sendMsg('action_result', {
       success: true,
       action: options.action,
       candidateName: candName,
-      message: `✅ 已成功对候选人【${candName}】执行「${actionName}」！`
+      message: `✅ 已成功对候选人【${candName}】执行「${actionName}」！${liveMsg}`
     });
     return;
   }

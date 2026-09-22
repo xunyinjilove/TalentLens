@@ -85,6 +85,76 @@ async function handleCandidateAction(browser, action, candidateName, customMsg) 
   sendMsg('status', { message: `🎉 【${candidateName}】「${actionName}」指令已完成！` });
 }
 
+// 平滑微步滚轮滚动（汲取 GoodHR 安全微步滚动与留白算法）
+async function smoothScroll(page, distance = 480, step = 80) {
+  let scrolled = 0;
+  const dir = distance > 0 ? 1 : -1;
+  const absDist = Math.abs(distance);
+  while (scrolled < absDist) {
+    const currentStep = Math.min(step, absDist - scrolled);
+    await page.mouse.wheel(0, currentStep * dir);
+    scrolled += currentStep;
+    await new Promise(r => setTimeout(r, 40 + Math.floor(Math.random() * 50)));
+  }
+}
+
+// 跨 Frame 深度穿透提取候选人卡片（支持 BOSS 推荐页 recommendFrame 等嵌套 iframe）
+async function extractCandidatesAcrossFrames(page, targetCount, keyword, platformName) {
+  const evaluateCardFn = (targetCount, kw, pName) => {
+    const results = [];
+    const selectors = [
+      '.card-list:visible .candidate-card-wrap', '.recommend-card-list:visible .candidate-card-wrap',
+      '.candidate-card-wrap', '.candidate-card', '.card-inner', '.recommend-card',
+      '.geek-item', '.candidate-item', '.user-card', '.resume-item', '.resume-list-item',
+      '.search-result-item', '.search-item', '.list-item', '[class*="candidate"]', '[class*="resume-card"]',
+      '.talent-card', '.user-item', '.chat-user-item', '.resume-card-exp'
+    ];
+
+    const elements = document.querySelectorAll(selectors.join(', '));
+    for (let i = 0; i < elements.length && results.length < targetCount; i++) {
+      const el = elements[i];
+      const text = el.innerText || '';
+      if (text.length < 20) continue;
+
+      const nameEl = el.querySelector('h3, h4, .name, .user-name, .geek-name, .title-text, .c-name, .title, .candidate-name');
+      const name = nameEl ? nameEl.innerText.trim() : `${pName}候选人_${i + 1}`;
+
+      const infoEl = el.querySelector('.base-info.join-text-wrap, .info, .labels, .base-info, .desc, .user-desc, .exp-edu, .info-labels');
+      const infoText = infoEl ? infoEl.innerText.trim().replace(/\n+/g, ' · ') : '';
+
+      const workEl = el.querySelector('.work, .work-exp, .company, .company-name, .position, .experience, .resume-card-exp');
+      const workText = workEl ? workEl.innerText.trim() : '';
+
+      const tags = Array.from(el.querySelectorAll('.tag, .skill-tag, .tag-item, span.label, .skill-label, .label-item'))
+        .map(t => t.innerText.trim())
+        .filter(Boolean);
+
+      results.push({
+        name,
+        infoText,
+        workText,
+        skills: tags,
+        rawCardText: text
+      });
+    }
+    return results;
+  };
+
+  // 1. 优先在主页面查找
+  let items = await page.evaluate(evaluateCardFn, targetCount, keyword, platformName).catch(() => []);
+  if (items && items.length > 0) return items;
+
+  // 2. 遍历子 iframe（如 recommendFrame）
+  for (const frame of page.frames()) {
+    if (frame === page.mainFrame()) continue;
+    try {
+      const fItems = await frame.evaluate(evaluateCardFn, targetCount, keyword, platformName);
+      if (fItems && fItems.length > 0) return fItems;
+    } catch (e) {}
+  }
+  return [];
+}
+
 // BOSS 企业端直连与抓取流程
 async function runBossEnterpriseFlow() {
   const browserPath = findBrowserExecutable();
@@ -235,11 +305,11 @@ async function runBossEnterpriseFlow() {
     return;
   }
 
-  // 确保处于推荐牛人页面
-  if (!page.url().includes('/web/boss/recommend')) {
-    sendMsg('status', { message: '🔄 正在跳转至 BOSS 直聘【推荐牛人】工作台...' });
+  // 确保处于推荐牛人或沟通工作台
+  if (!page.url().includes('/web/chat/') && !page.url().includes('/recommend')) {
+    sendMsg('status', { message: '🔄 正在跳转至 BOSS 直聘工作台...' });
     try {
-      await page.goto('https://www.zhipin.com/web/boss/recommend', { waitUntil: 'domcontentloaded', timeout: 30000 });
+      await page.goto('https://www.zhipin.com/web/chat/index', { waitUntil: 'domcontentloaded', timeout: 30000 });
       await new Promise(r => setTimeout(r, 2500));
     } catch (e) {}
   }
@@ -250,56 +320,14 @@ async function runBossEnterpriseFlow() {
     fs.mkdirSync(options.dataDir, { recursive: true });
   }
 
-  // 从页面中真实抓取候选人卡片
+  // 从页面及 iframe 中深度抓取候选人卡片（融入 GoodHR 跨 Frame 穿透提取与平滑微步滚轮）
   let scrapedCandidates = [];
   try {
-    // 尝试等待候选人卡片出现
-    await page.waitForSelector('.candidate-card-wrap, .card-inner, .recommend-card, .geek-item, .candidate-item, .user-card, .resume-item', { timeout: 10000 }).catch(() => {});
+    // 平滑微步滚轮，触发页面动态加载
+    await smoothScroll(page, 480, 80).catch(() => {});
+    await new Promise(r => setTimeout(r, 800));
 
-    scrapedCandidates = await page.evaluate((targetCount, kw, city) => {
-      const results = [];
-      // 常见 BOSS 牛人推荐列表的选择器
-      const cards = document.querySelectorAll(
-        '.candidate-card-wrap, .candidate-card, .card-inner, .recommend-card, .geek-item, .candidate-item, .user-card, [class*="candidate-card"], [class*="recommend-card"], .chat-user-item'
-      );
-
-      for (let i = 0; i < cards.length && results.length < targetCount; i++) {
-        const el = cards[i];
-        const text = el.innerText || '';
-        if (!text || text.length < 20) continue;
-
-        // 提取姓名
-        const nameEl = el.querySelector('.name, .geek-name, .candidate-name, .title-text, h3, h4, .user-name');
-        const name = nameEl ? nameEl.innerText.trim() : `BOSS牛人_${i + 1}`;
-
-        // 提取基本信息（经验、学历、年龄）
-        const infoEl = el.querySelector('.info-labels, .labels, .base-info, .geek-desc, .user-desc');
-        const infoText = infoEl ? infoEl.innerText.trim().replace(/\n+/g, ' · ') : '';
-
-        // 提取当前岗位与公司
-        const workEl = el.querySelector('.work-exp, .experience, .company-name, .work-desc, .position');
-        const workText = workEl ? workEl.innerText.trim() : '';
-
-        // 提取技能标签
-        const skillEls = el.querySelectorAll('.tag, .skill-tag, .tag-item, .label-item');
-        const skills = Array.from(skillEls).map(s => s.innerText.trim()).filter(Boolean);
-
-        // 提取自我评价或工作亮点
-        const descEl = el.querySelector('.desc, .advantage, .summary, .expect-text, .text-desc');
-        const descText = descEl ? descEl.innerText.trim() : '';
-
-        results.push({
-          name,
-          infoText,
-          workText,
-          skills,
-          descText,
-          rawCardText: text
-        });
-      }
-
-      return results;
-    }, options.count, options.keyword, options.city);
+    scrapedCandidates = await extractCandidatesAcrossFrames(page, options.count, options.keyword, 'BOSS直聘');
   } catch (evalErr) {
     sendMsg('status', { message: `⚠️ 读取页面元素提示: ${evalErr.message}` });
   }
