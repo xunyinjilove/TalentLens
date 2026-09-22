@@ -579,6 +579,10 @@ async function main() {
       return;
     }
     await scrapePlatform(options.testLoginPlatform, browserPath, 0);
+    sendMsg('done', { total: 0, message: `【${cfg.name}】登录态测试完毕` });
+    return;
+  }
+
   // 候选人自动化交互动作 (打招呼/索要简历/交换微信/标为不合适)
   if (options.action) {
     const actionLabels = {
