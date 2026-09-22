@@ -230,22 +230,53 @@ async function scrapePlatform(platformKey, browserPath, targetCount) {
     return null; // null = 启动失败（区别于 [] 即成功但无结果）
   }
 
-  const pages = await browser.pages();
-  const page = pages[0] || (await browser.newPage());
+  // 等待浏览器页面稳定（模式3下 Edge 可能正在加载 homeUrl / 重定向登录页）
+  await new Promise(r => setTimeout(r, 3000));
 
+  const pages = await browser.pages();
+
+  // 优先选择已经在平台域名上的 tab（避免选错 about:blank tab）
+  const domainHint = cfg.code === '51job' ? '51job.com' : cfg.code;
+  let page = pages.find(p => {
+    const u = p.url() || '';
+    return u.includes(domainHint) && !u.includes('about:blank');
+  });
+
+  if (!page) {
+    // 没有找到在平台域名上的 tab，取第一个
+    page = pages[0] || (await browser.newPage());
+  }
+
+  // 只在页面确实停留在 about:blank 时才导航（不中断已有的重定向链）
   try {
     const currentUrl = page.url() || '';
-    if (!currentUrl.includes(cfg.code === '51job' ? '51job.com' : cfg.code) || currentUrl.includes('about:blank')) {
+    if (!currentUrl || currentUrl === 'about:blank') {
       await page.goto(cfg.homeUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
     }
-  } catch (e) {}
+  } catch (e) {
+    // homeUrl 导航失败（可能因为重定向冲突），尝试直接打开登录页
+    try {
+      await page.goto(cfg.loginUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
+    } catch (e2) {
+      // 仍然失败，但不影响后续流程 — checkAuth 会检测页面状态
+    }
+  }
 
   // 严格 DOM 登录态检测函数
   const checkAuth = async () => {
     try {
       const curUrl = page.url() || '';
       if (!curUrl || curUrl.includes('about:blank')) {
-        return { logged: false, curUrl, reason: 'blank_url' };
+        // 页面意外停留在 about:blank — 尝试重新导航
+        try {
+          await page.goto(cfg.homeUrl, { waitUntil: 'domcontentloaded', timeout: 15000 });
+        } catch (navErr) {
+          try { await page.goto(cfg.loginUrl, { waitUntil: 'domcontentloaded', timeout: 15000 }); } catch (e2) {}
+        }
+        const retryUrl = page.url() || '';
+        if (!retryUrl || retryUrl.includes('about:blank')) {
+          return { logged: false, curUrl: retryUrl, reason: 'blank_url' };
+        }
       }
 
       const domAuth = await page.evaluate((code) => {
