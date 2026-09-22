@@ -205,12 +205,9 @@
                 <div class="boss-actions-bar">
                   <div class="actions-header">
                     <span class="actions-title">⚡ 人才直通与招聘自动化动作</span>
-                    <span class="actions-sub">基于 AI 评估结论直连候选人或平台反向检索</span>
+                    <span class="actions-sub">基于 AI 评估结论直连候选人并执行招聘自动化动作</span>
                   </div>
                   <div class="actions-group">
-                    <button class="boss-act-btn search-online" @click="handleSearchOnlineCandidate" title="在 BOSS直聘/猎聘 中以姓名和经历定向反查该人才">
-                      <el-icon><Search /></el-icon> 🔍 平台反查该人才
-                    </button>
                     <button class="boss-act-btn attach" @click="handleAttachResume(resumeStore.selectedResume.id)">
                       <el-icon><Paperclip /></el-icon> 补充附件结合分析
                     </button>
@@ -568,36 +565,6 @@ function copyCandidateEmail() {
     ElMessage.success(`✅ 已复制候选人模拟联系邮箱：${email}`)
   } catch (e) {
     ElMessage.info(`候选人模拟联系邮箱：${email}`)
-  }
-}
-
-async function handleSearchOnlineCandidate() {
-  const resume = resumeStore.selectedResume
-  if (!resume) return
-
-  const candidateName = resume.analysis?.candidateName || resume.fileName.replace(/^【.*?】/, '').replace(/^BOSS牛人_/, '').split('_')[0] || '陈思远'
-  const currentRole = resume.analysis?.currentRole || projectStore.currentProject?.job_config?.title || '临床项目经理'
-  
-  ElMessage.info(`正在全网反查【${candidateName}】(${currentRole}) 的线上在线档案...`)
-
-  let WailsApp: any = null
-  try { WailsApp = await import('../../wailsjs/go/main/App') } catch {}
-
-  if (WailsApp && WailsApp.StartMultiPlatformSearch) {
-    try {
-      await WailsApp.StartMultiPlatformSearch(
-        projectId.value,
-        candidateName,
-        '上海',
-        0,
-        '',
-        5,
-        ['boss', 'liepin']
-      )
-      ElMessage.success(`✅ 已启动平台直连，正在定向反向检索候选人【${candidateName}】！`)
-    } catch (e: any) {
-      ElMessage.error(`反查启动失败: ${e.message || e}`)
-    }
   }
 }
 
@@ -1878,18 +1845,6 @@ onMounted(async () => {
           background: linear-gradient(135deg, #1d4ed8 0%, #0f766e 100%);
           transform: translateY(-1px);
           box-shadow: 0 4px 10px rgba(37, 99, 235, 0.4);
-        }
-      }
-
-      &.search-online {
-        background: #f8fafc;
-        color: #1e293b;
-        border-color: #cbd5e1;
-        &:hover {
-          background: #f1f5f9;
-          border-color: #94a3b8;
-          color: #0f172a;
-          transform: translateY(-1px);
         }
       }
 
