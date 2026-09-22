@@ -155,7 +155,10 @@
                     <span v-if="resumeStore.selectedResume.analysis.currentRole">{{ resumeStore.selectedResume.analysis.currentRole }}</span>
                     <span v-if="resumeStore.selectedResume.analysis.workYears">{{ resumeStore.selectedResume.analysis.workYears }}经验</span>
                     <span v-if="resumeStore.selectedResume.analysis.education">{{ resumeStore.selectedResume.analysis.education }}</span>
-                    <span class="candidate-email-badge" title="候选人预留/联系邮箱"><el-icon><Message /></el-icon> qn3366271573@163.com</span>
+                    <span class="candidate-email-badge" title="点击复制候选人模拟联系邮箱" @click="copyCandidateEmail">
+                      <el-icon><Message /></el-icon> {{ resumeStore.selectedResume.email || 'qn3366271573@163.com' }}
+                      <el-icon class="copy-icon"><DocumentCopy /></el-icon>
+                    </span>
                   </div>
                 </div>
 
@@ -198,16 +201,13 @@
                   </div>
                 </div>
 
-                <!-- 人才直通与录用自动化动作栏 -->
+                <!-- 人才直通与招聘自动化动作栏 -->
                 <div class="boss-actions-bar">
                   <div class="actions-header">
-                    <span class="actions-title">⚡ 录用直通与招聘自动化动作</span>
-                    <span class="actions-sub">基于 AI 评估结论向候选人发放正式 Offer 或直连沟通</span>
+                    <span class="actions-title">⚡ 人才直通与招聘自动化动作</span>
+                    <span class="actions-sub">基于 AI 评估结论直连候选人或平台反向检索</span>
                   </div>
                   <div class="actions-group">
-                    <button class="boss-act-btn offer-btn" @click="handleOpenOfferDialog" title="通过 15194921527@163.com 向候选人发送正式录用通知书">
-                      <el-icon><Message /></el-icon> 📧 发送录用 Offer
-                    </button>
                     <button class="boss-act-btn search-online" @click="handleSearchOnlineCandidate" title="在 BOSS直聘/猎聘 中以姓名和经历定向反查该人才">
                       <el-icon><Search /></el-icon> 🔍 平台反查该人才
                     </button>
@@ -437,15 +437,6 @@
       @refresh="handleRefreshProject"
     />
 
-    <!-- 发送录用 Offer 弹窗 -->
-    <OfferDialog
-      v-model="showOfferDialog"
-      :candidate-name="resumeStore.selectedResume?.analysis?.candidateName || '陈思远'"
-      :candidate-email="'qn3366271573@163.com'"
-      :job-title="projectStore.currentProject?.job_config?.title || resumeStore.selectedResume?.analysis?.currentRole || '临床项目经理'"
-      :company-name="'上海泰尔生物医药科技有限公司'"
-    />
-
     <!-- 开发者调试面板 (F12 切换) -->
     <DevPanel />
   </div>
@@ -469,7 +460,6 @@ import LanguageSwitcher from '../components/LanguageSwitcher.vue'
 import AIConfigGuide from '../components/AIConfigGuide.vue'
 import DevPanel from '../components/DevPanel.vue'
 import BossSearchDialog from '../components/BossSearchDialog.vue'
-import OfferDialog from '../components/OfferDialog.vue'
 import { useResumeStore } from '../composables/useResumeStore'
 import { useProjectStore } from '../composables/useProjectStore'
 
@@ -489,7 +479,6 @@ const contentLoading = ref(false)
 const jobTitle = ref('高级Go开发工程师')
 const showConfigGuide = ref(false)
 const showBossDialog = ref(false)
-const showOfferDialog = ref(false)
 const animatedDetailScore = ref(0)
 let scoreAnimationFrame: number | null = null
 
@@ -572,8 +561,14 @@ async function handleExecuteBossAction(action: 'greet' | 'ask_resume' | 'exchang
   }
 }
 
-function handleOpenOfferDialog() {
-  showOfferDialog.value = true
+function copyCandidateEmail() {
+  const email = resumeStore.selectedResume?.email || 'qn3366271573@163.com'
+  try {
+    navigator.clipboard.writeText(email)
+    ElMessage.success(`✅ 已复制候选人模拟联系邮箱：${email}`)
+  } catch (e) {
+    ElMessage.info(`候选人模拟联系邮箱：${email}`)
+  }
 }
 
 async function handleSearchOnlineCandidate() {

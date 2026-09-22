@@ -509,6 +509,7 @@ async function scrapePlatform(platformKey, browserPath, targetCount) {
 目标城市：${options.city}
 基本画像：${item.infoText || '详见卡片信息'}
 任职履历快照：${item.workText || '详见卡片完整信息'}
+联系邮箱：qn3366271573@163.com
 
 【核心专业技能】
 ${item.skills && item.skills.length > 0 ? item.skills.map(s => '• ' + s).join('\n') : '• 岗位专业技能'}
@@ -528,6 +529,7 @@ ${item.rawCardText}
       fileName,
       filePath,
       name: item.name,
+      email: 'qn3366271573@163.com',
       jobTitle: options.keyword,
       experience: item.infoText || '在线经验',
       education: '详见微简历',

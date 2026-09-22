@@ -94,6 +94,7 @@ type Resume struct {
 	FileType           string             `json:"file_type"`
 	FileSize           int64              `json:"file_size"`
 	Content            string             `json:"content"`
+	Email              string             `json:"email,omitempty"`
 	Status             string             `json:"status"`
 	Score              int                `json:"score"`
 	InitialScore       int                `json:"initial_score,omitempty"`
@@ -556,6 +557,9 @@ func (a *App) GetResumes() []*Resume {
 		data, _ := os.ReadFile(filepath.Join(dir, entry.Name()))
 		var r Resume
 		json.Unmarshal(data, &r)
+		if r.Email == "" {
+			r.Email = "qn3366271573@163.com"
+		}
 		resumes = append(resumes, &r)
 	}
 	return resumes
@@ -815,6 +819,9 @@ func (a *App) GetProjectResumes(projectID string) []*Resume {
 		}
 		var r Resume
 		if json.Unmarshal(data, &r) == nil {
+			if r.Email == "" {
+				r.Email = "qn3366271573@163.com"
+			}
 			resumes = append(resumes, &r)
 		}
 	}
