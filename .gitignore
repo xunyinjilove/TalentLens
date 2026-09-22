@@ -59,3 +59,6 @@ docs/README.md
 
 # Cursor / editor
 .cursor/
+
+# Browser profiles and runtime data
+data/

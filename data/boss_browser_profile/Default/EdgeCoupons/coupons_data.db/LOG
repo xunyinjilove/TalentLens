@@ -1,5 +1,0 @@
-2026/09/03-16:21:27.875 82dc Creating DB D:\HR\TalentLens-main\data\boss_browser_profile\Default\EdgeCoupons/coupons_data.db since it was missing.
-2026/09/03-16:21:27.944 82dc Reusing MANIFEST D:\HR\TalentLens-main\data\boss_browser_profile\Default\EdgeCoupons/coupons_data.db/MANIFEST-000001
-2026/09/03-16:21:29.242 822c Level-0 table #5: started
-2026/09/03-16:21:29.254 822c Level-0 table #5: 683273 bytes OK
-2026/09/03-16:21:29.262 822c Delete type=0 #3

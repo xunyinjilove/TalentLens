@@ -346,13 +346,13 @@ async function scrapePlatform(platformKey, browserPath, targetCount) {
 
         // BOSS直聘
         if (code === 'boss') {
-          const isLoginUrl = url.includes('/login') || url.includes('/web/user');
-          const hasLoginForm = !!document.querySelector('input[type="tel"], input[placeholder*="手机号"], .login-box, .login-scan-box, .btn-sure');
+          const isLoginUrl = url.includes('/login') || url.includes('/web/user') || url.includes('intent=');
+          const hasLoginForm = !!document.querySelector('input[type="tel"], input[placeholder*="手机号"], .login-box, .login-scan-box, .btn-sure, .dialog-login');
           if (isLoginUrl || hasLoginForm) {
             return { logged: false, reason: 'login_form_present' };
           }
-          const hasUserInfo = !!document.querySelector('.user-nav, .nav-figure, .header-user, .user-avatar, .nav-item-user, a[href*="logout"], .nav-user, .user-name');
-          const hasRecNav = url.includes('/boss/') || url.includes('recommend') || text.includes('推荐牛人') || text.includes('职位管理');
+          const hasUserInfo = !!document.querySelector('.user-nav, .nav-figure, .header-user, .user-avatar, .nav-item-user, a[href*="logout"], .nav-user, .user-name, .chat-user');
+          const hasRecNav = (url.includes('/boss/') || url.includes('recommend') || url.includes('/web/chat/')) && (text.includes('推荐牛人') || text.includes('职位管理') || text.includes('沟通'));
           return { logged: hasUserInfo || hasRecNav, reason: 'ok' };
         }
 
@@ -604,15 +604,27 @@ async function main() {
   }
 
   sendMsg('status', {
-    message: `🚀 启动全渠道聚合检索引擎，计划调度平台：${options.platforms.map(p => PLATFORM_CONFIGS[p]?.name || p).join('、')}，目标岗位「${options.keyword}」...`
+    message: `🚀 启动全渠道聚合检索引擎，计划并发调度平台：${options.platforms.map(p => PLATFORM_CONFIGS[p]?.name || p).join('、')}，目标岗位「${options.keyword}」...`
   });
 
   let allResults = [];
   let errorCount = 0;
   let connectedPlatforms = [];
 
-  for (const plat of options.platforms) {
-    const res = await scrapePlatform(plat, browserPath, options.count);
+  // 并行调度所有选定平台，各平台在独立端口与独立 profile 窗口中同时拉起，互不阻塞
+  const platformPromises = options.platforms.map(async (plat, idx) => {
+    if (idx > 0) {
+      // 微交错 500ms 避免瞬间并发拉起 4 个 Edge 进程抢占 CPU
+      await new Promise(r => setTimeout(r, idx * 500));
+    }
+    return scrapePlatform(plat, browserPath, options.count);
+  });
+
+  const settledResults = await Promise.all(platformPromises);
+
+  for (let i = 0; i < settledResults.length; i++) {
+    const res = settledResults[i];
+    const plat = options.platforms[i];
     if (res === null) {
       // 该平台启动/连接失败
       errorCount++;
