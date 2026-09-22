@@ -98,7 +98,7 @@ async function runBossEnterpriseFlow() {
 
   const targetUrl = options.testLogin
     ? 'https://www.zhipin.com/web/user/'
-    : 'https://www.zhipin.com/web/boss/recommend';
+    : 'https://www.zhipin.com/web/chat/index';
 
   sendMsg('status', { message: `🚀 正在唤起 Edge 浏览器连接 BOSS 直聘企业后台...` });
 

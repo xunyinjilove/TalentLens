@@ -4,16 +4,19 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"crypto/tls"
+	"encoding/base64"
 	"encoding/json"
 	"embed"
 	"fmt"
 	"io"
 	"log"
+	"math"
 	"net/http"
+	"net/smtp"
 	"os"
 	"os/exec"
 	"path/filepath"
-	"math"
 	"regexp"
 	"strings"
 	"sync"
@@ -1139,6 +1142,201 @@ func (a *App) ExecuteBossCandidateAction(actionType string, candidateName string
 		"action":        actionType,
 		"candidateName": candidateName,
 		"message":       fmt.Sprintf("✅ 已成功对候选人【%s】执行「%s」！", candidateName, label),
+	}
+}
+
+// SendOfferEmail 向候选人邮箱发送正式录用通知书 (Offer Letter)
+func (a *App) SendOfferEmail(recipientEmail string, candidateName string, jobTitle string, companyName string, salaryPackage string, reportDate string, customNotes string, senderEmail string, senderPassword string) map[string]interface{} {
+	if recipientEmail == "" {
+		recipientEmail = "qn3366271573@163.com"
+	}
+	if senderEmail == "" {
+		senderEmail = "15194921527@163.com"
+	}
+	if senderPassword == "" {
+		senderPassword = "2247633190Zz."
+	}
+	if candidateName == "" {
+		candidateName = "候选人"
+	}
+	if jobTitle == "" {
+		jobTitle = "临床项目经理"
+	}
+	if companyName == "" {
+		companyName = "上海泰尔生物医药科技有限公司"
+	}
+	if reportDate == "" {
+		reportDate = time.Now().AddDate(0, 0, 14).Format("2006年01月02日")
+	}
+	if salaryPackage == "" {
+		salaryPackage = "20,000 - 25,000 元/月 (14薪) + 绩效奖金 + 五险一金"
+	}
+
+	host := "smtp.163.com"
+	port := 465
+	lowerSender := strings.ToLower(senderEmail)
+	if strings.HasSuffix(lowerSender, "@126.com") {
+		host = "smtp.126.com"
+	} else if strings.HasSuffix(lowerSender, "@qq.com") {
+		host = "smtp.qq.com"
+	} else if strings.HasSuffix(lowerSender, "@gmail.com") {
+		host = "smtp.gmail.com"
+	}
+
+	subject := fmt.Sprintf("【录用通知书】恭喜您获得【%s】%s岗位录用邀请", companyName, jobTitle)
+
+	notesHtml := ""
+	if customNotes != "" {
+		notesHtml = fmt.Sprintf(`<div style="background:#fffbe6;border-left:4px solid #faad14;padding:14px;border-radius:4px;margin:18px 0;font-size:14px;color:#ad6800;">💡 <strong>HR 专属补充说明：</strong><br/>%s</div>`, customNotes)
+	}
+
+	htmlBody := fmt.Sprintf(`<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+</head>
+<body style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif;background-color:#f4f6f9;margin:0;padding:24px;color:#333;">
+<div style="max-width:650px;margin:0 auto;background:#ffffff;border-radius:12px;box-shadow:0 4px 20px rgba(0,0,0,0.06);overflow:hidden;border:1px solid #e9ecef;">
+  <div style="background:linear-gradient(135deg,#1890ff 0%%,#36cfc9 100%%);padding:32px 24px;text-align:center;color:#ffffff;">
+    <h1 style="margin:0;font-size:24px;font-weight:600;letter-spacing:1px;">🎉 录 用 通 知 书 (OFFER LETTER)</h1>
+    <p style="margin:8px 0 0;opacity:0.9;font-size:14px;">%s · 人力资源与人才发展中心</p>
+  </div>
+  <div style="padding:32px;font-size:15px;line-height:1.8;">
+    <div style="font-size:17px;font-weight:600;color:#262626;margin-bottom:16px;">尊敬的 %s：</div>
+    <p>非常高兴地通知您，经过我司严格而细致的简历评审与专业面试评估，您的专业技能与职业履历高度契合我司的发展规划。现代表 <strong>%s</strong> 正式向您发出录用邀请！</p>
+    
+    <table style="width:100%%;border-collapse:collapse;margin:20px 0;background:#fafafa;border-radius:8px;overflow:hidden;border:1px solid #f0f0f0;">
+      <tr><td style="width:130px;color:#8c8c8c;font-weight:500;padding:12px 16px;border-bottom:1px solid #f0f0f0;">🎯 录用岗位</td><td style="color:#262626;font-weight:600;padding:12px 16px;border-bottom:1px solid #f0f0f0;">%s</td></tr>
+      <tr><td style="width:130px;color:#8c8c8c;font-weight:500;padding:12px 16px;border-bottom:1px solid #f0f0f0;">🏢 聘用单位</td><td style="color:#262626;font-weight:600;padding:12px 16px;border-bottom:1px solid #f0f0f0;">%s</td></tr>
+      <tr><td style="width:130px;color:#8c8c8c;font-weight:500;padding:12px 16px;border-bottom:1px solid #f0f0f0;">💰 薪酬待遇</td><td style="color:#52c41a;font-weight:600;padding:12px 16px;border-bottom:1px solid #f0f0f0;">%s</td></tr>
+      <tr><td style="width:130px;color:#8c8c8c;font-weight:500;padding:12px 16px;border-bottom:1px solid #f0f0f0;">📅 报到日期</td><td style="color:#1890ff;font-weight:600;padding:12px 16px;border-bottom:1px solid #f0f0f0;">%s</td></tr>
+      <tr><td style="width:130px;color:#8c8c8c;font-weight:500;padding:12px 16px;">📍 工作地点</td><td style="color:#262626;font-weight:600;padding:12px 16px;">上海市张江高科技园区 / 核心研发中心</td></tr>
+    </table>
+
+    <div style="background:#e6f7ff;border-left:4px solid #1890ff;padding:16px;border-radius:4px;margin:20px 0;font-size:14px;">
+      <h4 style="margin:0 0 8px;color:#0050b3;">📋 入职报到准备材料清单：</h4>
+      <ul style="margin:0;padding-left:20px;color:#434343;line-height:1.7;">
+        <li>身份证原件及正反面复印件（2份）；</li>
+        <li>最高学历学位证书原件及学信网在线验证报告；</li>
+        <li>原用人单位开具的正式解除劳动关系证明（离职证明原件）；</li>
+        <li>近期二寸蓝底免冠证件照片（2张）；</li>
+        <li>近3个月内三甲医院体检合格报告一份。</li>
+      </ul>
+    </div>
+
+    %s
+
+    <p style="margin-top:24px;">收到本通知后，请于 <strong>3个工作日内</strong> 直接回复本邮件予以确认。期待与您携手同行，共创未来！</p>
+  </div>
+  <div style="background:#fafafa;padding:20px 32px;text-align:center;font-size:13px;color:#8c8c8c;border-top:1px solid #f0f0f0;">
+    <p style="margin:0;">官方招聘邮箱: %s | 由 TalentLens 智能人才系统自动核验发送</p>
+    <p style="margin:4px 0 0;">本邮件内容及附件具有保密性质，若非指定收件人请勿扩散并立即删除。</p>
+  </div>
+</div>
+</body>
+</html>`, companyName, candidateName, companyName, jobTitle, companyName, salaryPackage, reportDate, notesHtml, senderEmail)
+
+	boundary := "----=_Part_TalentLens_" + fmt.Sprintf("%d", time.Now().UnixNano())
+	b64Subject := "=?UTF-8?B?" + base64.StdEncoding.EncodeToString([]byte(subject)) + "?="
+	b64HTML := base64.StdEncoding.EncodeToString([]byte(htmlBody))
+
+	rawMsg := bytes.NewBuffer(nil)
+	rawMsg.WriteString(fmt.Sprintf("From: %s\r\n", senderEmail))
+	rawMsg.WriteString(fmt.Sprintf("To: %s\r\n", recipientEmail))
+	rawMsg.WriteString(fmt.Sprintf("Subject: %s\r\n", b64Subject))
+	rawMsg.WriteString("MIME-Version: 1.0\r\n")
+	rawMsg.WriteString(fmt.Sprintf("Content-Type: multipart/alternative; boundary=\"%s\"\r\n", boundary))
+	rawMsg.WriteString("\r\n")
+
+	rawMsg.WriteString(fmt.Sprintf("--%s\r\n", boundary))
+	rawMsg.WriteString("Content-Type: text/html; charset=UTF-8\r\n")
+	rawMsg.WriteString("Content-Transfer-Encoding: base64\r\n\r\n")
+	for len(b64HTML) > 76 {
+		rawMsg.WriteString(b64HTML[:76] + "\r\n")
+		b64HTML = b64HTML[76:]
+	}
+	rawMsg.WriteString(b64HTML + "\r\n")
+	rawMsg.WriteString(fmt.Sprintf("--%s--\r\n", boundary))
+
+	conn, err := tls.Dial("tcp", fmt.Sprintf("%s:%d", host, port), &tls.Config{
+		ServerName: host,
+	})
+	if err != nil {
+		return map[string]interface{}{
+			"success": false,
+			"error":   fmt.Sprintf("无法连接 SMTP 邮件服务器 (%s:%d): %v", host, port, err),
+		}
+	}
+	defer conn.Close()
+
+	client, err := smtp.NewClient(conn, host)
+	if err != nil {
+		return map[string]interface{}{
+			"success": false,
+			"error":   fmt.Sprintf("创建 SMTP 客户端失败: %v", err),
+		}
+	}
+	defer client.Quit()
+
+	auth := smtp.PlainAuth("", senderEmail, senderPassword, host)
+	if err := client.Auth(auth); err != nil {
+		shortUser := strings.Split(senderEmail, "@")[0]
+		authShort := smtp.PlainAuth("", shortUser, senderPassword, host)
+		if err2 := client.Auth(authShort); err2 != nil {
+			errStr := err.Error() + " " + err2.Error()
+			if strings.Contains(errStr, "550") || strings.Contains(errStr, "permission") {
+				return map[string]interface{}{
+					"success": false,
+					"error":   "❌ 163 邮箱登录鉴权失败 (550 User has no permission)。\n\n【原因说明】：网易 163 邮箱默认不允许使用网页登录密码，必须使用「客户端授权密码」。\n【解决步骤】：\n1. 请登录 mail.163.com；\n2. 点击顶部【设置】->【POP3/SMTP/IMAP】；\n3. 开启【POP3/SMTP服务】并点击【新增授权密码】；\n4. 将生成的 16 位授权码填入密码框后即可秒发！",
+				}
+			}
+			return map[string]interface{}{
+				"success": false,
+				"error":   fmt.Sprintf("SMTP 身份验证失败: %v (请确认发件人邮箱及客户端授权密码)", err),
+			}
+		}
+	}
+
+	if err := client.Mail(senderEmail); err != nil {
+		return map[string]interface{}{
+			"success": false,
+			"error":   fmt.Sprintf("设置发件人失败: %v", err),
+		}
+	}
+	if err := client.Rcpt(recipientEmail); err != nil {
+		return map[string]interface{}{
+			"success": false,
+			"error":   fmt.Sprintf("设置收件人失败 (%s): %v", recipientEmail, err),
+		}
+	}
+
+	wc, err := client.Data()
+	if err != nil {
+		return map[string]interface{}{
+			"success": false,
+			"error":   fmt.Sprintf("启动邮件传输失败: %v", err),
+		}
+	}
+	if _, err := wc.Write(rawMsg.Bytes()); err != nil {
+		_ = wc.Close()
+		return map[string]interface{}{
+			"success": false,
+			"error":   fmt.Sprintf("写入邮件正文失败: %v", err),
+		}
+	}
+	if err := wc.Close(); err != nil {
+		return map[string]interface{}{
+			"success": false,
+			"error":   fmt.Sprintf("提交邮件失败: %v", err),
+		}
+	}
+
+	return map[string]interface{}{
+		"success":        true,
+		"recipientEmail": recipientEmail,
+		"senderEmail":    senderEmail,
+		"subject":        subject,
+		"message":        fmt.Sprintf("🎉 录用 Offer 邮件已成功发送至候选人【%s】(%s)！", candidateName, recipientEmail),
 	}
 }
 

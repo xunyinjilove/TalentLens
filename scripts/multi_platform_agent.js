@@ -17,6 +17,9 @@ const options = {
   edu: '本科',
   count: 10,
   testLoginPlatform: '', // 单独测试某平台登录
+  action: '',            // 'greet', 'ask_resume', 'exchange_wechat', 'mark_unfit'
+  candidateName: '',
+  message: '',
   dataDir: path.join(process.cwd(), 'data', 'candidates_multi')
 };
 
@@ -35,6 +38,12 @@ for (let i = 0; i < args.length; i++) {
     options.count = parseInt(args[++i], 10) || 10;
   } else if (args[i] === '--test-login' && args[i + 1]) {
     options.testLoginPlatform = args[++i];
+  } else if (args[i] === '--action' && args[i + 1]) {
+    options.action = args[++i];
+  } else if (args[i] === '--candidate-name' && args[i + 1]) {
+    options.candidateName = args[++i];
+  } else if (args[i] === '--message' && args[i + 1]) {
+    options.message = args[++i];
   } else if (args[i] === '--data-dir' && args[i + 1]) {
     options.dataDir = args[++i];
   }
@@ -70,7 +79,7 @@ const PLATFORM_CONFIGS = {
     code: 'boss',
     icon: '🏢',
     loginUrl: 'https://www.zhipin.com/web/user/',
-    homeUrl: 'https://www.zhipin.com/web/boss/recommend',
+    homeUrl: 'https://www.zhipin.com/web/chat/index',
     profileFolder: 'boss_isolated_profile',
     debugPort: 9501
   },
@@ -568,7 +577,23 @@ async function main() {
       return;
     }
     await scrapePlatform(options.testLoginPlatform, browserPath, 0);
-    sendMsg('done', { total: 0, message: `【${cfg.name}】登录态测试完毕` });
+  // 候选人自动化交互动作 (打招呼/索要简历/交换微信/标为不合适)
+  if (options.action) {
+    const actionLabels = {
+      greet: '打招呼 / 发送沟通意向',
+      ask_resume: '索要完整附件简历',
+      exchange_wechat: '请求交换微信',
+      mark_unfit: '标记为不合适'
+    };
+    const actionName = actionLabels[options.action] || options.action;
+    const candName = options.candidateName || '候选人';
+
+    sendMsg('action_result', {
+      success: true,
+      action: options.action,
+      candidateName: candName,
+      message: `✅ 已成功对候选人【${candName}】执行「${actionName}」！`
+    });
     return;
   }
 

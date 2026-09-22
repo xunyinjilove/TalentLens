@@ -155,6 +155,7 @@
                     <span v-if="resumeStore.selectedResume.analysis.currentRole">{{ resumeStore.selectedResume.analysis.currentRole }}</span>
                     <span v-if="resumeStore.selectedResume.analysis.workYears">{{ resumeStore.selectedResume.analysis.workYears }}经验</span>
                     <span v-if="resumeStore.selectedResume.analysis.education">{{ resumeStore.selectedResume.analysis.education }}</span>
+                    <span class="candidate-email-badge" title="候选人预留/联系邮箱"><el-icon><Message /></el-icon> qn3366271573@163.com</span>
                   </div>
                 </div>
 
@@ -197,27 +198,30 @@
                   </div>
                 </div>
 
-                <!-- BOSS 候选人自动化沟通操作栏 -->
+                <!-- 人才直通与录用自动化动作栏 -->
                 <div class="boss-actions-bar">
                   <div class="actions-header">
-                    <span class="actions-title">⚡ BOSS 招聘直通自动化动作</span>
-                    <span class="actions-sub">基于 AI 评估结论一键直连候选人</span>
+                    <span class="actions-title">⚡ 录用直通与招聘自动化动作</span>
+                    <span class="actions-sub">基于 AI 评估结论向候选人发放正式 Offer 或直连沟通</span>
                   </div>
                   <div class="actions-group">
+                    <button class="boss-act-btn offer-btn" @click="handleOpenOfferDialog" title="通过 15194921527@163.com 向候选人发送正式录用通知书">
+                      <el-icon><Message /></el-icon> 📧 发送录用 Offer
+                    </button>
+                    <button class="boss-act-btn search-online" @click="handleSearchOnlineCandidate" title="在 BOSS直聘/猎聘 中以姓名和经历定向反查该人才">
+                      <el-icon><Search /></el-icon> 🔍 平台反查该人才
+                    </button>
+                    <button class="boss-act-btn attach" @click="handleAttachResume(resumeStore.selectedResume.id)">
+                      <el-icon><Paperclip /></el-icon> 补充附件结合分析
+                    </button>
                     <button class="boss-act-btn greet" @click="handleExecuteBossAction('greet')">
                       <el-icon><ChatDotRound /></el-icon> 立即打招呼
-                    </button>
-                    <button class="boss-act-btn ask-resume" @click="handleExecuteBossAction('ask_resume')">
-                      <el-icon><DocumentAdd /></el-icon> 索要完整简历
                     </button>
                     <button class="boss-act-btn wechat" @click="handleExecuteBossAction('exchange_wechat')">
                       <el-icon><Connection /></el-icon> 交换微信
                     </button>
                     <button class="boss-act-btn unfit" @click="handleExecuteBossAction('mark_unfit')">
                       <el-icon><CloseBold /></el-icon> 标为不合适
-                    </button>
-                    <button class="boss-act-btn attach" @click="handleAttachResume(resumeStore.selectedResume.id)">
-                      <el-icon><Paperclip /></el-icon> 补充附件结合分析
                     </button>
                   </div>
                 </div>
@@ -433,6 +437,15 @@
       @refresh="handleRefreshProject"
     />
 
+    <!-- 发送录用 Offer 弹窗 -->
+    <OfferDialog
+      v-model="showOfferDialog"
+      :candidate-name="resumeStore.selectedResume?.analysis?.candidateName || '陈思远'"
+      :candidate-email="'qn3366271573@163.com'"
+      :job-title="projectStore.currentProject?.job_config?.title || resumeStore.selectedResume?.analysis?.currentRole || '临床项目经理'"
+      :company-name="'上海泰尔生物医药科技有限公司'"
+    />
+
     <!-- 开发者调试面板 (F12 切换) -->
     <DevPanel />
   </div>
@@ -446,7 +459,7 @@ import {
   Setting, Briefcase, Document, VideoPlay, Delete, View,
   CircleCheck, Warning, ChatLineSquare, Clock, Loading, CircleClose,
   RefreshRight, Download, Tickets, QuestionFilled, DocumentCopy, InfoFilled, Search,
-  ChatDotRound, DocumentAdd, Connection, CloseBold, Paperclip, Compass, Check
+  ChatDotRound, DocumentAdd, Connection, CloseBold, Paperclip, Compass, Check, Message
 } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import TitleBar from '../components/TitleBar.vue'
@@ -456,6 +469,7 @@ import LanguageSwitcher from '../components/LanguageSwitcher.vue'
 import AIConfigGuide from '../components/AIConfigGuide.vue'
 import DevPanel from '../components/DevPanel.vue'
 import BossSearchDialog from '../components/BossSearchDialog.vue'
+import OfferDialog from '../components/OfferDialog.vue'
 import { useResumeStore } from '../composables/useResumeStore'
 import { useProjectStore } from '../composables/useProjectStore'
 
@@ -475,6 +489,7 @@ const contentLoading = ref(false)
 const jobTitle = ref('高级Go开发工程师')
 const showConfigGuide = ref(false)
 const showBossDialog = ref(false)
+const showOfferDialog = ref(false)
 const animatedDetailScore = ref(0)
 let scoreAnimationFrame: number | null = null
 
@@ -554,6 +569,40 @@ async function handleExecuteBossAction(action: 'greet' | 'ask_resume' | 'exchang
     setTimeout(() => {
       ElMessage.success(`✅ 已成功对【${candidateName}】执行「${actionLabels[action]}」！`)
     }, 800)
+  }
+}
+
+function handleOpenOfferDialog() {
+  showOfferDialog.value = true
+}
+
+async function handleSearchOnlineCandidate() {
+  const resume = resumeStore.selectedResume
+  if (!resume) return
+
+  const candidateName = resume.analysis?.candidateName || resume.fileName.replace(/^【.*?】/, '').replace(/^BOSS牛人_/, '').split('_')[0] || '陈思远'
+  const currentRole = resume.analysis?.currentRole || projectStore.currentProject?.job_config?.title || '临床项目经理'
+  
+  ElMessage.info(`正在全网反查【${candidateName}】(${currentRole}) 的线上在线档案...`)
+
+  let WailsApp: any = null
+  try { WailsApp = await import('../../wailsjs/go/main/App') } catch {}
+
+  if (WailsApp && WailsApp.StartMultiPlatformSearch) {
+    try {
+      await WailsApp.StartMultiPlatformSearch(
+        projectId.value,
+        candidateName,
+        '上海',
+        0,
+        '',
+        5,
+        ['boss', 'liepin']
+      )
+      ElMessage.success(`✅ 已启动平台直连，正在定向反向检索候选人【${candidateName}】！`)
+    } catch (e: any) {
+      ElMessage.error(`反查启动失败: ${e.message || e}`)
+    }
   }
 }
 
@@ -1826,6 +1875,29 @@ onMounted(async () => {
       cursor: pointer;
       transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
 
+      &.offer-btn {
+        background: linear-gradient(135deg, #2563eb 0%, #0d9488 100%);
+        color: #ffffff;
+        box-shadow: 0 2px 6px rgba(37, 99, 235, 0.3);
+        &:hover {
+          background: linear-gradient(135deg, #1d4ed8 0%, #0f766e 100%);
+          transform: translateY(-1px);
+          box-shadow: 0 4px 10px rgba(37, 99, 235, 0.4);
+        }
+      }
+
+      &.search-online {
+        background: #f8fafc;
+        color: #1e293b;
+        border-color: #cbd5e1;
+        &:hover {
+          background: #f1f5f9;
+          border-color: #94a3b8;
+          color: #0f172a;
+          transform: translateY(-1px);
+        }
+      }
+
       &.greet {
         background: #00bebd;
         color: #ffffff;
@@ -1859,6 +1931,19 @@ onMounted(async () => {
       }
     }
   }
+}
+
+.candidate-email-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: #eff6ff;
+  color: #2563eb;
+  border: 1px solid #bfdbfe;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 11.5px;
+  font-weight: 500;
 }
 
 // 语言切换器样式
