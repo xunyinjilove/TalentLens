@@ -166,10 +166,12 @@ async function launchPlatformBrowser(cfg, browserPath, profileDir) {
     const browser = await puppeteer.launch({
       executablePath: browserPath,
       headless: false,
+      defaultViewport: null,
       ignoreDefaultArgs: ['--enable-automation'],
       args: [
         `--user-data-dir=${profileDir}`,
         `--remote-debugging-port=${debugPort}`,
+        '--disable-blink-features=AutomationControlled',
         '--no-first-run',
         '--no-default-browser-check',
         '--disable-infobars',
@@ -185,6 +187,7 @@ async function launchPlatformBrowser(cfg, browserPath, profileDir) {
   const child = spawn(browserPath, [
     `--remote-debugging-port=${debugPort}`,
     `--user-data-dir=${profileDir}`,
+    '--disable-blink-features=AutomationControlled',
     '--no-first-run',
     '--no-default-browser-check',
     '--start-maximized',
@@ -243,23 +246,64 @@ async function scrapePlatform(platformKey, browserPath, targetCount) {
   });
 
   if (!page) {
-    // 没有找到在平台域名上的 tab，取第一个
     page = pages[0] || (await browser.newPage());
   }
 
-  // 只在页面确实停留在 about:blank 时才导航（不中断已有的重定向链）
+  // 注入反检测防护：隐藏 webdriver，并拦截任何脚本企图把页面强制跳转至 about:blank 的行为
+  try {
+    await page.evaluateOnNewDocument(() => {
+      Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
+      window.chrome = window.chrome || { runtime: {} };
+
+      // 阻止 Location.prototype.replace / assign 跳转至 about:blank
+      try {
+        const origReplace = Location.prototype.replace;
+        Location.prototype.replace = function(url) {
+          if (typeof url === 'string' && url.includes('about:blank')) {
+            console.warn('[TalentLens] 已拦截第三方脚本强制跳转至 about:blank');
+            return;
+          }
+          return origReplace.call(this, url);
+        };
+      } catch (e) {}
+
+      try {
+        const origAssign = Location.prototype.assign;
+        Location.prototype.assign = function(url) {
+          if (typeof url === 'string' && url.includes('about:blank')) {
+            console.warn('[TalentLens] 已拦截第三方脚本 assign 跳转至 about:blank');
+            return;
+          }
+          return origAssign.call(this, url);
+        };
+      } catch (e) {}
+    });
+  } catch (e) {}
+
+  // 拦截并阻断猎聘等平台的反爬崩溃探针脚本 (security.min.js)
+  try {
+    await page.setRequestInterception(true);
+    page.on('request', req => {
+      const u = req.url() || '';
+      // 猎聘 security.min.js 检测到 DevTools/自动化后会强行清空页面跳转 about:blank
+      if (u.includes('security.min.js')) {
+        req.abort();
+      } else {
+        req.continue();
+      }
+    });
+  } catch (e) {}
+
+  // 打开主页 / 登录页
   try {
     const currentUrl = page.url() || '';
     if (!currentUrl || currentUrl === 'about:blank') {
       await page.goto(cfg.homeUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
     }
   } catch (e) {
-    // homeUrl 导航失败（可能因为重定向冲突），尝试直接打开登录页
     try {
       await page.goto(cfg.loginUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
-    } catch (e2) {
-      // 仍然失败，但不影响后续流程 — checkAuth 会检测页面状态
-    }
+    } catch (e2) {}
   }
 
   // 严格 DOM 登录态检测函数
@@ -267,16 +311,7 @@ async function scrapePlatform(platformKey, browserPath, targetCount) {
     try {
       const curUrl = page.url() || '';
       if (!curUrl || curUrl.includes('about:blank')) {
-        // 页面意外停留在 about:blank — 尝试重新导航
-        try {
-          await page.goto(cfg.homeUrl, { waitUntil: 'domcontentloaded', timeout: 15000 });
-        } catch (navErr) {
-          try { await page.goto(cfg.loginUrl, { waitUntil: 'domcontentloaded', timeout: 15000 }); } catch (e2) {}
-        }
-        const retryUrl = page.url() || '';
-        if (!retryUrl || retryUrl.includes('about:blank')) {
-          return { logged: false, curUrl: retryUrl, reason: 'blank_url' };
-        }
+        return { logged: false, curUrl, reason: 'blank_url' };
       }
 
       const domAuth = await page.evaluate((code) => {
@@ -291,7 +326,7 @@ async function scrapePlatform(platformKey, browserPath, targetCount) {
         // 猎聘网
         if (code === 'liepin') {
           const isLoginUrl = url.includes('/user/login') || url.includes('/login') || url.includes('/passport');
-          const hasLoginForm = !!document.querySelector('input[name*="user_login"], input[type="password"], .login-container, .login-box, .scan-box, .login-form');
+          const hasLoginForm = !!document.querySelector('input[name*="user_login"], input[type="password"], input[placeholder*="手机号"], input[placeholder*="验证码"], .ant-lpt-input, .login-container, .login-box, .scan-box, .login-form');
           if (isLoginUrl || hasLoginForm) {
             return { logged: false, reason: 'login_form_present' };
           }
