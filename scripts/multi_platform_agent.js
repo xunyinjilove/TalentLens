@@ -4,7 +4,7 @@
 
 const fs = require('fs');
 const path = require('path');
-const { spawn } = require('child_process');
+const { spawn, execSync } = require('child_process');
 const puppeteer = require('puppeteer-core');
 
 // 命令行参数解析
@@ -63,7 +63,7 @@ function findBrowserExecutable() {
   return null;
 }
 
-// 平台配置定义
+// 平台配置定义 — 每个平台分配固定 debugPort 避免冲突
 const PLATFORM_CONFIGS = {
   boss: {
     name: 'BOSS直聘',
@@ -71,7 +71,8 @@ const PLATFORM_CONFIGS = {
     icon: '🏢',
     loginUrl: 'https://www.zhipin.com/web/user/',
     homeUrl: 'https://www.zhipin.com/web/boss/recommend',
-    profileFolder: 'boss_isolated_profile'
+    profileFolder: 'boss_isolated_profile',
+    debugPort: 9501
   },
   zhaopin: {
     name: '智联招聘',
@@ -79,7 +80,8 @@ const PLATFORM_CONFIGS = {
     icon: '💼',
     loginUrl: 'https://passport.zhaopin.com/login',
     homeUrl: 'https://ihr.zhaopin.com/',
-    profileFolder: 'zhaopin_isolated_profile'
+    profileFolder: 'zhaopin_isolated_profile',
+    debugPort: 9502
   },
   '51job': {
     name: '前程无忧',
@@ -87,7 +89,8 @@ const PLATFORM_CONFIGS = {
     icon: '📑',
     loginUrl: 'https://ehire.51job.com/MainLogin.aspx',
     homeUrl: 'https://ehire.51job.com/',
-    profileFolder: '51job_isolated_profile'
+    profileFolder: '51job_isolated_profile',
+    debugPort: 9503
   },
   liepin: {
     name: '猎聘网',
@@ -95,7 +98,8 @@ const PLATFORM_CONFIGS = {
     icon: '🎯',
     loginUrl: 'https://lpt.liepin.com/user/login',
     homeUrl: 'https://lpt.liepin.com/',
-    profileFolder: 'liepin_isolated_profile'
+    profileFolder: 'liepin_isolated_profile',
+    debugPort: 9504
   }
 };
 
@@ -111,55 +115,101 @@ function isDuplicateCandidate(name, company, exp) {
   return false;
 }
 
-// 弹性双模浏览器唤起 (Puppeteer 直接启动 + CDP 端口回退)
-async function launchPlatformBrowser(cfg, browserPath, profileDir) {
-  const commonArgs = [
-    `--user-data-dir=${profileDir}`,
-    '--no-first-run',
-    '--no-default-browser-check',
-    '--disable-infobars',
-    '--start-maximized'
-  ];
+// 杀死占用指定 profile 目录的 Edge/Chrome 进程
+function killBrowserByProfile(profileDir) {
+  const normalizedDir = profileDir.replace(/\\/g, '\\\\');
+  for (const procName of ['msedge.exe', 'chrome.exe']) {
+    try {
+      const cmd = `wmic process where "name='${procName}' and CommandLine like '%${normalizedDir}%'" call terminate 2>nul`;
+      execSync(cmd, { stdio: 'ignore', timeout: 5000 });
+    } catch (e) {
+      // 静默 — WMIC 在没有匹配进程时返回非零退出码
+    }
+  }
+}
 
+// 清除浏览器 profile 目录下的锁文件
+function clearProfileLocks(profileDir) {
+  for (const lockName of ['SingletonLock', 'SingletonSocket', 'SingletonCookie']) {
+    try {
+      const f = path.join(profileDir, lockName);
+      if (fs.existsSync(f)) fs.unlinkSync(f);
+    } catch (e) {}
+  }
+}
+
+// 弹性三模浏览器唤起
+// 模式1: 连接已有 CDP 端口  →  模式2: 清残 + Puppeteer 直启  →  模式3: 清残 + CDP spawn 回退
+async function launchPlatformBrowser(cfg, browserPath, profileDir) {
+  const debugPort = cfg.debugPort;
+
+  // ─── 模式1: 尝试连接已经在跑的浏览器实例 ───
+  try {
+    const browser = await puppeteer.connect({
+      browserURL: `http://127.0.0.1:${debugPort}`,
+      defaultViewport: null
+    });
+    sendMsg('status', { platform: cfg.code, message: `♻️ 已复用【${cfg.name}】已打开的浏览器窗口` });
+    return browser;
+  } catch (e) {
+    // 没有在跑的实例，继续下面的流程
+  }
+
+  // ─── 清理残留进程 & 锁文件 ───
+  sendMsg('status', { platform: cfg.code, message: `🧹 清理【${cfg.name}】残留浏览器进程...` });
+  killBrowserByProfile(profileDir);
+  await new Promise(r => setTimeout(r, 1500)); // 等进程完全退出
+  clearProfileLocks(profileDir);
+
+  // ─── 模式2: Puppeteer 直接启动 ───
   try {
     const browser = await puppeteer.launch({
       executablePath: browserPath,
       headless: false,
       ignoreDefaultArgs: ['--enable-automation'],
-      args: commonArgs
+      args: [
+        `--user-data-dir=${profileDir}`,
+        `--remote-debugging-port=${debugPort}`,
+        '--no-first-run',
+        '--no-default-browser-check',
+        '--disable-infobars',
+        '--start-maximized'
+      ]
     });
     return browser;
   } catch (err1) {
-    const debugPort = 9333 + Math.floor(Math.random() * 500);
-    const child = spawn(browserPath, [
-      `--remote-debugging-port=${debugPort}`,
-      `--user-data-dir=${profileDir}`,
-      '--no-first-run',
-      '--no-default-browser-check',
-      '--start-maximized',
-      cfg.homeUrl
-    ], { detached: true, stdio: 'ignore' });
-    child.unref();
-
-    for (let i = 0; i < 14; i++) {
-      await new Promise(r => setTimeout(r, 500));
-      try {
-        const browser = await puppeteer.connect({
-          browserURL: `http://127.0.0.1:${debugPort}`,
-          defaultViewport: null
-        });
-        return browser;
-      } catch (e) {}
-    }
-
-    throw new Error(`浏览器启动异常: ${err1.message}`);
+    sendMsg('status', { platform: cfg.code, message: `⚠️ Puppeteer 直启失败 (${err1.message.substring(0, 80)})，尝试 CDP 回退...` });
   }
+
+  // ─── 模式3: 手动 spawn Edge + CDP connect ───
+  const child = spawn(browserPath, [
+    `--remote-debugging-port=${debugPort}`,
+    `--user-data-dir=${profileDir}`,
+    '--no-first-run',
+    '--no-default-browser-check',
+    '--start-maximized',
+    cfg.homeUrl
+  ], { detached: true, stdio: 'ignore' });
+  child.unref();
+
+  for (let i = 0; i < 20; i++) {
+    await new Promise(r => setTimeout(r, 800));
+    try {
+      const browser = await puppeteer.connect({
+        browserURL: `http://127.0.0.1:${debugPort}`,
+        defaultViewport: null
+      });
+      return browser;
+    } catch (e) {}
+  }
+
+  throw new Error(`无法启动浏览器 (profile: ${path.basename(profileDir)})，请确保没有其他 Edge 窗口占用该配置文件`);
 }
 
-// 统一抓取单个平台
+// 统一抓取单个平台 (返回 null 表示启动/连接失败，返回 [] 表示成功连接但无结果)
 async function scrapePlatform(platformKey, browserPath, targetCount) {
   const cfg = PLATFORM_CONFIGS[platformKey];
-  if (!cfg) return [];
+  if (!cfg) return null;
 
   sendMsg('status', {
     platform: platformKey,
@@ -177,7 +227,7 @@ async function scrapePlatform(platformKey, browserPath, targetCount) {
       platform: platformKey,
       message: `❌ 无法启动 ${cfg.name} 浏览器直连: ${err.message}`
     });
-    return [];
+    return null; // null = 启动失败（区别于 [] 即成功但无结果）
   }
 
   const pages = await browser.pages();
@@ -461,15 +511,35 @@ async function main() {
   });
 
   let allResults = [];
+  let errorCount = 0;
+  let connectedPlatforms = [];
+
   for (const plat of options.platforms) {
     const res = await scrapePlatform(plat, browserPath, options.count);
-    allResults = allResults.concat(res);
+    if (res === null) {
+      // 该平台启动/连接失败
+      errorCount++;
+    } else {
+      connectedPlatforms.push(plat);
+      allResults = allResults.concat(res);
+    }
   }
 
-  sendMsg('done', {
-    total: allResults.length,
-    message: `🎉 全渠道聚合检索完毕！共从 ${options.platforms.length} 大平台成功采集 ${allResults.length} 份真实人才档案，已自动流转至 AI 深度评测引擎！`
-  });
+  if (errorCount > 0 && connectedPlatforms.length === 0) {
+    // 所有平台都失败了 → 不发 done，发 error
+    sendMsg('error', {
+      message: `❌ 所有选定平台 (${options.platforms.length} 个) 均连接失败。请先关闭所有已打开的 Edge 浏览器窗口，然后重试。`
+    });
+  } else {
+    sendMsg('done', {
+      total: allResults.length,
+      connectedPlatforms: connectedPlatforms.length,
+      errorPlatforms: errorCount,
+      message: allResults.length > 0
+        ? `🎉 全渠道聚合检索完毕！共从 ${connectedPlatforms.length} 大平台成功采集 ${allResults.length} 份真实人才档案，已自动流转至 AI 深度评测引擎！`
+        : `⚠️ 已成功连接 ${connectedPlatforms.length} 个平台，但未发现匹配的候选人卡片。请在浏览器中手动搜索后重试。`
+    });
+  }
 }
 
 main().catch(err => {
