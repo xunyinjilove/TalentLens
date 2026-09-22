@@ -180,10 +180,8 @@ async function launchPlatformBrowser(cfg, browserPath, profileDir) {
       args: [
         `--user-data-dir=${profileDir}`,
         `--remote-debugging-port=${debugPort}`,
-        '--disable-blink-features=AutomationControlled',
         '--no-first-run',
         '--no-default-browser-check',
-        '--disable-infobars',
         '--start-maximized'
       ]
     });
@@ -196,11 +194,9 @@ async function launchPlatformBrowser(cfg, browserPath, profileDir) {
   const child = spawn(browserPath, [
     `--remote-debugging-port=${debugPort}`,
     `--user-data-dir=${profileDir}`,
-    '--disable-blink-features=AutomationControlled',
     '--no-first-run',
     '--no-default-browser-check',
-    '--start-maximized',
-    cfg.homeUrl
+    '--start-maximized'
   ], { detached: true, stdio: 'ignore' });
   child.unref();
 
@@ -242,10 +238,10 @@ async function scrapePlatform(platformKey, browserPath, targetCount) {
     return null; // null = 启动失败（区别于 [] 即成功但无结果）
   }
 
-  // 等待浏览器页面稳定（模式3下 Edge 可能正在加载 homeUrl / 重定向登录页）
-  await new Promise(r => setTimeout(r, 3000));
+  // 等待浏览器进程就绪
+  await new Promise(r => setTimeout(r, 1500));
 
-  const pages = await browser.pages();
+  let pages = await browser.pages();
 
   // 优先选择已经在平台域名上的 tab（避免选错 about:blank tab）
   const domainHint = cfg.code === '51job' ? '51job.com' : cfg.code;
@@ -257,6 +253,22 @@ async function scrapePlatform(platformKey, browserPath, targetCount) {
   if (!page) {
     page = pages[0] || (await browser.newPage());
   }
+
+  // 自动清理多余的 about:blank 空白标签页，避免界面上残留空白标签页
+  try {
+    pages = await browser.pages();
+    for (const p of pages) {
+      if (p !== page) {
+        const u = p.url() || '';
+        if (!u || u === 'about:blank') {
+          await p.close().catch(() => {});
+        }
+      }
+    }
+  } catch (e) {}
+
+  // 确保主标签页置顶激活
+  try { await page.bringToFront(); } catch (e) {}
 
   // 注入反检测防护：隐藏 webdriver，并拦截任何脚本企图把页面强制跳转至 about:blank 的行为
   try {
@@ -314,6 +326,17 @@ async function scrapePlatform(platformKey, browserPath, targetCount) {
       await page.goto(cfg.loginUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
     } catch (e2) {}
   }
+
+  // 导航完成后再次确认前台激活并清理任何残留空白页
+  try {
+    const curPages = await browser.pages();
+    for (const p of curPages) {
+      if (p !== page && (p.url() === 'about:blank' || !p.url())) {
+        await p.close().catch(() => {});
+      }
+    }
+    await page.bringToFront();
+  } catch (e) {}
 
   // 严格 DOM 登录态检测函数
   const checkAuth = async () => {

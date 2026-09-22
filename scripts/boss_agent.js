@@ -114,8 +114,6 @@ async function runBossEnterpriseFlow() {
         `--user-data-dir=${profileDir}`,
         '--no-first-run',
         '--no-default-browser-check',
-        '--disable-blink-features=AutomationControlled',
-        '--disable-infobars',
         '--disable-extensions',
         '--start-maximized'
       ]
@@ -127,6 +125,16 @@ async function runBossEnterpriseFlow() {
 
   const pages = await browser.pages();
   const page = pages[0] || (await browser.newPage());
+
+  // 清理可能存在的多余空白页并激活主标签页
+  try {
+    for (const p of pages) {
+      if (p !== page && (p.url() === 'about:blank' || !p.url())) {
+        await p.close().catch(() => {});
+      }
+    }
+    await page.bringToFront();
+  } catch (e) {}
 
   try {
     if (!page.url().includes('zhipin.com')) {
