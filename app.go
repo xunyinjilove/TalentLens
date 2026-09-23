@@ -1113,13 +1113,32 @@ func (a *App) ExecuteBossCandidateAction(actionType string, candidateName string
 		label = actionType
 	}
 
+	// 纯净化候选人姓名，去掉【前程无忧】等外包前缀
+	cleanName := strings.TrimSpace(candidateName)
+	cleanName = regexp.MustCompile(`^【.*?】\s*`).ReplaceAllString(cleanName, "")
+	cleanName = regexp.MustCompile(`^BOSS牛人_\s*`).ReplaceAllString(cleanName, "")
+	if strings.Contains(cleanName, "_") {
+		cleanName = strings.TrimSpace(strings.Split(cleanName, "_")[0])
+	}
+	if cleanName == "" {
+		cleanName = "候选人"
+	}
+
 	if scriptPath != "" {
-		cmd := exec.Command("node", scriptPath,
+		args := []string{
+			scriptPath,
 			"--action", actionType,
-			"--candidate-name", candidateName,
-			"--message", message,
+			"--candidate-name", cleanName,
 			"--data-dir", dataDir,
-		)
+		}
+		if message != "" {
+			if strings.HasPrefix(message, "http://") || strings.HasPrefix(message, "https://") {
+				args = append(args, "--candidate-url", message)
+			} else {
+				args = append(args, "--message", message)
+			}
+		}
+		cmd := exec.Command("node", args...)
 		out, err := cmd.Output()
 		if err == nil {
 			lines := strings.Split(string(out), "\n")
@@ -1142,15 +1161,18 @@ func (a *App) ExecuteBossCandidateAction(actionType string, candidateName string
 		"type":          "action_result",
 		"success":       true,
 		"action":        actionType,
-		"candidateName": candidateName,
-		"message":       fmt.Sprintf("✅ 已成功对候选人【%s】执行「%s」！", candidateName, label),
+		"candidateName": cleanName,
+		"message":       fmt.Sprintf("✅ 已成功对候选人【%s】执行「%s」！", cleanName, label),
 	}
 }
 
 // SendOfferEmail 向候选人邮箱发送正式录用通知书 (Offer Letter)
 func (a *App) SendOfferEmail(recipientEmail string, candidateName string, jobTitle string, companyName string, salaryPackage string, reportDate string, customNotes string, senderEmail string, senderPassword string) map[string]interface{} {
-	if recipientEmail == "" {
-		recipientEmail = "qn3366271573@163.com"
+	if strings.TrimSpace(recipientEmail) == "" {
+		return map[string]interface{}{
+			"success": false,
+			"message": "该候选人未公开个人邮箱，请先在招聘网站在线打招呼沟通获取邮箱后再发送录用通知！",
+		}
 	}
 	if senderEmail == "" {
 		senderEmail = "15194921527@163.com"

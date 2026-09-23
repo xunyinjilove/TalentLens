@@ -19,6 +19,7 @@ const options = {
   testLoginPlatform: '', // 单独测试某平台登录
   action: '',            // 'greet', 'ask_resume', 'exchange_wechat', 'mark_unfit'
   candidateName: '',
+  candidateUrl: '',
   message: '',
   dataDir: path.join(process.cwd(), 'data', 'candidates_multi')
 };
@@ -42,6 +43,8 @@ for (let i = 0; i < args.length; i++) {
     options.action = args[++i];
   } else if (args[i] === '--candidate-name' && args[i + 1]) {
     options.candidateName = args[++i];
+  } else if (args[i] === '--candidate-url' && args[i + 1]) {
+    options.candidateUrl = args[++i];
   } else if (args[i] === '--message' && args[i + 1]) {
     options.message = args[++i];
   } else if (args[i] === '--data-dir' && args[i + 1]) {
@@ -1131,25 +1134,58 @@ async function main() {
       mark_unfit: '标记为不合适'
     };
     const actionName = actionLabels[options.action] || options.action;
-    const candName = options.candidateName || '候选人';
+    // 纯净化候选人姓名，去掉【前程无忧】等外包前缀
+    const rawName = options.candidateName || '候选人';
+    const cleanName = rawName.replace(/^【.*?】/, '').replace(/^BOSS牛人_/, '').split('_')[0].trim();
 
     let liveTriggered = false;
     let liveMsg = '';
 
-    // 尝试连接正在运行的浏览器端口进行真实页面同步交互（借鉴 GoodHR 真实自动化流程）
-    for (const port of [9501, 9502, 9504, 9503]) {
+    // 尝试连接正在运行的浏览器端口进行真实页面同步交互（优先 51job 9503 与 BOSS 9501）
+    for (const port of [9503, 9501, 9502, 9504]) {
       try {
         const browser = await puppeteer.connect({
           browserURL: `http://127.0.0.1:${port}`,
           defaultViewport: null
         });
-        const pages = await browser.pages();
+        let pages = await browser.pages();
+
+        // 若提供了 candidateUrl 且当前没有打开该简历页面，主动在该平台浏览器中打开
+        if (options.candidateUrl && (
+          (port === 9503 && options.candidateUrl.includes('51job')) ||
+          (port === 9501 && options.candidateUrl.includes('zhipin')) ||
+          (port === 9502 && options.candidateUrl.includes('zhaopin')) ||
+          (port === 9504 && options.candidateUrl.includes('liepin'))
+        )) {
+          const hasUrl = pages.some(p => p.url().includes(options.candidateUrl) || (options.candidateUrl.includes('ehire.51job.com') && p.url().includes('ehire.51job.com')));
+          if (!hasUrl) {
+            try {
+              const newP = await browser.newPage();
+              await newP.goto(options.candidateUrl, { waitUntil: 'domcontentloaded', timeout: 15000 });
+              await new Promise(r => setTimeout(r, 1500));
+              pages = await browser.pages();
+            } catch (e) {}
+          }
+        }
+
         for (const p of pages) {
           const u = p.url() || '';
           if (u.includes('zhipin.com') || u.includes('zhaopin.com') || u.includes('liepin.com') || u.includes('51job.com')) {
             const framesToSearch = [p, ...p.frames().filter(f => f !== p.mainFrame())];
             for (const f of framesToSearch) {
               const clickRes = await f.evaluate((act, name) => {
+                const triggerClick = (targetEl) => {
+                  try {
+                    ['pointerdown', 'mousedown', 'pointerup', 'mouseup', 'click'].forEach(evtType => {
+                      targetEl.dispatchEvent(new MouseEvent(evtType, { bubbles: true, cancelable: true, view: window }));
+                    });
+                  } catch (e) {}
+                  if (typeof targetEl.click === 'function') {
+                    try { targetEl.click(); } catch (e) {}
+                  }
+                };
+
+                // 1. 查找匹配候选人的卡片
                 const cardSelectors = [
                   '.talent-search-container .card',
                   'div.card',
@@ -1164,57 +1200,79 @@ async function main() {
                   '.candidate-box'
                 ];
                 const cards = Array.from(document.querySelectorAll(cardSelectors.join(', ')));
-                
-                // 查找目标卡片（匹配候选人姓名或取首位）
-                let targetCard = null;
-                if (name && name !== '候选人') {
-                  targetCard = cards.find(c => c.innerText && c.innerText.includes(name));
-                } else if (cards.length > 0) {
-                  targetCard = cards[0];
+                let targetContainer = null;
+                if (cards.length > 0) {
+                  if (name && name !== '候选人') {
+                    targetContainer = cards.find(c => c.innerText && c.innerText.includes(name));
+                  }
+                  if (!targetContainer && cards.length === 1) targetContainer = cards[0];
                 }
 
-                // 也检查是否有已打开的微简历抽屉
-                const drawer = document.querySelector('.el-drawer, .resume-detail, [class*="drawer"]');
-                const rootContainer = targetCard || drawer;
+                // 2. 查找已打开的抽屉
+                if (!targetContainer) {
+                  targetContainer = document.querySelector('.el-drawer, .resume-detail, [class*="drawer"]');
+                }
 
-                if (rootContainer) {
+                // 3. 关键突破：若当前整个页面就是候选人微简历全屏/独立详情页（如 51job 独立详情页）！
+                // 直接以 document.body 为查找容器！
+                if (!targetContainer) {
+                  targetContainer = document.body;
+                }
+
+                if (targetContainer) {
                   if (act === 'greet') {
                     // 全渠道打招呼关键词匹配
                     // 51job: 立即Hi聊, Hi聊, .talk_btn
                     // Boss: 打招呼, 继续沟通, .btn-greet
                     // 智联: 聊一聊, .btn-chat
                     // 猎聘: 立即沟通, 打招呼, .btn-contact
-                    const clickables = Array.from(rootContainer.querySelectorAll('button, div, span, a'));
-                    const greetKeywords = ['hi聊', '立即hi聊', '打招呼', '聊一聊', '立即沟通', '沟通', '发消息'];
+                    const clickables = Array.from(targetContainer.querySelectorAll('button, div, span, a'));
+                    const greetKeywords = ['立即hi聊', 'hi聊', '打招呼', '聊一聊', '立即沟通', '沟通', '发消息'];
+                    
                     const btn = clickables.find(el => {
                       const t = (el.innerText || '').trim().toLowerCase();
                       const cls = (el.className || '').toLowerCase();
                       const isVis = el.offsetParent !== null || el.getClientRects().length > 0;
                       if (!isVis) return false;
-                      return greetKeywords.some(kw => t.includes(kw)) || cls.includes('greet') || cls.includes('chat') || cls.includes('talk');
+                      if (t.length > 15) return false; // 排除长段落
+                      return greetKeywords.some(kw => t === kw || t.includes(kw)) || cls.includes('talk_btn') || cls.includes('btn-greet');
                     });
 
                     if (btn) {
                       btn.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                      btn.click();
-                      return { ok: true, detail: `点击了「${btn.innerText.trim()}」按钮` };
+                      triggerClick(btn);
+
+                      // 51job / Boss 可能弹出确认或快捷打招呼弹窗，尝试一并触发确认发送
+                      setTimeout(() => {
+                        try {
+                          const confirmBtns = Array.from(document.querySelectorAll('button, div, span, a'));
+                          const sendBtn = confirmBtns.find(b => {
+                            const bt = (b.innerText || '').trim();
+                            return (bt === '发送' || bt === '立即发送' || bt === '确定发送') && (b.offsetParent !== null);
+                          });
+                          if (sendBtn) triggerClick(sendBtn);
+                        } catch (e) {}
+                      }, 400);
+
+                      return { ok: true, detail: `成功点击了「${btn.innerText.trim()}」按钮` };
                     }
                   } else if (act === 'mark_unfit') {
-                    const unfitBtn = rootContainer.querySelector('.btn-unfit, [class*="unfit"], [title*="不合适"], [class*="close"]');
+                    const unfitBtn = targetContainer.querySelector('.btn-unfit, [class*="unfit"], [title*="不合适"], [class*="close"]');
                     if (unfitBtn) {
-                      unfitBtn.click();
+                      triggerClick(unfitBtn);
                       return { ok: true, detail: '点击了不合适按钮' };
                     }
                   }
                 }
                 return { ok: false };
-              }, options.action, candName).catch(() => ({ ok: false }));
+              }, options.action, cleanName).catch(() => ({ ok: false }));
 
               if (clickRes.ok) {
                 liveTriggered = true;
-                liveMsg = `（已在正在运行的浏览器工作台中同步触发「${actionName}」）`;
-                // 模拟 GoodHR 规范：按 Escape 键安全关闭可能弹出的全屏浮层
-                await p.keyboard.press('Escape').catch(() => {});
+                liveMsg = `（已在正在运行的浏览器工作台中${clickRes.detail}）`;
+                // 将页面置顶激活，让用户能直观看到弹出的沟通窗口/对话输入框
+                await p.bringToFront().catch(() => {});
+                await new Promise(r => setTimeout(r, 1200));
                 break;
               }
             }
@@ -1228,8 +1286,10 @@ async function main() {
     sendMsg('action_result', {
       success: true,
       action: options.action,
-      candidateName: candName,
-      message: `✅ 已成功对候选人【${candName}】执行「${actionName}」！${liveMsg}`
+      candidateName: cleanName,
+      message: liveTriggered
+        ? `✅ 已成功对候选人【${cleanName}】执行「${actionName}」！${liveMsg}`
+        : `⚠️ 未能在当前打开的浏览器页面中定位到【${cleanName}】的打招呼按钮（请确认该候选人页面已打开）`
     });
     return;
   }

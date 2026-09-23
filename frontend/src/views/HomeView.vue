@@ -537,7 +537,9 @@ async function handleExecuteBossAction(action: 'greet' | 'ask_resume' | 'exchang
   const resume = resumeStore.selectedResume
   if (!resume) return
 
-  const candidateName = resume.analysis?.candidateName || resume.fileName.replace(/^BOSS牛人_/, '').split('_')[0] || '候选人'
+  // 纯净化候选人姓名，去掉【前程无忧】、【BOSS】等外包前缀与后缀
+  let candidateName = resume.analysis?.candidateName || (resume.fileName || '').replace(/^【.*?】/, '').replace(/^BOSS牛人_/, '').split('_')[0].trim()
+  if (!candidateName) candidateName = '候选人'
   
   let WailsApp: any = null
   try { WailsApp = await import('../../wailsjs/go/main/App') } catch {}
@@ -553,9 +555,14 @@ async function handleExecuteBossAction(action: 'greet' | 'ask_resume' | 'exchang
 
   if (WailsApp && WailsApp.ExecuteBossCandidateAction) {
     try {
-      const res = await WailsApp.ExecuteBossCandidateAction(action, candidateName, '')
+      const candidateUrl = resume.url || ''
+      const res = await WailsApp.ExecuteBossCandidateAction(action, candidateName, candidateUrl)
       if (res && res.message) {
-        ElMessage.success(res.message)
+        if (res.success) {
+          ElMessage.success(res.message)
+        } else {
+          ElMessage.warning(res.message)
+        }
       } else {
         ElMessage.success(`✅ 已成功对【${candidateName}】执行「${actionLabels[action]}」！`)
       }
