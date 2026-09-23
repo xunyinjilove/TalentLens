@@ -275,6 +275,163 @@ async function extractCandidatesAcrossFrames(page, targetCount, keyword, platfor
   return [];
 }
 
+// 详情穿透引擎：针对搜索列表仅展示精简摘要的特性，点击候选人穿透提取抽屉/新标签页中的全量履历与优势
+async function enrichCandidatesWithFullDetail(page, browser, candidates, platformKey, cfg) {
+  if (!candidates || candidates.length === 0) return candidates;
+
+  sendMsg('status', {
+    platform: platformKey,
+    message: `🔍 【${cfg.name}】正在进行简历深度穿透，逐一提取全量工作经历与完整优势...`
+  });
+
+  const enriched = [];
+
+  for (let i = 0; i < candidates.length; i++) {
+    const cand = candidates[i];
+    sendMsg('status', {
+      platform: platformKey,
+      message: `📑 正在穿透读取【${cand.name}】的完整微简历档案 (${i + 1}/${candidates.length})...`
+    });
+
+    let fullDetailText = '';
+
+    try {
+      // 1. 设置新页面监听（如果点击打开的是新标签页）
+      let newPagePromise = new Promise(resolve => {
+        const handler = async target => {
+          try {
+            const p = await target.page();
+            if (p) {
+              browser.off('targetcreated', handler);
+              resolve(p);
+            }
+          } catch (e) { resolve(null); }
+        };
+        browser.on('targetcreated', handler);
+        setTimeout(() => {
+          browser.off('targetcreated', handler);
+          resolve(null);
+        }, 3000);
+      });
+
+      // 2. 拟人点击候选人卡片或姓名
+      const clicked = await page.evaluate((candName, idx) => {
+        const cards = document.querySelectorAll(
+          '.talent-search-container .card, div.card, .eh-talent-search .card, .candidate-card-wrap, .geek-item, .res-list tr, .candidate-box'
+        );
+        let targetCard = null;
+        for (const c of cards) {
+          const nameEl = c.querySelector('.firstline .name, span.name, .name, h3, h4, .user-name');
+          if (nameEl && nameEl.innerText && nameEl.innerText.includes(candName)) {
+            targetCard = c;
+            break;
+          }
+        }
+        if (!targetCard && cards[idx]) targetCard = cards[idx];
+
+        if (targetCard) {
+          const clickTarget = targetCard.querySelector('.firstline .name, span.name, .name, a, h3, h4') || targetCard;
+          try { clickTarget.scrollIntoView({ behavior: 'smooth', block: 'center' }); } catch (e) {}
+          clickTarget.click();
+          return true;
+        }
+        return false;
+      }, cand.name, i);
+
+      if (clicked) {
+        // 3. 检查是否有新页面产生
+        const newPage = await newPagePromise;
+        if (newPage) {
+          // 等待新标签页文本内容渲染完毕
+          await newPage.waitForFunction(
+            () => document.body && document.body.innerText.length > 300,
+            { timeout: 5000 }
+          ).catch(() => {});
+
+          fullDetailText = await newPage.evaluate(() => document.body.innerText).catch(() => '');
+          await newPage.close().catch(() => {});
+        } else {
+          // 4. 新标签页未打开，等待页面内 Element Plus 抽屉/模态弹层挂载渲染 (最长等待 2.5 秒)
+          const waitStart = Date.now();
+          while (Date.now() - waitStart < 2500) {
+            fullDetailText = await page.evaluate(() => {
+              // 优先查找 Element Plus / Ant Design / 招聘业务标准抽屉容器
+              const drawerSelectors = [
+                '.el-drawer__body', '.el-drawer',
+                '.resume-detail', '.resume-detail-drawer', '.detail-box',
+                '.candidate-detail', '.user-detail', '.dialog-resume',
+                '[class*="resume-detail"]', '[class*="ResumeDetail"]',
+                '.chat-detail'
+              ];
+              for (const sel of drawerSelectors) {
+                const els = document.querySelectorAll(sel);
+                for (const el of els) {
+                  if ((el.offsetParent !== null || el.getClientRects().length > 0) && (el.innerText || '').length > 200) {
+                    return el.innerText;
+                  }
+                }
+              }
+
+              // 通用降级匹配：页面内包含“工作经历”且可见的大型信息容器
+              const all = Array.from(document.querySelectorAll('div, section, aside'));
+              const containers = all.filter(el => {
+                const t = el.innerText || '';
+                const isVis = el.offsetParent !== null || el.getClientRects().length > 0;
+                return isVis && t.includes('工作经历') && (t.includes('个人优势') || t.includes('项目经验') || t.includes('教育经历')) && el.children.length >= 2;
+              });
+
+              if (containers.length > 0) {
+                containers.sort((a, b) => b.innerText.length - a.innerText.length);
+                return containers[0].innerText;
+              }
+              return '';
+            }).catch(() => '');
+
+            if (fullDetailText && fullDetailText.length > 200) {
+              break;
+            }
+            await new Promise(r => setTimeout(r, 400));
+          }
+
+          // 5. 抓取完毕后关闭抽屉，恢复搜索列表状态（Esc 秒级关闭 + 兜底点击关闭按钮）
+          await page.keyboard.press('Escape');
+          await new Promise(r => setTimeout(r, 300));
+          await page.evaluate(() => {
+            const closeBtns = document.querySelectorAll('.el-drawer__close-btn, .close-btn, .icon-close, [class*="close"]');
+            for (const b of closeBtns) {
+              if (b.offsetParent !== null) { b.click(); break; }
+            }
+          }).catch(() => {});
+        }
+      }
+    } catch (err) {
+      console.warn(`[TalentLens] 穿透提取候选人【${cand.name}】详情异常: ${err.message}`);
+    }
+
+    // 6. 若成功提取到全量详情正文，则融合并升级候选人信息
+    if (fullDetailText && fullDetailText.length > (cand.rawCardText || '').length) {
+      cand.rawCardText = fullDetailText;
+
+      // 提取全量工作经历
+      const workSectionMatch = fullDetailText.match(/工作经历[\s\S]*?(?=项目经验|教育经历|证书|求职意向|$)/i);
+      if (workSectionMatch && workSectionMatch[0].length > 20) {
+        cand.workText = workSectionMatch[0].trim().replace(/\n+/g, ' | ');
+      }
+
+      // 提取核心优势
+      const advMatch = fullDetailText.match(/个人优势[\s\S]*?(?=工作经历|项目经验|教育经历|证书|$)/i);
+      if (advMatch && advMatch[0].length > 10) {
+        cand.advantage = advMatch[0].trim();
+      }
+    }
+
+    enriched.push(cand);
+    await new Promise(r => setTimeout(r, 500));
+  }
+
+  return enriched;
+}
+
 // 弹性三模浏览器唤起
 // 模式1: 连接已有 CDP 端口  →  模式2: 清残 + Puppeteer 直启  →  模式3: 清残 + CDP spawn 回退
 async function launchPlatformBrowser(cfg, browserPath, profileDir) {
@@ -770,6 +927,9 @@ async function autoNavigateAndSearch(page, platformKey, cfg, options) {
     return [];
   }
 
+  // 执行详情穿透：逐一提取抽屉/新标签页中的全量工作经历与完整个人优势
+  scraped = await enrichCandidatesWithFullDetail(page, browser, scraped, platformKey, cfg);
+
   // 整理并存储
   const platformSavedList = [];
   for (let i = 0; i < scraped.length; i++) {
@@ -788,11 +948,11 @@ async function autoNavigateAndSearch(page, platformKey, cfg, options) {
 基本画像：${item.infoText || '详见卡片信息'}
 任职履历快照：${item.workText || '详见卡片完整信息'}
 联系邮箱：qn3366271573@163.com
-
+${item.advantage ? `\n【个人综合优势】\n${item.advantage}\n` : ''}
 【核心专业技能】
 ${item.skills && item.skills.length > 0 ? item.skills.map(s => '• ' + s).join('\n') : '• 岗位专业技能'}
 
-【${cfg.name} 在线卡片完整正文】
+【${cfg.name} 在线微简历完整正文】
 ${item.rawCardText}
 `;
 
