@@ -94,6 +94,7 @@ type Resume struct {
 	FileType           string             `json:"file_type"`
 	FileSize           int64              `json:"file_size"`
 	Content            string             `json:"content"`
+	URL                string             `json:"url,omitempty"`
 	Email              string             `json:"email,omitempty"`
 	Status             string             `json:"status"`
 	Score              int                `json:"score"`
@@ -557,9 +558,6 @@ func (a *App) GetResumes() []*Resume {
 		data, _ := os.ReadFile(filepath.Join(dir, entry.Name()))
 		var r Resume
 		json.Unmarshal(data, &r)
-		if r.Email == "" {
-			r.Email = "qn3366271573@163.com"
-		}
 		resumes = append(resumes, &r)
 	}
 	return resumes
@@ -819,9 +817,6 @@ func (a *App) GetProjectResumes(projectID string) []*Resume {
 		}
 		var r Resume
 		if json.Unmarshal(data, &r) == nil {
-			if r.Email == "" {
-				r.Email = "qn3366271573@163.com"
-			}
 			resumes = append(resumes, &r)
 		}
 	}
@@ -1474,6 +1469,8 @@ func (a *App) StartMultiPlatformSearch(projectID string, keyword string, city st
 					candName, _ := candObj["fileName"].(string)
 					candPath, _ := candObj["filePath"].(string)
 					candContent, _ := candObj["content"].(string)
+					candUrl, _ := candObj["url"].(string)
+					candEmail, _ := candObj["email"].(string)
 
 					r := &Resume{
 						ID:        candID,
@@ -1483,6 +1480,8 @@ func (a *App) StartMultiPlatformSearch(projectID string, keyword string, city st
 						FileType:  ".txt",
 						FileSize:  int64(len(candContent)),
 						Content:   candContent,
+						URL:       candUrl,
+						Email:     candEmail,
 						Status:    "pending",
 						CreatedAt: time.Now(),
 					}

@@ -249,11 +249,28 @@ async function extractCandidatesAcrossFrames(page, targetCount, keyword, platfor
           .filter(t => t && t.length < 20 && !t.includes('电话') && !t.includes('聊') && !t.includes('活跃') && !t.includes('求职意向'))
       ));
 
+      // 提取直达链接
+      let candUrl = '';
+      const aTag = el.querySelector('a[href*="resume"], a[href*="detail"], a[href*="geek"], a[href*="talent"], a');
+      if (aTag && aTag.href && !aTag.href.startsWith('javascript:')) {
+        candUrl = aTag.href;
+      }
+      if (!candUrl) {
+        const seq = el.getAttribute('data-seq') || el.getAttribute('data-resumeid') || el.getAttribute('data-id') || el.getAttribute('data-geekid');
+        if (seq) {
+          candUrl = `${window.location.origin}${window.location.pathname}?seq=${seq}`;
+        }
+      }
+      if (!candUrl) {
+        candUrl = window.location.href;
+      }
+
       results.push({
         name,
         infoText,
         workText,
         skills: tags,
+        url: candUrl,
         rawCardText: text
       });
     }
@@ -348,6 +365,7 @@ async function enrichCandidatesWithFullDetail(page, browser, candidates, platfor
             { timeout: 5000 }
           ).catch(() => {});
 
+          cand.url = newPage.url() || cand.url;
           fullDetailText = await newPage.evaluate(() => document.body.innerText).catch(() => '');
           await newPage.close().catch(() => {});
         } else {
@@ -940,6 +958,15 @@ async function autoNavigateAndSearch(page, platformKey, cfg, options) {
     const dupTag = isDup ? '【跨平台重合 · 已标记聚合】' : '';
 
     const candID = `${platformKey}_${Date.now()}_${i}`;
+
+    // 智能提取候选人真实邮箱（若公开），杜绝假邮箱占位
+    const emailRegex = /([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})/;
+    const emailMatch = (item.rawCardText || '').match(emailRegex);
+    const candidateEmail = emailMatch ? emailMatch[1] : '';
+
+    // 候选人在线直达链接（便于一键点击/复制联系）
+    const candidateUrl = item.url || (page.url() || '');
+
     const formattedContent = `【${cfg.name} 真实推荐牛人档案】${dupTag}
 姓名 / 称谓：${item.name}
 来源渠道：${cfg.name}
@@ -947,7 +974,8 @@ async function autoNavigateAndSearch(page, platformKey, cfg, options) {
 目标城市：${options.city}
 基本画像：${item.infoText || '详见卡片信息'}
 任职履历快照：${item.workText || '详见卡片完整信息'}
-联系邮箱：qn3366271573@163.com
+在线直达网址：${candidateUrl}
+联系方式：${candidateEmail ? candidateEmail : '平台默认隐私保护（需通过在线打招呼或索取完整简历获取）'}
 ${item.advantage ? `\n【个人综合优势】\n${item.advantage}\n` : ''}
 【核心专业技能】
 ${item.skills && item.skills.length > 0 ? item.skills.map(s => '• ' + s).join('\n') : '• 岗位专业技能'}
@@ -967,7 +995,8 @@ ${item.rawCardText}
       fileName,
       filePath,
       name: item.name,
-      email: 'qn3366271573@163.com',
+      url: candidateUrl,
+      email: candidateEmail,
       jobTitle: options.keyword,
       experience: item.infoText || '在线经验',
       education: '详见微简历',
@@ -1049,24 +1078,60 @@ async function main() {
             const framesToSearch = [p, ...p.frames().filter(f => f !== p.mainFrame())];
             for (const f of framesToSearch) {
               const clickRes = await f.evaluate((act, name) => {
-                const cards = document.querySelectorAll(
-                  '.card-list:visible .candidate-card-wrap, .recommend-card-list:visible .candidate-card-wrap, ' +
-                  '.candidate-card-wrap, .candidate-card, .card-inner, .recommend-card, .resume-item, .chat-user-item, .geek-item'
-                );
-                for (const card of cards) {
-                  if (card.innerText && card.innerText.includes(name)) {
-                    if (act === 'greet') {
-                      const btn = card.querySelector('.btn.btn-greet, .btn-greet, .btn-primary, [class*="greet"], .large-screen-btn, button');
-                      if (btn && (btn.innerText.includes('打招呼') || btn.innerText.includes('沟通'))) {
-                        btn.click();
-                        return { ok: true, detail: '点击了打招呼按钮' };
-                      }
-                    } else if (act === 'mark_unfit') {
-                      const unfitBtn = card.querySelector('.btn-unfit, [class*="unfit"], [title*="不合适"], [class*="close"]');
-                      if (unfitBtn) {
-                        unfitBtn.click();
-                        return { ok: true, detail: '点击了不合适按钮' };
-                      }
+                const cardSelectors = [
+                  '.talent-search-container .card',
+                  'div.card',
+                  '.eh-talent-search .card',
+                  '.candidate-card-wrap',
+                  '.candidate-card',
+                  '.card-inner',
+                  '.recommend-card',
+                  '.resume-item',
+                  '.chat-user-item',
+                  '.geek-item',
+                  '.candidate-box'
+                ];
+                const cards = Array.from(document.querySelectorAll(cardSelectors.join(', ')));
+                
+                // 查找目标卡片（匹配候选人姓名或取首位）
+                let targetCard = null;
+                if (name && name !== '候选人') {
+                  targetCard = cards.find(c => c.innerText && c.innerText.includes(name));
+                } else if (cards.length > 0) {
+                  targetCard = cards[0];
+                }
+
+                // 也检查是否有已打开的微简历抽屉
+                const drawer = document.querySelector('.el-drawer, .resume-detail, [class*="drawer"]');
+                const rootContainer = targetCard || drawer;
+
+                if (rootContainer) {
+                  if (act === 'greet') {
+                    // 全渠道打招呼关键词匹配
+                    // 51job: 立即Hi聊, Hi聊, .talk_btn
+                    // Boss: 打招呼, 继续沟通, .btn-greet
+                    // 智联: 聊一聊, .btn-chat
+                    // 猎聘: 立即沟通, 打招呼, .btn-contact
+                    const clickables = Array.from(rootContainer.querySelectorAll('button, div, span, a'));
+                    const greetKeywords = ['hi聊', '立即hi聊', '打招呼', '聊一聊', '立即沟通', '沟通', '发消息'];
+                    const btn = clickables.find(el => {
+                      const t = (el.innerText || '').trim().toLowerCase();
+                      const cls = (el.className || '').toLowerCase();
+                      const isVis = el.offsetParent !== null || el.getClientRects().length > 0;
+                      if (!isVis) return false;
+                      return greetKeywords.some(kw => t.includes(kw)) || cls.includes('greet') || cls.includes('chat') || cls.includes('talk');
+                    });
+
+                    if (btn) {
+                      btn.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                      btn.click();
+                      return { ok: true, detail: `点击了「${btn.innerText.trim()}」按钮` };
+                    }
+                  } else if (act === 'mark_unfit') {
+                    const unfitBtn = rootContainer.querySelector('.btn-unfit, [class*="unfit"], [title*="不合适"], [class*="close"]');
+                    if (unfitBtn) {
+                      unfitBtn.click();
+                      return { ok: true, detail: '点击了不合适按钮' };
                     }
                   }
                 }

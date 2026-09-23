@@ -155,10 +155,20 @@
                     <span v-if="resumeStore.selectedResume.analysis.currentRole">{{ resumeStore.selectedResume.analysis.currentRole }}</span>
                     <span v-if="resumeStore.selectedResume.analysis.workYears">{{ resumeStore.selectedResume.analysis.workYears }}经验</span>
                     <span v-if="resumeStore.selectedResume.analysis.education">{{ resumeStore.selectedResume.analysis.education }}</span>
-                    <span class="candidate-email-badge" title="点击复制候选人模拟联系邮箱" @click="copyCandidateEmail">
-                      <el-icon><Message /></el-icon> {{ resumeStore.selectedResume.email || 'qn3366271573@163.com' }}
+                    <span v-if="resumeStore.selectedResume.email" class="candidate-email-badge" title="点击复制候选人联系邮箱" @click="copyCandidateEmail">
+                      <el-icon><Message /></el-icon> {{ resumeStore.selectedResume.email }}
                       <el-icon class="copy-icon"><DocumentCopy /></el-icon>
                     </span>
+                    <span v-else class="candidate-email-badge disabled" title="在线直聘平台默认隐私保护，需在线打招呼沟通获取">
+                      <el-icon><Message /></el-icon> 邮箱未公开
+                    </span>
+                    <span v-if="resumeStore.selectedResume.url" class="candidate-url-badge" title="点击复制候选人在线直达网址" @click="copyCandidateUrl">
+                      <el-icon><Link /></el-icon> 在线直达主页
+                      <el-icon class="copy-icon"><DocumentCopy /></el-icon>
+                    </span>
+                    <a v-if="resumeStore.selectedResume.url" :href="resumeStore.selectedResume.url" target="_blank" class="candidate-link-btn" title="在浏览器中直接打开候选人在线页面">
+                      <el-icon><TopRight /></el-icon> 直达联系
+                    </a>
                   </div>
                 </div>
 
@@ -447,7 +457,8 @@ import {
   Setting, Briefcase, Document, VideoPlay, Delete, View,
   CircleCheck, Warning, ChatLineSquare, Clock, Loading, CircleClose,
   RefreshRight, Download, Tickets, QuestionFilled, DocumentCopy, InfoFilled, Search,
-  ChatDotRound, DocumentAdd, Connection, CloseBold, Paperclip, Compass, Check, Message
+  ChatDotRound, DocumentAdd, Connection, CloseBold, Paperclip, Compass, Check, Message,
+  Link, TopRight
 } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import TitleBar from '../components/TitleBar.vue'
@@ -559,12 +570,28 @@ async function handleExecuteBossAction(action: 'greet' | 'ask_resume' | 'exchang
 }
 
 function copyCandidateEmail() {
-  const email = resumeStore.selectedResume?.email || 'qn3366271573@163.com'
-  try {
-    navigator.clipboard.writeText(email)
-    ElMessage.success(`✅ 已复制候选人模拟联系邮箱：${email}`)
-  } catch (e) {
-    ElMessage.info(`候选人模拟联系邮箱：${email}`)
+  const email = resumeStore.selectedResume?.email
+  if (email) {
+    try {
+      navigator.clipboard.writeText(email)
+      ElMessage.success(`✅ 已复制候选人联系邮箱：${email}`)
+    } catch (e) {
+      ElMessage.info(`候选人联系邮箱：${email}`)
+    }
+  } else {
+    ElMessage.warning(`该候选人暂未公开个人邮箱，可直接通过在线打招呼沟通。`)
+  }
+}
+
+function copyCandidateUrl() {
+  const url = resumeStore.selectedResume?.url
+  if (url) {
+    try {
+      navigator.clipboard.writeText(url)
+      ElMessage.success(`✅ 已复制候选人在线直达网址，可粘贴到浏览器中联系！`)
+    } catch (e) {
+      ElMessage.info(`候选人网址：${url}`)
+    }
   }
 }
 
@@ -1894,6 +1921,57 @@ onMounted(async () => {
   border-radius: 4px;
   font-size: 11.5px;
   font-weight: 500;
+  cursor: pointer;
+
+  &.disabled {
+    background: #f1f5f9;
+    color: #94a3b8;
+    border-color: #e2e8f0;
+    cursor: default;
+  }
+}
+
+.candidate-url-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: #ecfdf5;
+  color: #059669;
+  border: 1px solid #a7f3d0;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 11.5px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s;
+
+  &:hover {
+    background: #d1fae5;
+    border-color: #6ee7b7;
+    transform: translateY(-1px);
+  }
+}
+
+.candidate-link-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  background: #f8fafc;
+  color: #475569;
+  border: 1px solid #cbd5e1;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 11.5px;
+  font-weight: 500;
+  text-decoration: none;
+  transition: all 0.2s;
+
+  &:hover {
+    background: #0284c7;
+    color: #ffffff;
+    border-color: #0284c7;
+    transform: translateY(-1px);
+  }
 }
 
 // 语言切换器样式
