@@ -192,16 +192,24 @@ async function smoothScroll(page, distance = 480, step = 80) {
   }
 }
 
-// 跨 Frame 深度穿透提取候选人卡片（支持 BOSS 推荐页 recommendFrame 等嵌套 iframe）
+// 跨 Frame 深度穿透提取候选人卡片（支持 51job 新版/老版、BOSS 直聘、智联、猎聘等全渠道）
 async function extractCandidatesAcrossFrames(page, targetCount, keyword, platformName) {
   const evaluateCardFn = (targetCount, kw, pName) => {
+    const results = [];
+    const seenNames = new Set();
+
     const selectors = [
+      // 前程无忧 (51job) 最新版 Revision 容器
+      '.talent-search-container .card',
+      '.eh-talent-search .card',
+      'div.card',
+      // BOSS 直聘与通用选择器
       '.card-list .candidate-card-wrap', '.recommend-card-list .candidate-card-wrap',
       '.candidate-card-wrap', '.candidate-card', '.card-inner', '.recommend-card',
       '.geek-item', '.candidate-item', '.user-card', '.resume-item', '.resume-list-item',
       '.search-result-item', '.search-item', '.list-item', '[class*="candidate"]', '[class*="resume-card"]',
       '.talent-card', '.user-item', '.chat-user-item', '.resume-card-exp',
-      // 前程无忧 (51job) / 智联 / 猎聘 专用列表及表格行选择器
+      // 前程无忧老版 / 智联 / 猎聘 表格行与列表项
       '.res-list tr', '.resume-list tr', '.table-candidate tr', 'tr.tr-resume', 'tr[class*="resume"]',
       '.candidate-box', '.talent-item', '.item-box', '[class*="resumeItem"]', '[class*="searchItem"]',
       '[class*="talentItem"]', '.resume_detail', '.res_list_box', '.resume-item-wrap', '.el-table__row'
@@ -215,18 +223,30 @@ async function extractCandidatesAcrossFrames(page, targetCount, keyword, platfor
       const text = el.innerText || '';
       if (text.length < 20) continue;
 
-      const nameEl = el.querySelector('h3, h4, .name, .user-name, .geek-name, .title-text, .c-name, .title, .candidate-name, td.name, td a[href*="resume"], a[href*="Resume"], a[href*="detail"], td:first-child a');
-      const name = nameEl ? nameEl.innerText.trim() : `${pName}候选人_${i + 1}`;
+      // 提取姓名（兼容 51job .firstline .name, span.name 等）
+      const nameEl = el.querySelector('.firstline .name, span.name, h3, h4, .name, .user-name, .geek-name, .title-text, .c-name, .title, .candidate-name, td.name, td a[href*="resume"], a[href*="Resume"], a[href*="detail"], td:first-child a');
+      if (!nameEl) continue;
 
-      const infoEl = el.querySelector('.base-info.join-text-wrap, .info, .labels, .base-info, .desc, .user-desc, .exp-edu, .info-labels, td.exp, td.edu');
-      const infoText = infoEl ? infoEl.innerText.trim().replace(/\n+/g, ' · ') : '';
+      let name = nameEl.innerText.trim();
+      name = name.split('\n')[0].trim();
+      if (!name || name.length > 10 || seenNames.has(name)) continue;
+      seenNames.add(name);
 
-      const workEl = el.querySelector('.work, .work-exp, .company, .company-name, .position, .experience, .resume-card-exp, td.company');
-      const workText = workEl ? workEl.innerText.trim() : '';
+      // 基本画像
+      const infoEl = el.querySelector('.userinfo, .detail, .firstline, .base-info.join-text-wrap, .info, .labels, .base-info, .desc, .user-desc, .exp-edu, .info-labels, td.exp, td.edu');
+      let infoText = infoEl ? infoEl.innerText.trim().replace(/\n+/g, ' · ') : '';
+      infoText = infoText.replace(name, '').replace(/^[\s·]+/, '');
 
-      const tags = Array.from(el.querySelectorAll('.tag, .skill-tag, .tag-item, span.label, .skill-label, .label-item'))
-        .map(t => t.innerText.trim())
-        .filter(Boolean);
+      // 任职履历与详细经历
+      const workEl = el.querySelector('.info_content, .work, .work-exp, .company, .company-name, .position, .experience, .resume-card-exp, td.company');
+      const workText = workEl ? workEl.innerText.trim().replace(/\n+/g, ' | ') : '';
+
+      // 核心专业技能标签（包含 51job 的 .skill_label, .content_tag_item 等）
+      const tags = Array.from(new Set(
+        Array.from(el.querySelectorAll('.skill_label, .content_tag_item, .tag, .skill-tag, .tag-item, span.label, .skill-label, .label-item, span[class*="tag"], span[class*="label"], .match-tag'))
+          .map(t => t.innerText.trim())
+          .filter(t => t && t.length < 20 && !t.includes('电话') && !t.includes('聊') && !t.includes('活跃') && !t.includes('求职意向'))
+      ));
 
       results.push({
         name,
