@@ -3,6 +3,8 @@
 所有重要变更都会记录在此文件中。  
 格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/)。
 
+> 💡 **完整 Git 提交记录与中文对照表**：请查阅 [COMMITS_ZH.md](COMMITS_ZH.md) 了解所有 28+ 次提交的详细中文翻译及架构升级历程。
+
 ---
 
 ## [1.0.0] - 2025-02-06

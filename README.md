@@ -4,7 +4,7 @@
 </p>
 
 <p align="center">
-  <a href="README_EN.md">English</a> | 中文
+  <a href="README_EN.md">English</a> | 中文 | <a href="COMMITS_ZH.md">📜 提交记录与中文对照</a>
 </p>
 
 <p align="center">
