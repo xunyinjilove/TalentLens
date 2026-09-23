@@ -98,7 +98,8 @@ const PLATFORM_CONFIGS = {
     code: '51job',
     icon: '📑',
     loginUrl: 'https://ehire.51job.com/MainLogin.aspx',
-    homeUrl: 'https://ehire.51job.com/',
+    homeUrl: 'https://ehire.51job.com/Revision/talent/search',
+    fallbackHomeUrl: 'https://ehire.51job.com/Revision/navigate/',
     profileFolder: '51job_isolated_profile',
     debugPort: 9503
   },
@@ -586,9 +587,9 @@ async function scrapePlatform(platformKey, browserPath, targetCount) {
 async function autoNavigateAndSearch(page, platformKey, cfg, options) {
   try {
     if (platformKey === '51job') {
-      const curUrl = page.url() || '';
-      // 如果当前还在工作台首页 (Navigate.aspx 或根路径)，优先进入“人才搜索”
-      if (curUrl.includes('Navigate') || curUrl.endsWith('.com/') || curUrl.endsWith('.com') || curUrl.includes('MainLogin')) {
+      let curUrl = page.url() || '';
+      // 如果当前还在工作台首页 (navigate)，立即进入“人才搜索”
+      if (curUrl.toLowerCase().includes('navigate') || curUrl.endsWith('.com/') || curUrl.endsWith('.com') || curUrl.includes('MainLogin')) {
         sendMsg('status', {
           platform: platformKey,
           message: `🧭 正在自动跳转至【前程无忧】人才搜索中心...`
@@ -611,45 +612,54 @@ async function autoNavigateAndSearch(page, platformKey, cfg, options) {
           });
         } catch (e) {}
 
-        // 若 DOM 点击未发生跳转，直接通过 URL 跳转
-        if (!clicked) {
+        // 若 DOM 点击未发生跳转，直接跳转到最新版 Revision/talent/search
+        if (!clicked || !page.url().includes('/talent/search')) {
           try {
-            await page.goto('https://ehire.51job.com/Candidate/SearchResumeNew.aspx', {
+            await page.goto('https://ehire.51job.com/Revision/talent/search', {
               waitUntil: 'domcontentloaded',
               timeout: 20000
             });
-          } catch (e) {
-            try {
-              await page.goto('https://ehire.51job.com/Candidate/SearchResume.aspx', {
-                waitUntil: 'domcontentloaded',
-                timeout: 20000
-              });
-            } catch (e2) {}
-          }
+          } catch (e) {}
         }
         await new Promise(r => setTimeout(r, 2000));
       }
 
-      // 尝试在搜索页自动输入关键词并触发搜索
+      // 无论何种途径进入搜索页，自动输入关键词并触发搜索
       try {
-        const searchBoxSelector = 'input#txtKeyword, input#keyword, input#txtKeyWord, input[placeholder*="关键词"], input[placeholder*="搜索"], input[placeholder*="职位"], input.search-input, input[name*="keyword"], input[name*="Keyword"]';
-        const hasInput = await page.$(searchBoxSelector);
-        if (hasInput) {
+        const filled = await page.evaluate((kw) => {
+          const inputs = Array.from(document.querySelectorAll('input'));
+          const target = inputs.find(i => {
+            const p = (i.placeholder || '').trim();
+            return p.includes('搜索职位名') || p.includes('职位名') || p.includes('关键词') || p.includes('搜索');
+          });
+          if (target) {
+            target.focus();
+            target.value = kw;
+            // 触发 Vue 3 / Element Plus 响应式双向绑定事件 (v-model)
+            target.dispatchEvent(new Event('input', { bubbles: true }));
+            target.dispatchEvent(new Event('change', { bubbles: true }));
+            return true;
+          }
+          return false;
+        }, options.keyword);
+
+        if (filled) {
           sendMsg('status', {
             platform: platformKey,
             message: `⌨️ 正在自动输入搜索关键词「${options.keyword}」并检索...`
           });
-          await humanType(page, searchBoxSelector, options.keyword);
-          await new Promise(r => setTimeout(r, 400));
+          await new Promise(r => setTimeout(r, 500));
           
-          const searchBtnSelector = '#btnSearch, #btnSearchResume, .search-btn, button[class*="search"], a[class*="search"]';
-          const searchBtn = await page.$(searchBtnSelector);
-          if (searchBtn) {
-            await searchBtn.click();
-          } else {
-            await page.keyboard.press('Enter');
-          }
-          await new Promise(r => setTimeout(r, 2000));
+          // 点击搜索按钮
+          await page.evaluate(() => {
+            const btns = Array.from(document.querySelectorAll('button, .el-button, div, span'));
+            const searchBtn = btns.find(b => b.innerText && b.innerText.trim() === '搜索');
+            if (searchBtn) {
+              searchBtn.click();
+            }
+          });
+          await page.keyboard.press('Enter');
+          await new Promise(r => setTimeout(r, 2500));
         }
       } catch (e) {}
 
@@ -727,16 +737,17 @@ async function autoNavigateAndSearch(page, platformKey, cfg, options) {
     // 如果仍在 51job 工作台且过了 6 秒仍未进入搜索页，自动重试跳转
     if (platformKey === '51job' && pollAttempts === 3) {
       const curUrl = page.url() || '';
-      if (curUrl.includes('Navigate') || curUrl.endsWith('.com/') || curUrl.endsWith('.com')) {
+      if (curUrl.toLowerCase().includes('navigate') || curUrl.endsWith('.com/') || curUrl.endsWith('.com')) {
         sendMsg('status', {
           platform: platformKey,
           message: `🔄 【前程无忧】正在从工作台自动直跳「人才搜索」中心...`
         });
-        await page.goto('https://ehire.51job.com/Candidate/SearchResumeNew.aspx', {
+        await page.goto('https://ehire.51job.com/Revision/talent/search', {
           waitUntil: 'domcontentloaded',
           timeout: 20000
         }).catch(() => {});
         await new Promise(r => setTimeout(r, 2000));
+        await autoNavigateAndSearch(page, platformKey, cfg, options);
       }
     }
 
