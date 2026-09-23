@@ -292,6 +292,55 @@ async function extractCandidatesAcrossFrames(page, targetCount, keyword, platfor
   return [];
 }
 
+// 深度净化候选人简历正文：剔除防泄密水印网格、举报按钮、平台免责声明与动态操作框
+function cleanCandidateResumeText(rawText) {
+  if (!rawText) return '';
+  let cleaned = rawText;
+
+  // 1. 剔除末尾平台免责声明、输入框与操作动态面板
+  cleaned = cleaned.replace(/声明[：:][\s\S]*?终止服务.*?$/is, '');
+  cleaned = cleaned.replace(/与人才沟通[\s\S]*?$/is, '');
+  cleaned = cleaned.replace(/操作动态[\s\S]*?$/is, '');
+  cleaned = cleaned.replace(/仅看评价[\s\S]*?$/is, '');
+  cleaned = cleaned.replace(/0\s*\/\s*500[\s\S]*?$/is, '');
+  cleaned = cleaned.replace(/您可对候选人的在职状态进行相关询问[～~]/g, '');
+
+  // 2. 剔除独立的“举报”及“虚假简历举报”等行
+  cleaned = cleaned.replace(/^\s*(?:举报|侵权举报|虚假简历举报|举报该简历)\s*$/mgi, '');
+
+  // 3. 核心水印清洗算法：检测并剔除横向或纵向重复网格化出现的企业防泄密水印
+  // 水印特征：同一行内出现多次相同的公司名称，或者连续多行只包含同一公司名称
+  cleaned = cleaned.replace(/(上海透景生命科技股份有限公司[\s\t]*)+/g, '');
+
+  // 通用规则：检测任何公司名称（以股份有限公司、有限公司、科技、集团结尾的4~30字短语）在局部大量重复
+  cleaned = cleaned.replace(/(?:[\t ]*([^\n\r]{4,30}?(?:公司|企业|集团|机构))[\t ]*){2,}/g, (match, word) => {
+    const escaped = word.replace(/[-/\\^$*+?.()|[\]{}]/g, '\\$&');
+    const count = (match.match(new RegExp(escaped, 'g')) || []).length;
+    return count >= 2 ? '' : match;
+  });
+
+  // 去除只包含重复水印的独立行
+  const lines = cleaned.split('\n');
+  const validLines = [];
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (!trimmed) {
+      validLines.push('');
+      continue;
+    }
+    if (trimmed === '举报' || trimmed.startsWith('声明：以上人才信息仅供')) continue;
+    // 检查单行内是否由相同单词/短语重复填充
+    const words = trimmed.split(/\s{2,}|\t+/);
+    if (words.length >= 2 && words.every(w => w === words[0])) continue;
+    validLines.push(line);
+  }
+  cleaned = validLines.join('\n');
+
+  // 4. 清理冗余空行
+  cleaned = cleaned.replace(/\n{3,}/g, '\n\n').trim();
+  return cleaned;
+}
+
 // 详情穿透引擎：针对搜索列表仅展示精简摘要的特性，点击候选人穿透提取抽屉/新标签页中的全量履历与优势
 async function enrichCandidatesWithFullDetail(page, browser, candidates, platformKey, cfg) {
   if (!candidates || candidates.length === 0) return candidates;
@@ -373,6 +422,19 @@ async function enrichCandidatesWithFullDetail(page, browser, candidates, platfor
           const waitStart = Date.now();
           while (Date.now() - waitStart < 2500) {
             fullDetailText = await page.evaluate(() => {
+              // 抽取前临时移除水印网格与底部垃圾操作节点
+              try {
+                const garbage = document.querySelectorAll(
+                  '[class*="watermark"], [class*="water-mark"], .eh-watermark, ' +
+                  '[class*="report"], .jubao, .bottom-action, .footer-action, .operate-log, .chat-input-box'
+                );
+                garbage.forEach(g => {
+                  if (!g.innerText.includes('工作经历') && !g.innerText.includes('个人优势')) {
+                    try { g.remove(); } catch (e) {}
+                  }
+                });
+              } catch (e) {}
+
               // 优先查找 Element Plus / Ant Design / 招聘业务标准抽屉容器
               const drawerSelectors = [
                 '.el-drawer__body', '.el-drawer',
@@ -426,6 +488,11 @@ async function enrichCandidatesWithFullDetail(page, browser, candidates, platfor
       console.warn(`[TalentLens] 穿透提取候选人【${cand.name}】详情异常: ${err.message}`);
     }
 
+    // 执行文本深度净化（剔除水印网格、举报、免责声明等噪音）
+    if (fullDetailText) {
+      fullDetailText = cleanCandidateResumeText(fullDetailText);
+    }
+
     // 6. 若成功提取到全量详情正文，则融合并升级候选人信息
     if (fullDetailText && fullDetailText.length > (cand.rawCardText || '').length) {
       cand.rawCardText = fullDetailText;
@@ -433,13 +500,13 @@ async function enrichCandidatesWithFullDetail(page, browser, candidates, platfor
       // 提取全量工作经历
       const workSectionMatch = fullDetailText.match(/工作经历[\s\S]*?(?=项目经验|教育经历|证书|求职意向|$)/i);
       if (workSectionMatch && workSectionMatch[0].length > 20) {
-        cand.workText = workSectionMatch[0].trim().replace(/\n+/g, ' | ');
+        cand.workText = cleanCandidateResumeText(workSectionMatch[0].trim().replace(/\n+/g, ' | '));
       }
 
       // 提取核心优势
       const advMatch = fullDetailText.match(/个人优势[\s\S]*?(?=工作经历|项目经验|教育经历|证书|$)/i);
       if (advMatch && advMatch[0].length > 10) {
-        cand.advantage = advMatch[0].trim();
+        cand.advantage = cleanCandidateResumeText(advMatch[0].trim());
       }
     }
 
@@ -959,9 +1026,14 @@ async function autoNavigateAndSearch(page, platformKey, cfg, options) {
 
     const candID = `${platformKey}_${Date.now()}_${i}`;
 
+    // 净化正文与经历（剔除水印网格、举报、免责声明等）
+    const cleanedRawText = cleanCandidateResumeText(item.rawCardText);
+    const cleanedWorkText = cleanCandidateResumeText(item.workText);
+    const cleanedAdvantage = cleanCandidateResumeText(item.advantage);
+
     // 智能提取候选人真实邮箱（若公开），杜绝假邮箱占位
     const emailRegex = /([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})/;
-    const emailMatch = (item.rawCardText || '').match(emailRegex);
+    const emailMatch = (cleanedRawText || '').match(emailRegex);
     const candidateEmail = emailMatch ? emailMatch[1] : '';
 
     // 候选人在线直达链接（便于一键点击/复制联系）
@@ -973,15 +1045,15 @@ async function autoNavigateAndSearch(page, platformKey, cfg, options) {
 检索岗位：${options.keyword}
 目标城市：${options.city}
 基本画像：${item.infoText || '详见卡片信息'}
-任职履历快照：${item.workText || '详见卡片完整信息'}
+任职履历快照：${cleanedWorkText || '详见卡片完整信息'}
 在线直达网址：${candidateUrl}
 联系方式：${candidateEmail ? candidateEmail : '平台默认隐私保护（需通过在线打招呼或索取完整简历获取）'}
-${item.advantage ? `\n【个人综合优势】\n${item.advantage}\n` : ''}
+${cleanedAdvantage ? `\n【个人综合优势】\n${cleanedAdvantage}\n` : ''}
 【核心专业技能】
 ${item.skills && item.skills.length > 0 ? item.skills.map(s => '• ' + s).join('\n') : '• 岗位专业技能'}
 
 【${cfg.name} 在线微简历完整正文】
-${item.rawCardText}
+${cleanedRawText}
 `;
 
     const fileName = `【${cfg.name}】${item.name}_${options.keyword}.txt`;
@@ -1000,7 +1072,7 @@ ${item.rawCardText}
       jobTitle: options.keyword,
       experience: item.infoText || '在线经验',
       education: '详见微简历',
-      company: item.workText || '行业企业',
+      company: cleanedWorkText || '行业企业',
       skills: item.skills || [],
       content: formattedContent
     };

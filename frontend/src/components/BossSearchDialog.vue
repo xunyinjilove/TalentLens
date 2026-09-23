@@ -353,6 +353,9 @@ async function handleStartSearch() {
   searching.value = true
   isFinished.value = false
   candidateCount.value = 0
+  seenCandidateIds.clear()
+  lastStatusMsg = ''
+  doneTriggered = false
   searchLogs.value = []
   currentStatusText.value = '正在启动矩阵式检索引擎...'
   addLog('status', `🚀 启动多平台聚合寻才：[${form.city}] 岗位「${form.keyword}」，调度平台：${plats.join('、')}，单平台目标 ${form.countPerPlatform} 人`)
@@ -417,8 +420,11 @@ function handleClose() {
   }
 }
 
-// 绑定 Wails 事件监听 (同时监听 platform:* 与 boss:* 保持全兼容)
+// 绑定 Wails 事件监听 (统一监听 platform:* 并引入候选人唯一排重，根除计数翻倍问题)
 let unsubscribeList: Array<() => void> = []
+const seenCandidateIds = new Set<string>()
+let lastStatusMsg = ''
+let doneTriggered = false
 
 onMounted(async () => {
   let WailsRuntime: any = null
@@ -427,6 +433,8 @@ onMounted(async () => {
 
   const handleStatus = (evt: any) => {
     if (evt && evt.message) {
+      if (lastStatusMsg === evt.message) return // 防重打印
+      lastStatusMsg = evt.message
       currentStatusText.value = evt.message
       addLog('status', evt.message)
     }
@@ -434,8 +442,12 @@ onMounted(async () => {
 
   const handleCandidate = (evt: any) => {
     if (evt && evt.candidate) {
-      candidateCount.value = candidateCount.value + 1
       const c = evt.candidate
+      const candKey = c.id || `${c.platform}_${c.name}_${c.fileName}`
+      if (seenCandidateIds.has(candKey)) return // 排重，根绝翻倍
+      seenCandidateIds.add(candKey)
+
+      candidateCount.value = seenCandidateIds.size
       const pName = c.platformName || evt.platformName || '招聘平台'
       addLog('candidate', `👤 [${pName}] 成功提取牛人: ${c.name}（${c.experience} · ${c.company || '在线履历'}）`)
       emit('refresh')
@@ -443,11 +455,13 @@ onMounted(async () => {
   }
 
   const handleDone = (evt: any) => {
+    if (doneTriggered) return
+    doneTriggered = true
     searching.value = false
     isFinished.value = true
     currentStatusText.value = '全渠道检索完成，已启动 AI 分析！'
     addLog('done', evt.message || '🎉 候选人已全部采集并导入！')
-    ElMessage.success('多平台候选人已全部导入，正在进行 AI 智能打分！')
+    ElMessage.success(`多平台候选人采集完成 (共 ${candidateCount.value} 人)，正在进行 AI 智能打分！`)
     emit('refresh')
   }
 
@@ -458,19 +472,14 @@ onMounted(async () => {
     ElMessage.error(evt.message || '操作未完成')
   }
 
+  // 仅监听统一平台事件，彻底切断与旧 boss:* 兼容事件的双发重叠
   const offPlatformStatus = WailsRuntime.EventsOn('platform:status', handleStatus)
   const offPlatformCandidate = WailsRuntime.EventsOn('platform:candidate_found', handleCandidate)
   const offPlatformDone = WailsRuntime.EventsOn('platform:done', handleDone)
   const offPlatformError = WailsRuntime.EventsOn('platform:error', handleError)
 
-  const offBossStatus = WailsRuntime.EventsOn('boss:status', handleStatus)
-  const offBossCandidate = WailsRuntime.EventsOn('boss:candidate_found', handleCandidate)
-  const offBossDone = WailsRuntime.EventsOn('boss:done', handleDone)
-  const offBossError = WailsRuntime.EventsOn('boss:error', handleError)
-
   unsubscribeList = [
-    offPlatformStatus, offPlatformCandidate, offPlatformDone, offPlatformError,
-    offBossStatus, offBossCandidate, offBossDone, offBossError
+    offPlatformStatus, offPlatformCandidate, offPlatformDone, offPlatformError
   ]
 })
 
