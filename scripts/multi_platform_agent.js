@@ -195,28 +195,33 @@ async function smoothScroll(page, distance = 480, step = 80) {
 // 跨 Frame 深度穿透提取候选人卡片（支持 BOSS 推荐页 recommendFrame 等嵌套 iframe）
 async function extractCandidatesAcrossFrames(page, targetCount, keyword, platformName) {
   const evaluateCardFn = (targetCount, kw, pName) => {
-    const results = [];
     const selectors = [
-      '.card-list:visible .candidate-card-wrap', '.recommend-card-list:visible .candidate-card-wrap',
+      '.card-list .candidate-card-wrap', '.recommend-card-list .candidate-card-wrap',
       '.candidate-card-wrap', '.candidate-card', '.card-inner', '.recommend-card',
       '.geek-item', '.candidate-item', '.user-card', '.resume-item', '.resume-list-item',
       '.search-result-item', '.search-item', '.list-item', '[class*="candidate"]', '[class*="resume-card"]',
-      '.talent-card', '.user-item', '.chat-user-item', '.resume-card-exp'
+      '.talent-card', '.user-item', '.chat-user-item', '.resume-card-exp',
+      // 前程无忧 (51job) / 智联 / 猎聘 专用列表及表格行选择器
+      '.res-list tr', '.resume-list tr', '.table-candidate tr', 'tr.tr-resume', 'tr[class*="resume"]',
+      '.candidate-box', '.talent-item', '.item-box', '[class*="resumeItem"]', '[class*="searchItem"]',
+      '[class*="talentItem"]', '.resume_detail', '.res_list_box', '.resume-item-wrap', '.el-table__row'
     ];
 
     const elements = document.querySelectorAll(selectors.join(', '));
     for (let i = 0; i < elements.length && results.length < targetCount; i++) {
       const el = elements[i];
+      // 过滤不可见节点
+      if (el.offsetParent === null && el.getClientRects().length === 0) continue;
       const text = el.innerText || '';
       if (text.length < 20) continue;
 
-      const nameEl = el.querySelector('h3, h4, .name, .user-name, .geek-name, .title-text, .c-name, .title, .candidate-name');
+      const nameEl = el.querySelector('h3, h4, .name, .user-name, .geek-name, .title-text, .c-name, .title, .candidate-name, td.name, td a[href*="resume"], a[href*="Resume"], a[href*="detail"], td:first-child a');
       const name = nameEl ? nameEl.innerText.trim() : `${pName}候选人_${i + 1}`;
 
-      const infoEl = el.querySelector('.base-info.join-text-wrap, .info, .labels, .base-info, .desc, .user-desc, .exp-edu, .info-labels');
+      const infoEl = el.querySelector('.base-info.join-text-wrap, .info, .labels, .base-info, .desc, .user-desc, .exp-edu, .info-labels, td.exp, td.edu');
       const infoText = infoEl ? infoEl.innerText.trim().replace(/\n+/g, ' · ') : '';
 
-      const workEl = el.querySelector('.work, .work-exp, .company, .company-name, .position, .experience, .resume-card-exp');
+      const workEl = el.querySelector('.work, .work-exp, .company, .company-name, .position, .experience, .resume-card-exp, td.company');
       const workText = workEl ? workEl.innerText.trim() : '';
 
       const tags = Array.from(el.querySelectorAll('.tag, .skill-tag, .tag-item, span.label, .skill-label, .label-item'))
@@ -557,30 +562,179 @@ async function scrapePlatform(platformKey, browserPath, targetCount) {
     return [];
   }
 
+// 自动导航至平台的搜索/推荐中心，并执行关键词自动键入与搜索触发
+async function autoNavigateAndSearch(page, platformKey, cfg, options) {
+  try {
+    if (platformKey === '51job') {
+      const curUrl = page.url() || '';
+      // 如果当前还在工作台首页 (Navigate.aspx 或根路径)，优先进入“人才搜索”
+      if (curUrl.includes('Navigate') || curUrl.endsWith('.com/') || curUrl.endsWith('.com') || curUrl.includes('MainLogin')) {
+        sendMsg('status', {
+          platform: platformKey,
+          message: `🧭 正在自动跳转至【前程无忧】人才搜索中心...`
+        });
+
+        // 尝试在页面左侧菜单点击“人才搜索”或“人才望远镜”
+        let clicked = false;
+        try {
+          clicked = await page.evaluate(() => {
+            const elements = Array.from(document.querySelectorAll('a, span, li, div, p'));
+            const target = elements.find(el => {
+              const t = (el.innerText || '').trim();
+              return t === '人才搜索' || t === '人才望远镜' || t === '搜索简历';
+            });
+            if (target) {
+              target.click();
+              return true;
+            }
+            return false;
+          });
+        } catch (e) {}
+
+        // 若 DOM 点击未发生跳转，直接通过 URL 跳转
+        if (!clicked) {
+          try {
+            await page.goto('https://ehire.51job.com/Candidate/SearchResumeNew.aspx', {
+              waitUntil: 'domcontentloaded',
+              timeout: 20000
+            });
+          } catch (e) {
+            try {
+              await page.goto('https://ehire.51job.com/Candidate/SearchResume.aspx', {
+                waitUntil: 'domcontentloaded',
+                timeout: 20000
+              });
+            } catch (e2) {}
+          }
+        }
+        await new Promise(r => setTimeout(r, 2000));
+      }
+
+      // 尝试在搜索页自动输入关键词并触发搜索
+      try {
+        const searchBoxSelector = 'input#txtKeyword, input#keyword, input#txtKeyWord, input[placeholder*="关键词"], input[placeholder*="搜索"], input[placeholder*="职位"], input.search-input, input[name*="keyword"], input[name*="Keyword"]';
+        const hasInput = await page.$(searchBoxSelector);
+        if (hasInput) {
+          sendMsg('status', {
+            platform: platformKey,
+            message: `⌨️ 正在自动输入搜索关键词「${options.keyword}」并检索...`
+          });
+          await humanType(page, searchBoxSelector, options.keyword);
+          await new Promise(r => setTimeout(r, 400));
+          
+          const searchBtnSelector = '#btnSearch, #btnSearchResume, .search-btn, button[class*="search"], a[class*="search"]';
+          const searchBtn = await page.$(searchBtnSelector);
+          if (searchBtn) {
+            await searchBtn.click();
+          } else {
+            await page.keyboard.press('Enter');
+          }
+          await new Promise(r => setTimeout(r, 2000));
+        }
+      } catch (e) {}
+
+    } else if (platformKey === 'zhaopin') {
+      try {
+        const searchBoxSelector = 'input[placeholder*="搜索"], input[placeholder*="关键词"], input[placeholder*="岗位"], .search-input input';
+        const hasInput = await page.$(searchBoxSelector);
+        if (hasInput) {
+          sendMsg('status', {
+            platform: platformKey,
+            message: `⌨️ 正在自动输入「${options.keyword}」并检索...`
+          });
+          await humanType(page, searchBoxSelector, options.keyword);
+          await page.keyboard.press('Enter');
+          await new Promise(r => setTimeout(r, 2000));
+        }
+      } catch (e) {}
+
+    } else if (platformKey === 'liepin') {
+      try {
+        const searchBoxSelector = 'input[placeholder*="搜索"], input[placeholder*="关键词"], input[placeholder*="职位"], .search-box input';
+        const hasInput = await page.$(searchBoxSelector);
+        if (hasInput) {
+          sendMsg('status', {
+            platform: platformKey,
+            message: `⌨️ 正在自动输入「${options.keyword}」并检索...`
+          });
+          await humanType(page, searchBoxSelector, options.keyword);
+          await page.keyboard.press('Enter');
+          await new Promise(r => setTimeout(r, 2000));
+        }
+      } catch (e) {}
+    }
+  } catch (err) {}
+}
+
   sendMsg('status', {
     platform: platformKey,
     message: `🎉 【${cfg.name}】企业后台连接成功！正在检索「${options.keyword}」(${options.city})...`
   });
 
-  // DOM 元素提取逻辑（融合 GoodHR 跨 Frame 穿透提取与平滑滚动加载）
+  // 1. 自动执行平台寻路与关键词检索
+  await autoNavigateAndSearch(page, platformKey, cfg, options);
+
+  // 2. 动态弹性轮询（最长 45 秒，每 2 秒微步滚轮并检测候选人卡片）
   let scraped = [];
-  try {
-    await new Promise(r => setTimeout(r, 2000));
+  const pollStart = Date.now();
+  const maxPollMs = 45000;
+  let pollAttempts = 0;
 
-    // 先在工作台执行小幅微步滚轮，促发页面异步加载更多最新推荐候选人
-    await smoothScroll(page, 480, 80).catch(() => {});
-    await new Promise(r => setTimeout(r, 800));
+  while (Date.now() - pollStart < maxPollMs) {
+    pollAttempts++;
+    try {
+      if (!browser.isConnected()) {
+        sendMsg('status', { platform: platformKey, message: `【${cfg.name}】浏览器窗口已关闭` });
+        return [];
+      }
+    } catch (e) {}
 
-    // 跨 Frame 穿透提取候选人卡片（支持 BOSS 直聘 recommendFrame 等嵌套 iframe）
-    scraped = await extractCandidatesAcrossFrames(page, targetCount, options.keyword, cfg.name);
-  } catch (evalErr) {
-    sendMsg('status', { platform: platformKey, message: `⚠️ DOM 解析提示: ${evalErr.message}` });
+    try {
+      // 微步滚轮触发瀑布流加载
+      await smoothScroll(page, 400, 80).catch(() => {});
+      await new Promise(r => setTimeout(r, 1000));
+
+      scraped = await extractCandidatesAcrossFrames(page, targetCount, options.keyword, cfg.name);
+      if (scraped && scraped.length > 0) {
+        sendMsg('status', {
+          platform: platformKey,
+          message: `🎯 【${cfg.name}】成功捕获 ${scraped.length} 位在线匹配候选人，正在解析整理...`
+        });
+        break; // 成功找到候选人，跳出轮询！
+      }
+    } catch (evalErr) {}
+
+    // 如果仍在 51job 工作台且过了 6 秒仍未进入搜索页，自动重试跳转
+    if (platformKey === '51job' && pollAttempts === 3) {
+      const curUrl = page.url() || '';
+      if (curUrl.includes('Navigate') || curUrl.endsWith('.com/') || curUrl.endsWith('.com')) {
+        sendMsg('status', {
+          platform: platformKey,
+          message: `🔄 【前程无忧】正在从工作台自动直跳「人才搜索」中心...`
+        });
+        await page.goto('https://ehire.51job.com/Candidate/SearchResumeNew.aspx', {
+          waitUntil: 'domcontentloaded',
+          timeout: 20000
+        }).catch(() => {});
+        await new Promise(r => setTimeout(r, 2000));
+      }
+    }
+
+    // 周期性提醒用户后台正在持续守候
+    if (pollAttempts % 5 === 0) {
+      sendMsg('status', {
+        platform: platformKey,
+        message: `⏳ 【${cfg.name}】正在实时守候候选人数据渲染...（您也可在打开的 Edge 窗口中切换岗位或点击搜索）`
+      });
+    }
+
+    await new Promise(r => setTimeout(r, 1500));
   }
 
   if (!scraped || scraped.length === 0) {
     sendMsg('status', {
       platform: platformKey,
-      message: `ℹ️ 在【${cfg.name}】当前工作台视图中未发现新推荐卡片，建议在打开的窗口中切换至招聘岗位。`
+      message: `ℹ️ 在【${cfg.name}】当前页面中未发现新推荐卡片，建议在打开的窗口中切换至招聘岗位或点击搜索。`
     });
     return [];
   }

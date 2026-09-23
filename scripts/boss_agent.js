@@ -103,7 +103,7 @@ async function extractCandidatesAcrossFrames(page, targetCount, keyword, platfor
   const evaluateCardFn = (targetCount, kw, pName) => {
     const results = [];
     const selectors = [
-      '.card-list:visible .candidate-card-wrap', '.recommend-card-list:visible .candidate-card-wrap',
+      '.card-list .candidate-card-wrap', '.recommend-card-list .candidate-card-wrap',
       '.candidate-card-wrap', '.candidate-card', '.card-inner', '.recommend-card',
       '.geek-item', '.candidate-item', '.user-card', '.resume-item', '.resume-list-item',
       '.search-result-item', '.search-item', '.list-item', '[class*="candidate"]', '[class*="resume-card"]',
@@ -113,6 +113,7 @@ async function extractCandidatesAcrossFrames(page, targetCount, keyword, platfor
     const elements = document.querySelectorAll(selectors.join(', '));
     for (let i = 0; i < elements.length && results.length < targetCount; i++) {
       const el = elements[i];
+      if (el.offsetParent === null && el.getClientRects().length === 0) continue;
       const text = el.innerText || '';
       if (text.length < 20) continue;
 
@@ -320,16 +321,19 @@ async function runBossEnterpriseFlow() {
     fs.mkdirSync(options.dataDir, { recursive: true });
   }
 
-  // 从页面及 iframe 中深度抓取候选人卡片（融入 GoodHR 跨 Frame 穿透提取与平滑微步滚轮）
+  // 从页面及 iframe 中深度抓取候选人卡片（动态轮询最长 30 秒，支持页面动态渲染）
   let scrapedCandidates = [];
-  try {
-    // 平滑微步滚轮，触发页面动态加载
-    await smoothScroll(page, 480, 80).catch(() => {});
-    await new Promise(r => setTimeout(r, 800));
-
-    scrapedCandidates = await extractCandidatesAcrossFrames(page, options.count, options.keyword, 'BOSS直聘');
-  } catch (evalErr) {
-    sendMsg('status', { message: `⚠️ 读取页面元素提示: ${evalErr.message}` });
+  const pollStart = Date.now();
+  while (Date.now() - pollStart < 30000) {
+    try {
+      await smoothScroll(page, 480, 80).catch(() => {});
+      await new Promise(r => setTimeout(r, 1000));
+      scrapedCandidates = await extractCandidatesAcrossFrames(page, options.count, options.keyword, 'BOSS直聘');
+      if (scrapedCandidates && scrapedCandidates.length > 0) {
+        break;
+      }
+    } catch (evalErr) {}
+    await new Promise(r => setTimeout(r, 1500));
   }
 
   if (!scrapedCandidates || scrapedCandidates.length === 0) {
