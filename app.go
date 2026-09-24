@@ -14,6 +14,7 @@ import (
 	"math"
 	"net/http"
 	"net/smtp"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -2374,9 +2375,93 @@ func (a *App) GetAppVersion() string {
 	return AppVersion
 }
 
-// OpenURL 用系统浏览器打开链接
-func (a *App) OpenURL(url string) {
-	runtime.BrowserOpenURL(a.ctx, url)
+// findBrowserExecutable 查找系统 Edge 或 Chrome 可执行文件路径
+func (a *App) findBrowserExecutable() string {
+	candidates := []string{
+		`C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe`,
+		`C:\Program Files\Microsoft\Edge\Application\msedge.exe`,
+		`C:\Program Files\Google\Chrome\Application\chrome.exe`,
+		`C:\Program Files (x86)\Google\Chrome\Application\chrome.exe`,
+		filepath.Join(os.Getenv("LOCALAPPDATA"), `Microsoft\Edge SxS\Application\msedge.exe`),
+		filepath.Join(os.Getenv("LOCALAPPDATA"), `Google\Chrome\Application\chrome.exe`),
+	}
+	for _, p := range candidates {
+		if p != "" {
+			if _, err := os.Stat(p); err == nil {
+				return p
+			}
+		}
+	}
+	return ""
+}
+
+// OpenURL 智能打开链接：优先在已登录该平台的专用浏览器实例（图二）中新开 Tab 并激活窗口，避免外部浏览器要求重新扫码
+func (a *App) OpenURL(rawURL string) {
+	if strings.TrimSpace(rawURL) == "" {
+		return
+	}
+
+	// 1. 根据 URL 域名精准映射到各平台调试端口与数据目录
+	port := 0
+	profileDirName := ""
+	low := strings.ToLower(rawURL)
+	if strings.Contains(low, "51job.com") || strings.Contains(low, "ehire") {
+		port = 9503
+		profileDirName = "51job_isolated_profile"
+	} else if strings.Contains(low, "zhipin.com") {
+		port = 9501
+		profileDirName = "boss_isolated_profile"
+	} else if strings.Contains(low, "zhaopin.com") {
+		port = 9502
+		profileDirName = "zhaopin_isolated_profile"
+	} else if strings.Contains(low, "liepin.com") {
+		port = 9504
+		profileDirName = "liepin_isolated_profile"
+	}
+
+	// 2. 若属于招聘平台，优先尝试通过 CDP 协议在已有已登录的专用浏览器（图二）中新开 Tab
+	if port > 0 {
+		client := &http.Client{Timeout: 2 * time.Second}
+		newTabURL := fmt.Sprintf("http://127.0.0.1:%d/json/new?%s", port, url.QueryEscape(rawURL))
+		req, err := http.NewRequest(http.MethodPut, newTabURL, nil)
+		if err == nil {
+			resp, err := client.Do(req)
+			if err == nil && (resp.StatusCode == http.StatusOK || resp.StatusCode == http.StatusCreated) {
+				defer resp.Body.Close()
+				var tabInfo struct {
+					ID string `json:"id"`
+				}
+				if err := json.NewDecoder(resp.Body).Decode(&tabInfo); err == nil && tabInfo.ID != "" {
+					// 激活此 Tab 并唤起浏览器窗口到前台
+					activateURL := fmt.Sprintf("http://127.0.0.1:%d/json/activate/%s", port, tabInfo.ID)
+					_, _ = client.Get(activateURL)
+					log.Printf("[OpenURL] 成功在【%s / 端口 %d】已登录专用窗口中直接展示候选人: %s", profileDirName, port, rawURL)
+					return
+				}
+			}
+		}
+
+		// 3. 若当前未在运行（端口未连通），使用该平台的专属 profile 目录拉起专用 Edge/Chrome 浏览器（保留已登录 Cookie）
+		profileDir := filepath.Join(a.getDataDir(), "candidates_multi", profileDirName)
+		browserPath := a.findBrowserExecutable()
+		if browserPath != "" && profileDirName != "" {
+			_ = os.MkdirAll(profileDir, 0755)
+			cmd := exec.Command(browserPath,
+				fmt.Sprintf("--user-data-dir=%s", profileDir),
+				fmt.Sprintf("--remote-debugging-port=%d", port),
+				"--no-first-run",
+				"--no-default-browser-check",
+				rawURL,
+			)
+			if err := cmd.Start(); err == nil {
+				log.Printf("[OpenURL] 成功拉起带登录凭据的专用浏览器实例打开候选人: %s", rawURL)
+				return
+			}
+		}
+	}
+
+	// 4. 普通链接（如更新检测、外链）或保底兜底：调用系统默认浏览器打开
+	runtime.BrowserOpenURL(a.ctx, rawURL)
 }
 
 // CheckForUpdate 检查 GitHub 是否有新版本
