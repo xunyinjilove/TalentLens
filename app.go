@@ -18,6 +18,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -823,17 +824,15 @@ func (a *App) GetProjectResumes(projectID string) []*Resume {
 	return resumes
 }
 
-// GetProjectRanking 获取项目排名（按分数降序）
+// GetProjectRanking 获取项目排名（按分数降序，同分时按创建时间降序保持顺序稳定）
 func (a *App) GetProjectRanking(projectID string) []*Resume {
 	resumes := a.GetProjectResumes(projectID)
-	// 按分数降序排列
-	for i := 0; i < len(resumes); i++ {
-		for j := i + 1; j < len(resumes); j++ {
-			if resumes[j].Score > resumes[i].Score {
-				resumes[i], resumes[j] = resumes[j], resumes[i]
-			}
+	sort.SliceStable(resumes, func(i, j int) bool {
+		if resumes[i].Score != resumes[j].Score {
+			return resumes[i].Score > resumes[j].Score
 		}
-	}
+		return resumes[i].CreatedAt.After(resumes[j].CreatedAt)
+	})
 	return resumes
 }
 
@@ -1040,6 +1039,10 @@ func (a *App) TestPlatformLogin(platform string) bool {
 
 				go func() {
 					scanner := bufio.NewScanner(stdout)
+					// 扩容缓冲区上限至 4MB，防止单行 JSON 超出默认 64KB 限制导致静默截断
+					buf := make([]byte, 64*1024)
+					scanner.Buffer(buf, 4*1024*1024)
+
 					for scanner.Scan() {
 						line := scanner.Text()
 						if strings.TrimSpace(line) == "" {
@@ -1063,6 +1066,9 @@ func (a *App) TestPlatformLogin(platform string) bool {
 								runtime.EventsEmit(a.ctx, "platform:error", evt)
 							}
 						}
+					}
+					if err := scanner.Err(); err != nil {
+						log.Printf("[TestPlatformLogin Scanner Error] 子进程管道读取异常: %v", err)
 					}
 					_ = cmd.Wait()
 					a.bossMutex.Lock()
@@ -1503,6 +1509,10 @@ func (a *App) StartMultiPlatformSearch(projectID string, keyword string, city st
 
 	go func() {
 		scanner := bufio.NewScanner(stdout)
+		// 扩容缓冲区上限至 4MB，防止全量大简历 JSON 超出默认 64KB 限制导致静默截断
+		buf := make([]byte, 64*1024)
+		scanner.Buffer(buf, 4*1024*1024)
+
 		for scanner.Scan() {
 			line := scanner.Text()
 			if strings.TrimSpace(line) == "" {
@@ -1566,6 +1576,10 @@ func (a *App) StartMultiPlatformSearch(projectID string, keyword string, city st
 				runtime.EventsEmit(a.ctx, "boss:error", evt)
 				runtime.EventsEmit(a.ctx, "platform:error", evt)
 			}
+		}
+
+		if err := scanner.Err(); err != nil {
+			log.Printf("[MultiPlatformSearch Scanner Error] 矩阵寻才读取子进程管道异常: %v", err)
 		}
 
 		_ = cmd.Wait()
