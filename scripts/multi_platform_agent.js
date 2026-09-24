@@ -269,21 +269,31 @@ async function extractCandidatesAcrossFrames(page, targetCount, keyword, platfor
 
       // 提取直达链接
       let candUrl = '';
-      const aTag = el.querySelector('a[href*="resume"], a[href*="detail"], a[href*="geek"], a[href*="talent"], a');
+      const aTag = el.querySelector('a[href*="resume"], a[href*="Resume"], a[href*="detail"], a[href*="geek"], a[href*="talent"], a');
       if (aTag && aTag.href && !aTag.href.startsWith('javascript:')) {
         candUrl = aTag.href;
       }
       if (!candUrl) {
-        const seq = el.getAttribute('data-seq') || el.getAttribute('data-resumeid') || el.getAttribute('data-id') || el.getAttribute('data-geekid');
+        const seq = el.getAttribute('data-seq') || el.getAttribute('data-resumeid') || el.getAttribute('data-id') || el.getAttribute('data-userid') || el.getAttribute('data-geekid');
         if (seq) {
           candUrl = `${window.location.origin}${window.location.pathname}?seq=${seq}`;
         }
       }
-      if (!candUrl) {
-        candUrl = window.location.href;
-      }
 
-      if (candUrl && seenUrls.has(candUrl)) continue;
+      // 关键判定：只有独立的候选人详情 URL 才参与 URL 排重，绝对不能把搜索列表页 URL 当作排重依据！
+      const isCandDetailUrl = (u) => {
+        if (!u) return false;
+        const low = u.toLowerCase();
+        if (low.includes('/talent/search') || low.includes('/search') || low.includes('/recommend') || low.includes('/navigate')) return false;
+        return low.includes('id=') || low.includes('seq=') || low.includes('user') || low.includes('resume') || low.includes('detail') || low.includes('geek');
+      };
+
+      if (isCandDetailUrl(candUrl)) {
+        if (seenUrls.has(candUrl)) continue;
+        seenUrls.add(candUrl);
+      } else {
+        candUrl = ''; // 保持空，等待详情穿透提取真实 ID 链接
+      }
 
       // 基本画像
       const infoEl = el.querySelector('.userinfo, .detail, .firstline, .base-info.join-text-wrap, .info, .labels, .base-info, .desc, .user-desc, .exp-edu, .info-labels, td.exp, td.edu');
@@ -303,7 +313,6 @@ async function extractCandidatesAcrossFrames(page, targetCount, keyword, platfor
 
       seenNames.add(name);
       seenNames.add(cleanName);
-      if (candUrl) seenUrls.add(candUrl);
 
       results.push({
         name,
@@ -531,6 +540,10 @@ async function enrichCandidatesWithFullDetail(page, browser, candidates, platfor
     // 执行文本深度净化（剔除水印网格、举报、免责声明等噪音）
     if (fullDetailText) {
       fullDetailText = cleanCandidateResumeText(fullDetailText);
+      const idMatch = fullDetailText.match(/人才ID[：:\s]*(\d+)/i) || fullDetailText.match(/ID[：:\s]*(\d{6,})/i);
+      if (idMatch && (!cand.url || cand.url.includes('/talent/search'))) {
+        cand.url = `https://ehire.51job.com/Candidate/ResumeView.aspx?hidUserID=${idMatch[1]}`;
+      }
     }
 
     // 6. 若成功提取到全量详情正文，则融合并升级候选人信息
@@ -1015,30 +1028,23 @@ async function autoNavigateAndSearch(page, platformKey, cfg, options) {
         Array.from(projectExcludedUrls)
       );
 
-      if (scraped && scraped.length >= targetCount) {
-        sendMsg('status', {
-          platform: platformKey,
-          message: `🎯 【${cfg.name}】成功捕获 ${scraped.length} 位全新在线候选人（已自动排重），正在解析整理...`
-        });
-        break; // 成功找到指定数量全新候选人，跳出轮询！
+      if (scraped && scraped.length > 0) {
+        if (scraped.length >= targetCount || pollAttempts >= 2) {
+          sendMsg('status', {
+            platform: platformKey,
+            message: `🎯 【${cfg.name}】成功捕获 ${scraped.length} 位全新在线候选人（已自动排重），正在解析整理...`
+          });
+          break; // 成功找到全新候选人，立即跳出！
+        }
       }
 
-      // 若可见卡片多已被收录，尝试点击下一页或翻页按钮
+      // 若可见卡片多已被收录且尚未捕获到候选人，尝试点击下一页或翻页按钮
       if (pollAttempts >= 3 && (!scraped || scraped.length < targetCount)) {
         await page.evaluate(() => {
           const nextBtns = Array.from(document.querySelectorAll('button.btn-next, .btn-next, .next-page, a.next, [class*="pagination"] button:last-child, .el-pagination .btn-next, li.number.active + li.number'));
           const btn = nextBtns.find(b => b.offsetParent !== null && !b.disabled && !b.className.includes('is-disabled'));
           if (btn) btn.click();
         }).catch(() => {});
-      }
-
-      // 若已接近超时但已捕获到部分新候选人，也跳出进入解析
-      if (Date.now() - pollStart >= maxPollMs - 3000 && scraped && scraped.length > 0) {
-        sendMsg('status', {
-          platform: platformKey,
-          message: `🎯 【${cfg.name}】捕获到 ${scraped.length} 位全新在线候选人，进入解析...`
-        });
-        break;
       }
     } catch (evalErr) {}
 

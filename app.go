@@ -1451,7 +1451,8 @@ func (a *App) StartMultiPlatformSearch(projectID string, keyword string, city st
 		if name != "" && name != "候选人" {
 			excludedNames = append(excludedNames, name)
 		}
-		if r.URL != "" {
+		// 严密排重：仅将具体的候选人独立主页加入排除，绝对不把通用搜索页加入排除集
+		if r.URL != "" && !strings.Contains(r.URL, "/talent/search") && !strings.Contains(r.URL, "/search") && !strings.Contains(r.URL, "/recommend") && !strings.Contains(r.URL, "/navigate") {
 			excludedUrls = append(excludedUrls, r.URL)
 		}
 	}
