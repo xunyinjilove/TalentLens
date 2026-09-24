@@ -411,126 +411,124 @@ async function enrichCandidatesWithFullDetail(page, browser, candidates, platfor
     let fullDetailText = '';
 
     try {
-      // 1. 设置新页面监听（如果点击打开的是新标签页）
-      let newPagePromise = new Promise(resolve => {
-        const handler = async target => {
-          try {
-            const p = await target.page();
-            if (p) {
-              browser.off('targetcreated', handler);
-              resolve(p);
-            }
-          } catch (e) { resolve(null); }
-        };
-        browser.on('targetcreated', handler);
-        setTimeout(() => {
-          browser.off('targetcreated', handler);
-          resolve(null);
-        }, 3000);
-      });
-
-      // 2. 拟人点击候选人卡片或姓名
-      const clicked = await page.evaluate((candName, idx) => {
-        const cards = document.querySelectorAll(
-          '.talent-search-container .card, div.card, .eh-talent-search .card, .candidate-card-wrap, .geek-item, .res-list tr, .candidate-box'
-        );
-        let targetCard = null;
-        for (const c of cards) {
-          const nameEl = c.querySelector('.firstline .name, span.name, .name, h3, h4, .user-name');
-          if (nameEl && nameEl.innerText && nameEl.innerText.includes(candName)) {
-            targetCard = c;
-            break;
-          }
-        }
-        if (!targetCard && cards[idx]) targetCard = cards[idx];
-
-        if (targetCard) {
-          const clickTarget = targetCard.querySelector('.firstline .name, span.name, .name, a, h3, h4') || targetCard;
-          try { clickTarget.scrollIntoView({ behavior: 'smooth', block: 'center' }); } catch (e) {}
-          clickTarget.click();
-          return true;
-        }
-        return false;
-      }, cand.name, i);
-
-      if (clicked) {
-        // 3. 检查是否有新页面产生
-        const newPage = await newPagePromise;
-        if (newPage) {
-          // 等待新标签页文本内容渲染完毕
-          await newPage.waitForFunction(
-            () => document.body && document.body.innerText.length > 300,
-            { timeout: 5000 }
+      // 1. 若候选人已有独立详情 URL，优先直接开独立标签页后台提取（不干扰主页面列表状态）
+      const isDirectDetail = cand.url && (cand.url.includes('id=') || cand.url.includes('seq=') || cand.url.includes('ResumeView') || cand.url.includes('geek'));
+      if (isDirectDetail) {
+        let directPage = null;
+        try {
+          directPage = await browser.newPage();
+          await directPage.goto(cand.url, { waitUntil: 'domcontentloaded', timeout: 8000 }).catch(() => {});
+          await directPage.waitForFunction(
+            () => document.body && document.body.innerText.length > 200,
+            { timeout: 3000 }
           ).catch(() => {});
+          fullDetailText = await directPage.evaluate(() => document.body.innerText).catch(() => '');
+        } catch (e) {
+        } finally {
+          if (directPage) await directPage.close().catch(() => {});
+        }
+      }
 
-          cand.url = newPage.url() || cand.url;
-          fullDetailText = await newPage.evaluate(() => document.body.innerText).catch(() => '');
-          await newPage.close().catch(() => {});
-        } else {
-          // 4. 新标签页未打开，等待页面内 Element Plus 抽屉/模态弹层挂载渲染 (最长等待 2.5 秒)
-          const waitStart = Date.now();
-          while (Date.now() - waitStart < 2500) {
-            fullDetailText = await page.evaluate(() => {
-              // 抽取前临时移除水印网格与底部垃圾操作节点
-              try {
-                const garbage = document.querySelectorAll(
-                  '[class*="watermark"], [class*="water-mark"], .eh-watermark, ' +
-                  '[class*="report"], .jubao, .bottom-action, .footer-action, .operate-log, .chat-input-box'
-                );
-                garbage.forEach(g => {
-                  if (!g.innerText.includes('工作经历') && !g.innerText.includes('个人优势')) {
-                    try { g.remove(); } catch (e) {}
-                  }
-                });
-              } catch (e) {}
-
-              // 优先查找 Element Plus / Ant Design / 招聘业务标准抽屉容器
-              const drawerSelectors = [
-                '.el-drawer__body', '.el-drawer',
-                '.resume-detail', '.resume-detail-drawer', '.detail-box',
-                '.candidate-detail', '.user-detail', '.dialog-resume',
-                '[class*="resume-detail"]', '[class*="ResumeDetail"]',
-                '.chat-detail'
-              ];
-              for (const sel of drawerSelectors) {
-                const els = document.querySelectorAll(sel);
-                for (const el of els) {
-                  if ((el.offsetParent !== null || el.getClientRects().length > 0) && (el.innerText || '').length > 200) {
-                    return el.innerText;
-                  }
-                }
+      // 2. 若未通过直接 URL 拿到正文，执行主列表卡片拟人点击与抽屉监听
+      if (!fullDetailText || fullDetailText.length < 200) {
+        let newPagePromise = new Promise(resolve => {
+          const handler = async target => {
+            try {
+              const p = await target.page();
+              if (p) {
+                browser.off('targetcreated', handler);
+                resolve(p);
               }
+            } catch (e) { resolve(null); }
+          };
+          browser.on('targetcreated', handler);
+          setTimeout(() => {
+            browser.off('targetcreated', handler);
+            resolve(null);
+          }, 1500);
+        });
 
-              // 通用降级匹配：页面内包含“工作经历”且可见的大型信息容器
-              const all = Array.from(document.querySelectorAll('div, section, aside'));
-              const containers = all.filter(el => {
-                const t = el.innerText || '';
-                const isVis = el.offsetParent !== null || el.getClientRects().length > 0;
-                return isVis && t.includes('工作经历') && (t.includes('个人优势') || t.includes('项目经验') || t.includes('教育经历')) && el.children.length >= 2;
-              });
-
-              if (containers.length > 0) {
-                containers.sort((a, b) => b.innerText.length - a.innerText.length);
-                return containers[0].innerText;
-              }
-              return '';
-            }).catch(() => '');
-
-            if (fullDetailText && fullDetailText.length > 200) {
+        // 拟人点击候选人卡片或姓名
+        const clicked = await page.evaluate((candName, idx) => {
+          const cards = document.querySelectorAll(
+            '.talent-search-container .card, div.card, .eh-talent-search .card, .candidate-card-wrap, .geek-item, .res-list tr, .candidate-box'
+          );
+          let targetCard = null;
+          for (const c of cards) {
+            const nameEl = c.querySelector('.firstline .name, span.name, .name, h3, h4, .user-name');
+            if (nameEl && nameEl.innerText && nameEl.innerText.includes(candName)) {
+              targetCard = c;
               break;
             }
-            await new Promise(r => setTimeout(r, 400));
           }
+          if (!targetCard && cards[idx]) targetCard = cards[idx];
 
-          // 5. 抓取完毕后关闭抽屉，恢复搜索列表状态（Esc 秒级关闭 + 兜底点击关闭按钮）
-          await page.keyboard.press('Escape');
-          await new Promise(r => setTimeout(r, 300));
-          await page.evaluate(() => {
-            const closeBtns = document.querySelectorAll('.el-drawer__close-btn, .close-btn, .icon-close, [class*="close"]');
-            for (const b of closeBtns) {
-              if (b.offsetParent !== null) { b.click(); break; }
+          if (targetCard) {
+            const clickTarget = targetCard.querySelector('.firstline .name, span.name, .name, a, h3, h4') || targetCard;
+            try { clickTarget.scrollIntoView({ behavior: 'smooth', block: 'center' }); } catch (e) {}
+            clickTarget.click();
+            return true;
+          }
+          return false;
+        }, cand.name, i);
+
+        if (clicked) {
+          const newPage = await newPagePromise;
+          if (newPage) {
+            await newPage.waitForFunction(
+              () => document.body && document.body.innerText.length > 200,
+              { timeout: 3500 }
+            ).catch(() => {});
+
+            cand.url = newPage.url() || cand.url;
+            fullDetailText = await newPage.evaluate(() => document.body.innerText).catch(() => '');
+            await newPage.close().catch(() => {});
+          } else {
+            // 抽屉/模态弹层快速轮询 (最长等待 1.5 秒，每 150ms 轮询一次)
+            const waitStart = Date.now();
+            while (Date.now() - waitStart < 1500) {
+              fullDetailText = await page.evaluate(() => {
+                const drawerSelectors = [
+                  '.el-drawer__body', '.el-drawer',
+                  '.resume-detail', '.resume-detail-drawer', '.detail-box',
+                  '.candidate-detail', '.user-detail', '.dialog-resume',
+                  '[class*="resume-detail"]', '[class*="ResumeDetail"]',
+                  '.chat-detail'
+                ];
+                for (const sel of drawerSelectors) {
+                  const els = document.querySelectorAll(sel);
+                  for (const el of els) {
+                    if ((el.offsetParent !== null || el.getClientRects().length > 0) && (el.innerText || '').length > 200) {
+                      return el.innerText;
+                    }
+                  }
+                }
+                const all = Array.from(document.querySelectorAll('div, section, aside'));
+                const containers = all.filter(el => {
+                  const t = el.innerText || '';
+                  const isVis = el.offsetParent !== null || el.getClientRects().length > 0;
+                  return isVis && t.includes('工作经历') && (t.includes('个人优势') || t.includes('项目经验') || t.includes('教育经历')) && el.children.length >= 2;
+                });
+                if (containers.length > 0) {
+                  containers.sort((a, b) => b.innerText.length - a.innerText.length);
+                  return containers[0].innerText;
+                }
+                return '';
+              }).catch(() => '');
+
+              if (fullDetailText && fullDetailText.length > 200) break;
+              await new Promise(r => setTimeout(r, 150));
             }
-          }).catch(() => {});
+
+            // 抓取完毕快速关闭抽屉
+            await page.keyboard.press('Escape');
+            await page.evaluate(() => {
+              const closeBtns = document.querySelectorAll('.el-drawer__close-btn, .close-btn, .icon-close, [class*="close"]');
+              for (const b of closeBtns) {
+                if (b.offsetParent !== null) { b.click(); break; }
+              }
+            }).catch(() => {});
+          }
         }
       }
     } catch (err) {
@@ -546,7 +544,7 @@ async function enrichCandidatesWithFullDetail(page, browser, candidates, platfor
       }
     }
 
-    // 6. 若成功提取到全量详情正文，则融合并升级候选人信息
+    // 若成功提取到全量详情正文，则融合并升级候选人信息
     if (fullDetailText && fullDetailText.length > (cand.rawCardText || '').length) {
       cand.rawCardText = fullDetailText;
 
@@ -564,7 +562,7 @@ async function enrichCandidatesWithFullDetail(page, browser, candidates, platfor
     }
 
     enriched.push(cand);
-    await new Promise(r => setTimeout(r, 500));
+    await new Promise(r => setTimeout(r, 150));
   }
 
   return enriched;

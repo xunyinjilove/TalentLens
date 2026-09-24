@@ -465,7 +465,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, watch } from 'vue'
+import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import {
@@ -853,6 +853,10 @@ onMounted(async () => {
     // 加载项目下的简历
     await resumeStore.loadProjectResumes(projectId.value)
   }
+})
+
+onUnmounted(() => {
+  resumeStore.cleanupWailsEvents()
 })
 </script>
 

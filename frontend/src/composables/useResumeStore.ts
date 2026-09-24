@@ -566,8 +566,13 @@ export const useResumeStore = defineStore('resume', () => {
     }
   }
 
-  // 初始化 Wails 事件监听
+  // Wails 事件单例守卫与清理集合
+  let eventsInitialized = false
+  let eventCleanupFns: Array<() => void> = []
+
+  // 初始化 Wails 事件监听（单例幂等，防止多处挂载重复触发）
   async function initWailsEvents() {
+    if (eventsInitialized) return
     await loadWailsBindings()
     
     if (!isWailsEnv || !WailsRuntime) {
@@ -575,31 +580,32 @@ export const useResumeStore = defineStore('resume', () => {
       return
     }
 
+    eventsInitialized = true
+
     // 监听简历添加事件（后端 processFile 或 OnFileDrop）
-    WailsRuntime.EventsOn('resume:added', (data: any) => {
+    const unsub1 = WailsRuntime.EventsOn('resume:added', (data: any) => {
       devLog('info', `收到后端简历添加事件: ${data.file_name}`)
       addResumeFromBackend(data)
     })
 
     // 监听原生拖拽/文件选择添加事件
-    WailsRuntime.EventsOn('resume:dropped', (data: any) => {
+    const unsub2 = WailsRuntime.EventsOn('resume:dropped', (data: any) => {
       devLog('info', `收到原生文件事件: ${data.file_name}, 内容长度=${(data.content || '').length}`)
       addResumeFromBackend(data)
     })
 
     // 监听分析进度事件（含进度百分比）
-    WailsRuntime.EventsOn('analysis:progress', (data: any) => {
+    const unsub3 = WailsRuntime.EventsOn('analysis:progress', (data: any) => {
       devLog('info', `分析进度: id=${data.id}, progress=${data.progress}%`)
       const resume = resumes.value.find(r => r.id === data.id)
       if (resume) {
         resume.status = data.status || 'analyzing'
-        // 存储进度到 resume 对象上（动态属性）
         ;(resume as any).progress = data.progress || 0
       }
     })
 
     // 监听分析完成事件
-    WailsRuntime.EventsOn('analysis:completed', (data: any) => {
+    const unsub4 = WailsRuntime.EventsOn('analysis:completed', (data: any) => {
       devLog('info', `分析完成: id=${data.id}, score=${data.score}`)
       const resume = resumes.value.find(r => r.id === data.id)
       if (resume) {
@@ -631,7 +637,7 @@ export const useResumeStore = defineStore('resume', () => {
     })
 
     // 监听分析错误事件
-    WailsRuntime.EventsOn('analysis:error', (data: any) => {
+    const unsub5 = WailsRuntime.EventsOn('analysis:error', (data: any) => {
       devLog('error', `分析失败: id=${data.id}, error=${data.error}`)
       const resume = resumes.value.find(r => r.id === data.id)
       if (resume) {
@@ -641,7 +647,7 @@ export const useResumeStore = defineStore('resume', () => {
     })
 
     // 监听批量分析进度（更新全局进度状态）
-    WailsRuntime.EventsOn('batch:progress', (data: any) => {
+    const unsub6 = WailsRuntime.EventsOn('batch:progress', (data: any) => {
       devLog('info', `批量进度: ${data.current}/${data.total}`)
       batchProgress.value = {
         current: data.current,
@@ -651,13 +657,24 @@ export const useResumeStore = defineStore('resume', () => {
     })
 
     // 监听批量分析完成
-    WailsRuntime.EventsOn('batch:completed', (data: any) => {
+    const unsub7 = WailsRuntime.EventsOn('batch:completed', (data: any) => {
       devLog('info', `批量分析完成, 共 ${data.total} 份`)
       isAnalyzing.value = false
       batchProgress.value = { current: 0, total: 0, currentResumeId: null }
     })
 
+    eventCleanupFns = [unsub1, unsub2, unsub3, unsub4, unsub5, unsub6, unsub7].filter(fn => typeof fn === 'function')
     console.log('✅ Wails 事件监听已初始化')
+  }
+
+  // 清除注销事件监听（防内存泄漏）
+  function cleanupWailsEvents() {
+    eventCleanupFns.forEach(fn => {
+      try { fn() } catch (e) {}
+    })
+    eventCleanupFns = []
+    eventsInitialized = false
+    console.log('🧹 Wails 事件监听已注销清理')
   }
 
   // 获取简历解析内容（AI 实际看到的文本）
@@ -706,6 +723,7 @@ export const useResumeStore = defineStore('resume', () => {
     clearAll,
     getResumeContent,
     initWailsEvents,
+    cleanupWailsEvents,
     isWailsEnvironment
   }
 })

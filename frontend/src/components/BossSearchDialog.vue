@@ -118,6 +118,27 @@
           />
         </div>
 
+        <!-- 当前各招聘平台状态实时指示条 -->
+        <div class="active-platforms-bar">
+          <div
+            v-for="p in platformList.filter(p => p.selected)"
+            :key="p.code"
+            class="active-plat-pill"
+            :class="{
+              'is-active': activePlatformCode === p.code,
+              'is-done': (platformCounts[p.code] || 0) >= form.countPerPlatform
+            }"
+          >
+            <span class="plat-pill-icon">{{ p.icon }}</span>
+            <span class="plat-pill-name">{{ p.name }}</span>
+            <span class="plat-pill-count">
+              <el-icon v-if="activePlatformCode === p.code && searching" class="spin"><Loading /></el-icon>
+              <el-icon v-else-if="(platformCounts[p.code] || 0) >= form.countPerPlatform" class="icon-done"><CircleCheck /></el-icon>
+              {{ platformCounts[p.code] || 0 }} / {{ form.countPerPlatform }}
+            </span>
+          </div>
+        </div>
+
         <!-- 实时抓取流水日志 -->
         <div class="log-stream-box" ref="logBoxRef">
           <div
@@ -208,6 +229,8 @@ const searching = ref(false)
 const isFinished = ref(false)
 const currentStatusText = ref('正在就绪...')
 const candidateCount = ref(0)
+const activePlatformCode = ref<string>('')
+const platformCounts = ref<Record<string, number>>({})
 const logBoxRef = ref<HTMLElement | null>(null)
 
 interface SearchLog {
@@ -453,11 +476,14 @@ onMounted(async () => {
   if (!WailsRuntime) return
 
   const handleStatus = (evt: any) => {
-    if (evt && evt.message) {
-      if (lastStatusMsg === evt.message) return // 防重打印
-      lastStatusMsg = evt.message
-      currentStatusText.value = evt.message
-      addLog('status', evt.message)
+    if (evt) {
+      if (evt.platform) activePlatformCode.value = evt.platform
+      if (evt.message) {
+        if (lastStatusMsg === evt.message) return // 防重打印
+        lastStatusMsg = evt.message
+        currentStatusText.value = evt.message
+        addLog('status', evt.message)
+      }
     }
   }
 
@@ -467,6 +493,10 @@ onMounted(async () => {
       const candKey = c.id || `${c.platform}_${c.name}_${c.fileName}`
       if (seenCandidateIds.has(candKey)) return // 排重，根绝翻倍
       seenCandidateIds.add(candKey)
+
+      if (c.platform) {
+        platformCounts.value[c.platform] = (platformCounts.value[c.platform] || 0) + 1
+      }
 
       candidateCount.value = seenCandidateIds.size
       const pName = c.platformName || evt.platformName || '招聘平台'
@@ -755,6 +785,72 @@ onUnmounted(() => {
         font-size: 13px;
         font-weight: 700;
         color: $system-blue;
+      }
+    }
+  }
+
+  .active-platforms-bar {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+
+    .active-plat-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 5px 12px;
+      background: #f8fafc;
+      border: 1px solid #e2e8f0;
+      border-radius: 20px;
+      font-size: 12px;
+      color: #64748b;
+      transition: all 0.25s ease;
+
+      .plat-pill-icon {
+        font-size: 13px;
+      }
+
+      .plat-pill-name {
+        font-weight: 600;
+      }
+
+      .plat-pill-count {
+        display: inline-flex;
+        align-items: center;
+        gap: 3px;
+        font-size: 11px;
+        background: rgba(0, 0, 0, 0.05);
+        padding: 1px 6px;
+        border-radius: 10px;
+      }
+
+      &.is-active {
+        background: #eff6ff;
+        border-color: #3b82f6;
+        color: #1d4ed8;
+        box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.15);
+
+        .plat-pill-count {
+          background: #dbeafe;
+          color: #1d4ed8;
+          font-weight: 700;
+        }
+      }
+
+      &.is-done {
+        background: #f0fdf4;
+        border-color: #22c55e;
+        color: #15803d;
+
+        .plat-pill-count {
+          background: #dcfce7;
+          color: #15803d;
+          font-weight: 700;
+        }
+
+        .icon-done {
+          color: #22c55e;
+        }
       }
     }
   }
