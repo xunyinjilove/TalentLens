@@ -21,6 +21,7 @@ const options = {
   candidateName: '',
   candidateUrl: '',
   message: '',
+  excludeFile: '',       // 跨批次排重凭据文件
   dataDir: path.join(process.cwd(), 'data', 'candidates_multi')
 };
 
@@ -47,6 +48,8 @@ for (let i = 0; i < args.length; i++) {
     options.candidateUrl = args[++i];
   } else if (args[i] === '--message' && args[i + 1]) {
     options.message = args[++i];
+  } else if (args[i] === '--exclude-file' && args[i + 1]) {
+    options.excludeFile = args[++i];
   } else if (args[i] === '--data-dir' && args[i + 1]) {
     options.dataDir = args[++i];
   }
@@ -118,14 +121,38 @@ const PLATFORM_CONFIGS = {
   }
 };
 
-// 内存去重缓存
+// 跨批次与全局排重缓存
 const seenCandidateKeys = new Set();
+const projectExcludedNames = new Set();
+const projectExcludedUrls = new Set();
+
+if (options.excludeFile && fs.existsSync(options.excludeFile)) {
+  try {
+    const raw = fs.readFileSync(options.excludeFile, 'utf8');
+    const parsed = JSON.parse(raw);
+    if (Array.isArray(parsed.names)) {
+      parsed.names.forEach(n => {
+        const c = (n || '').trim();
+        if (c) {
+          projectExcludedNames.add(c);
+          seenCandidateKeys.add(c);
+        }
+      });
+    }
+    if (Array.isArray(parsed.urls)) {
+      parsed.urls.forEach(u => {
+        const c = (u || '').trim();
+        if (c) projectExcludedUrls.add(c);
+      });
+    }
+  } catch (e) {}
+}
 
 function isDuplicateCandidate(name, company, exp) {
   const cleanName = (name || '').replace(/[\s\*]/g, '');
   const cleanComp = (company || '').replace(/[\s\(\)（）某]/g, '');
   const key = `${cleanName}_${cleanComp}`;
-  if (seenCandidateKeys.has(key)) return true;
+  if (seenCandidateKeys.has(key) || projectExcludedNames.has(cleanName)) return true;
   seenCandidateKeys.add(key);
   return false;
 }
@@ -196,11 +223,12 @@ async function smoothScroll(page, distance = 480, step = 80) {
   }
 }
 
-// 跨 Frame 深度穿透提取候选人卡片（支持 51job 新版/老版、BOSS 直聘、智联、猎聘等全渠道）
-async function extractCandidatesAcrossFrames(page, targetCount, keyword, platformName) {
-  const evaluateCardFn = (targetCount, kw, pName) => {
+// 跨 Frame 深度穿透提取候选人卡片（支持 51job 新版/老版、BOSS 直聘、智联、猎聘等全渠道，并支持全局跨批次排重）
+async function extractCandidatesAcrossFrames(page, targetCount, keyword, platformName, excludedNames = [], excludedUrls = []) {
+  const evaluateCardFn = (targetCount, kw, pName, exclNames, exclUrls) => {
     const results = [];
-    const seenNames = new Set();
+    const seenNames = new Set(exclNames || []);
+    const seenUrls = new Set(exclUrls || []);
 
     const selectors = [
       // 前程无忧 (51job) 最新版 Revision 容器
@@ -233,24 +261,11 @@ async function extractCandidatesAcrossFrames(page, targetCount, keyword, platfor
 
       let name = nameEl.innerText.trim();
       name = name.split('\n')[0].trim();
-      if (!name || name.length > 10 || seenNames.has(name)) continue;
-      seenNames.add(name);
+      if (!name || name.length > 10) continue;
 
-      // 基本画像
-      const infoEl = el.querySelector('.userinfo, .detail, .firstline, .base-info.join-text-wrap, .info, .labels, .base-info, .desc, .user-desc, .exp-edu, .info-labels, td.exp, td.edu');
-      let infoText = infoEl ? infoEl.innerText.trim().replace(/\n+/g, ' · ') : '';
-      infoText = infoText.replace(name, '').replace(/^[\s·]+/, '');
-
-      // 任职履历与详细经历
-      const workEl = el.querySelector('.info_content, .work, .work-exp, .company, .company-name, .position, .experience, .resume-card-exp, td.company');
-      const workText = workEl ? workEl.innerText.trim().replace(/\n+/g, ' | ') : '';
-
-      // 核心专业技能标签（包含 51job 的 .skill_label, .content_tag_item 等）
-      const tags = Array.from(new Set(
-        Array.from(el.querySelectorAll('.skill_label, .content_tag_item, .tag, .skill-tag, .tag-item, span.label, .skill-label, .label-item, span[class*="tag"], span[class*="label"], .match-tag'))
-          .map(t => t.innerText.trim())
-          .filter(t => t && t.length < 20 && !t.includes('电话') && !t.includes('聊') && !t.includes('活跃') && !t.includes('求职意向'))
-      ));
+      // 纯净姓名与去重判断（跳过项目已有候选人）
+      const cleanName = name.replace(/^【.*?】/, '').replace(/^BOSS牛人_/, '').split('_')[0].trim();
+      if (seenNames.has(name) || seenNames.has(cleanName)) continue;
 
       // 提取直达链接
       let candUrl = '';
@@ -268,6 +283,28 @@ async function extractCandidatesAcrossFrames(page, targetCount, keyword, platfor
         candUrl = window.location.href;
       }
 
+      if (candUrl && seenUrls.has(candUrl)) continue;
+
+      // 基本画像
+      const infoEl = el.querySelector('.userinfo, .detail, .firstline, .base-info.join-text-wrap, .info, .labels, .base-info, .desc, .user-desc, .exp-edu, .info-labels, td.exp, td.edu');
+      let infoText = infoEl ? infoEl.innerText.trim().replace(/\n+/g, ' · ') : '';
+      infoText = infoText.replace(name, '').replace(/^[\s·]+/, '');
+
+      // 任职履历与详细经历
+      const workEl = el.querySelector('.info_content, .work, .work-exp, .company, .company-name, .position, .experience, .resume-card-exp, td.company');
+      const workText = workEl ? workEl.innerText.trim().replace(/\n+/g, ' | ') : '';
+
+      // 核心专业技能标签
+      const tags = Array.from(new Set(
+        Array.from(el.querySelectorAll('.skill_label, .content_tag_item, .tag, .skill-tag, .tag-item, span.label, .skill-label, .label-item, span[class*="tag"], span[class*="label"], .match-tag'))
+          .map(t => t.innerText.trim())
+          .filter(t => t && t.length < 20 && !t.includes('电话') && !t.includes('聊') && !t.includes('活跃') && !t.includes('求职意向'))
+      ));
+
+      seenNames.add(name);
+      seenNames.add(cleanName);
+      if (candUrl) seenUrls.add(candUrl);
+
       results.push({
         name,
         infoText,
@@ -281,14 +318,14 @@ async function extractCandidatesAcrossFrames(page, targetCount, keyword, platfor
   };
 
   // 1. 优先在主文档查找
-  let items = await page.evaluate(evaluateCardFn, targetCount, keyword, platformName).catch(() => []);
+  let items = await page.evaluate(evaluateCardFn, targetCount, keyword, platformName, excludedNames, excludedUrls).catch(() => []);
   if (items && items.length > 0) return items;
 
-  // 2. 主文档无结果时穿透遍历子 iframe（如 BOSS 直聘 recommendFrame iframe）
+  // 2. 主文档无结果时穿透遍历子 iframe
   for (const frame of page.frames()) {
     if (frame === page.mainFrame()) continue;
     try {
-      const fItems = await frame.evaluate(evaluateCardFn, targetCount, keyword, platformName);
+      const fItems = await frame.evaluate(evaluateCardFn, targetCount, keyword, platformName, excludedNames, excludedUrls);
       if (fItems && fItems.length > 0) return fItems;
     } catch (e) {}
   }
@@ -966,16 +1003,42 @@ async function autoNavigateAndSearch(page, platformKey, cfg, options) {
 
     try {
       // 微步滚轮触发瀑布流加载
-      await smoothScroll(page, 400, 80).catch(() => {});
-      await new Promise(r => setTimeout(r, 1000));
+      await smoothScroll(page, 450, 80).catch(() => {});
+      await new Promise(r => setTimeout(r, 800));
 
-      scraped = await extractCandidatesAcrossFrames(page, targetCount, options.keyword, cfg.name);
-      if (scraped && scraped.length > 0) {
+      scraped = await extractCandidatesAcrossFrames(
+        page,
+        targetCount,
+        options.keyword,
+        cfg.name,
+        Array.from(projectExcludedNames),
+        Array.from(projectExcludedUrls)
+      );
+
+      if (scraped && scraped.length >= targetCount) {
         sendMsg('status', {
           platform: platformKey,
-          message: `🎯 【${cfg.name}】成功捕获 ${scraped.length} 位在线匹配候选人，正在解析整理...`
+          message: `🎯 【${cfg.name}】成功捕获 ${scraped.length} 位全新在线候选人（已自动排重），正在解析整理...`
         });
-        break; // 成功找到候选人，跳出轮询！
+        break; // 成功找到指定数量全新候选人，跳出轮询！
+      }
+
+      // 若可见卡片多已被收录，尝试点击下一页或翻页按钮
+      if (pollAttempts >= 3 && (!scraped || scraped.length < targetCount)) {
+        await page.evaluate(() => {
+          const nextBtns = Array.from(document.querySelectorAll('button.btn-next, .btn-next, .next-page, a.next, [class*="pagination"] button:last-child, .el-pagination .btn-next, li.number.active + li.number'));
+          const btn = nextBtns.find(b => b.offsetParent !== null && !b.disabled && !b.className.includes('is-disabled'));
+          if (btn) btn.click();
+        }).catch(() => {});
+      }
+
+      // 若已接近超时但已捕获到部分新候选人，也跳出进入解析
+      if (Date.now() - pollStart >= maxPollMs - 3000 && scraped && scraped.length > 0) {
+        sendMsg('status', {
+          platform: platformKey,
+          message: `🎯 【${cfg.name}】捕获到 ${scraped.length} 位全新在线候选人，进入解析...`
+        });
+        break;
       }
     } catch (evalErr) {}
 

@@ -154,11 +154,19 @@
         </el-button>
         <el-button
           v-if="isFinished"
+          type="primary"
+          @click="handleContinueSearch"
+        >
+          <el-icon><RefreshRight /></el-icon>
+          继续寻找下一批 (增量 {{ form.countPerPlatform }} 人 · 自动排重)
+        </el-button>
+        <el-button
+          v-if="isFinished"
           type="success"
           @click="handleCompleteAndClose"
         >
           <el-icon><Check /></el-icon>
-          完成 ({{ candidateCount }} 人)
+          完成并查看 (本批 {{ candidateCount }} 人)
         </el-button>
       </div>
     </template>
@@ -176,7 +184,8 @@ import {
   WarningFilled,
   Loading,
   InfoFilled,
-  Key
+  Key,
+  RefreshRight
 } from '@element-plus/icons-vue'
 
 const props = defineProps<{
@@ -407,6 +416,12 @@ async function handleStop() {
   searching.value = false
   currentStatusText.value = '已停止搜寻'
   addLog('status', '⏹️ 已手动停止搜寻任务')
+}
+
+async function handleContinueSearch() {
+  emit('refresh')
+  ElMessage.info(`正在为您启动下一批检索（每平台 ${form.countPerPlatform} 人，自动跳过已有简历）...`)
+  await handleStartSearch()
 }
 
 function handleCompleteAndClose() {

@@ -1433,7 +1433,40 @@ func (a *App) StartMultiPlatformSearch(projectID string, keyword string, city st
 		expStr = "不限"
 	}
 
-	cmd := exec.Command("node", scriptPath,
+	// 导出当前项目已收录的候选人特征（姓名、主页网址），进行跨批次与增量全局排重
+	existingResumes := a.GetProjectResumes(projectID)
+	var excludedNames []string
+	var excludedUrls []string
+	for _, r := range existingResumes {
+		name := r.FileName
+		if r.Analysis != nil && r.Analysis.CandidateName != "" {
+			name = r.Analysis.CandidateName
+		}
+		name = regexp.MustCompile(`^【.*?】\s*`).ReplaceAllString(name, "")
+		name = regexp.MustCompile(`^BOSS牛人_\s*`).ReplaceAllString(name, "")
+		if strings.Contains(name, "_") {
+			name = strings.Split(name, "_")[0]
+		}
+		name = strings.TrimSpace(name)
+		if name != "" && name != "候选人" {
+			excludedNames = append(excludedNames, name)
+		}
+		if r.URL != "" {
+			excludedUrls = append(excludedUrls, r.URL)
+		}
+	}
+
+	excludeFilePath := filepath.Join(dataDir, fmt.Sprintf("exclude_%s.json", projectID))
+	excludeData := map[string]interface{}{
+		"names": excludedNames,
+		"urls":  excludedUrls,
+	}
+	if b, err := json.Marshal(excludeData); err == nil {
+		_ = os.WriteFile(excludeFilePath, b, 0644)
+	}
+
+	cmdArgs := []string{
+		scriptPath,
 		"--platforms", strings.Join(platforms, ","),
 		"--keyword", keyword,
 		"--city", city,
@@ -1441,7 +1474,10 @@ func (a *App) StartMultiPlatformSearch(projectID string, keyword string, city st
 		"--edu", eduLevel,
 		"--count", fmt.Sprintf("%d", count),
 		"--data-dir", dataDir,
-	)
+		"--exclude-file", excludeFilePath,
+	}
+
+	cmd := exec.Command("node", cmdArgs...)
 
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {

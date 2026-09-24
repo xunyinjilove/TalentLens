@@ -211,25 +211,30 @@
                   </div>
                 </div>
 
-                <!-- 人才直通与招聘自动化动作栏 -->
-                <div class="boss-actions-bar">
-                  <div class="actions-header">
-                    <span class="actions-title">⚡ 人才直通与招聘自动化动作</span>
-                    <span class="actions-sub">基于 AI 评估结论直连候选人并执行招聘自动化动作</span>
+                <!-- 候选人在线直达与沟通专区 -->
+                <div class="candidate-portal-bar">
+                  <div class="portal-header">
+                    <span class="portal-title">🌐 候选人在线直达与沟通</span>
+                    <span class="portal-sub">直连招聘平台候选人详情页，可直接在线联系、查看最新动态或加收藏</span>
                   </div>
-                  <div class="actions-group">
-                    <button class="boss-act-btn attach" @click="handleAttachResume(resumeStore.selectedResume.id)">
-                      <el-icon><Paperclip /></el-icon> 补充附件结合分析
+                  <div class="portal-actions">
+                    <button
+                      class="portal-act-btn primary"
+                      :disabled="!resumeStore.selectedResume.url"
+                      @click="handleOpenCandidateUrl"
+                    >
+                      <el-icon><Compass /></el-icon> 在浏览器中直接打开候选人主页
                     </button>
-                    <button class="boss-act-btn greet" @click="handleExecuteBossAction('greet')">
-                      <el-icon><ChatDotRound /></el-icon> 立即打招呼
+                    <button
+                      class="portal-act-btn secondary"
+                      :disabled="!resumeStore.selectedResume.url"
+                      @click="copyCandidateUrl"
+                    >
+                      <el-icon><DocumentCopy /></el-icon> 复制直达网址
                     </button>
-                    <button class="boss-act-btn wechat" @click="handleExecuteBossAction('exchange_wechat')">
-                      <el-icon><Connection /></el-icon> 交换微信
-                    </button>
-                    <button class="boss-act-btn unfit" @click="handleExecuteBossAction('mark_unfit')">
-                      <el-icon><CloseBold /></el-icon> 标为不合适
-                    </button>
+                    <span v-if="!resumeStore.selectedResume.url" class="portal-empty-tip">
+                      （本地导入简历，暂无在线直达链接）
+                    </span>
                   </div>
                 </div>
 
@@ -533,47 +538,29 @@ async function handleAttachResume(resumeId: string) {
   }
 }
 
-async function handleExecuteBossAction(action: 'greet' | 'ask_resume' | 'exchange_wechat' | 'mark_unfit') {
-  const resume = resumeStore.selectedResume
-  if (!resume) return
+async function handleOpenCandidateUrl() {
+  const url = resumeStore.selectedResume?.url
+  if (!url) {
+    ElMessage.warning('当前候选人暂无在线主页网址')
+    return
+  }
 
-  // 纯净化候选人姓名，去掉【前程无忧】、【BOSS】等外包前缀与后缀
-  let candidateName = resume.analysis?.candidateName || (resume.fileName || '').replace(/^【.*?】/, '').replace(/^BOSS牛人_/, '').split('_')[0].trim()
-  if (!candidateName) candidateName = '候选人'
-  
   let WailsApp: any = null
   try { WailsApp = await import('../../wailsjs/go/main/App') } catch {}
 
-  const actionLabels: Record<string, string> = {
-    greet: '打招呼 / 发送沟通意向',
-    ask_resume: '索要完整附件简历',
-    exchange_wechat: '请求交换微信',
-    mark_unfit: '标记为不合适'
-  }
-
-  ElMessage.info(`正在对【${candidateName}】执行「${actionLabels[action]}」...`)
-
-  if (WailsApp && WailsApp.ExecuteBossCandidateAction) {
+  if (WailsApp && WailsApp.OpenURL) {
     try {
-      const candidateUrl = resume.url || ''
-      const res = await WailsApp.ExecuteBossCandidateAction(action, candidateName, candidateUrl)
-      if (res && res.message) {
-        if (res.success) {
-          ElMessage.success(res.message)
-        } else {
-          ElMessage.warning(res.message)
-        }
-      } else {
-        ElMessage.success(`✅ 已成功对【${candidateName}】执行「${actionLabels[action]}」！`)
-      }
+      await WailsApp.OpenURL(url)
+      ElMessage.success('✅ 已调用默认浏览器打开候选人在线主页！')
+      return
     } catch (e: any) {
-      ElMessage.error(`操作失败: ${e.message || e}`)
+      ElMessage.error(`打开浏览器失败: ${e.message || e}`)
     }
-  } else {
-    setTimeout(() => {
-      ElMessage.success(`✅ 已成功对【${candidateName}】执行「${actionLabels[action]}」！`)
-    }, 800)
   }
+
+  // 开发预览模式回退
+  window.open(url, '_blank')
+  ElMessage.success('已在新标签页中打开候选人主页！')
 }
 
 function copyCandidateEmail() {
@@ -1828,91 +1815,98 @@ onMounted(async () => {
   }
 }
 
-// BOSS 自动化直通操作栏
-.boss-actions-bar {
+// 候选人在线直达专区
+.candidate-portal-bar {
   margin: 14px 0 18px 0;
-  padding: 12px 16px;
-  background: linear-gradient(135deg, rgba(30, 58, 95, 0.05) 0%, rgba(14, 165, 233, 0.08) 100%);
-  border: 1px solid rgba(14, 165, 233, 0.25);
-  border-radius: 10px;
+  padding: 14px 18px;
+  background: linear-gradient(135deg, rgba(37, 99, 235, 0.06) 0%, rgba(14, 165, 233, 0.08) 100%);
+  border: 1px solid rgba(37, 99, 235, 0.22);
+  border-radius: 12px;
+  box-shadow: 0 2px 8px rgba(37, 99, 235, 0.04);
 
-  .actions-header {
+  .portal-header {
     display: flex;
     justify-content: space-between;
     align-items: center;
-    margin-bottom: 10px;
+    margin-bottom: 12px;
 
-    .actions-title {
-      font-size: 13px;
+    .portal-title {
+      font-size: 13.5px;
       font-weight: 700;
-      color: #1e3a5f;
+      color: #1e3a8a;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
     }
 
-    .actions-sub {
+    .portal-sub {
       font-size: 11px;
       color: #64748b;
     }
   }
 
-  .actions-group {
+  .portal-actions {
     display: flex;
+    align-items: center;
     flex-wrap: wrap;
-    gap: 8px;
+    gap: 10px;
 
-    .boss-act-btn {
+    .portal-act-btn {
       display: inline-flex;
       align-items: center;
-      gap: 6px;
-      padding: 6px 14px;
-      font-size: 12px;
+      gap: 7px;
+      padding: 8px 18px;
+      font-size: 12.5px;
       font-weight: 600;
-      border-radius: 6px;
-      border: 1px solid transparent;
+      border-radius: 8px;
       cursor: pointer;
       transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+      border: 1px solid transparent;
 
-      &.offer-btn {
-        background: linear-gradient(135deg, #2563eb 0%, #0d9488 100%);
+      &.primary {
+        background: linear-gradient(135deg, #2563eb 0%, #0284c7 100%);
         color: #ffffff;
-        box-shadow: 0 2px 6px rgba(37, 99, 235, 0.3);
-        &:hover {
-          background: linear-gradient(135deg, #1d4ed8 0%, #0f766e 100%);
+        box-shadow: 0 3px 10px rgba(37, 99, 235, 0.25);
+
+        &:hover:not(:disabled) {
+          background: linear-gradient(135deg, #1d4ed8 0%, #0369a1 100%);
           transform: translateY(-1px);
-          box-shadow: 0 4px 10px rgba(37, 99, 235, 0.4);
+          box-shadow: 0 5px 14px rgba(37, 99, 235, 0.35);
+        }
+
+        &:disabled {
+          background: #cbd5e1;
+          color: #94a3b8;
+          cursor: not-allowed;
+          box-shadow: none;
         }
       }
 
-      &.greet {
-        background: #00bebd;
-        color: #ffffff;
-        &:hover { background: #009e9d; transform: translateY(-1px); }
-      }
-
-      &.ask-resume {
-        background: #0ea5e9;
-        color: #ffffff;
-        &:hover { background: #0284c7; transform: translateY(-1px); }
-      }
-
-      &.wechat {
-        background: #10b981;
-        color: #ffffff;
-        &:hover { background: #059669; transform: translateY(-1px); }
-      }
-
-      &.unfit {
-        background: #f1f5f9;
-        color: #64748b;
+      &.secondary {
+        background: #ffffff;
+        color: #1e293b;
         border-color: #cbd5e1;
-        &:hover { background: #fee2e2; color: #dc2626; border-color: #fca5a5; transform: translateY(-1px); }
-      }
 
-      &.attach {
-        background: #f0fdf4;
-        color: #15803d;
-        border-color: #86efac;
-        &:hover { background: #dcfce7; border-color: #4ade80; transform: translateY(-1px); }
+        &:hover:not(:disabled) {
+          background: #f8fafc;
+          border-color: #94a3b8;
+          color: #0f172a;
+          transform: translateY(-1px);
+        }
+
+        &:disabled {
+          background: #f1f5f9;
+          color: #cbd5e1;
+          border-color: #e2e8f0;
+          cursor: not-allowed;
+        }
       }
+    }
+
+    .portal-empty-tip {
+      font-size: 11px;
+      color: #94a3b8;
+      margin-left: 4px;
     }
   }
 }
