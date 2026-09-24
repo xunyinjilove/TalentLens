@@ -165,13 +165,13 @@
         <el-button v-if="!searching" @click="visible = false">取消</el-button>
         <el-button v-if="searching" type="danger" plain @click="handleStop">停止检索</el-button>
         <el-button
-          v-if="!searching && searchLogs.length === 0"
+          v-if="!searching && !isFinished"
           type="primary"
           @click="handleStartSearch"
           :disabled="!form.keyword.trim() || selectedPlatformCodes.length === 0"
         >
           <el-icon><Search /></el-icon>
-          启动矩阵并发检索 (已选 {{ selectedPlatformCodes.length }} 个平台)
+          {{ isContinue ? '立即启动增量继续寻才' : `启动矩阵并发检索 (已选 ${selectedPlatformCodes.length} 个平台)` }}
         </el-button>
         <el-button
           v-if="isFinished"
@@ -312,10 +312,20 @@ watch(() => props.modelValue, (val) => {
     searching.value = false
     isFinished.value = false
     candidateCount.value = 0
+    activePlatformCode.value = ''
+    platformCounts.value = {}
+    seenCandidateIds.clear()
+    lastStatusMsg = ''
+    doneTriggered = false
     searchLogs.value = []
+
     if (props.isContinue) {
-      currentStatusText.value = '继续寻才模式 — 将自动跳过已有候选人'
-      searchLogs.value.push({ time: Date.now(), type: 'status', message: '📌 继续寻才模式：将在已有候选人基础上继续抓取，自动排重不重复' })
+      currentStatusText.value = '继续寻才模式 — 正在启动增量检索...'
+      searchLogs.value.push({ time: Date.now(), type: 'status', message: '📌 继续寻才模式：自动跳过已有简历，正在连接全渠道检索下一批...' })
+      // 自动启动增量检索
+      nextTick(() => {
+        handleStartSearch()
+      })
     } else {
       currentStatusText.value = '准备就绪'
     }
@@ -391,6 +401,8 @@ async function handleStartSearch() {
   searching.value = true
   isFinished.value = false
   candidateCount.value = 0
+  activePlatformCode.value = ''
+  platformCounts.value = {}
   seenCandidateIds.clear()
   lastStatusMsg = ''
   doneTriggered = false
