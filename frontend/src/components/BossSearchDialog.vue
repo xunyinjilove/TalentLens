@@ -22,8 +22,19 @@
         </div>
       </div>
 
-      <!-- 搜索配置表单 -->
-      <div class="search-form" v-if="!searching && searchLogs.length === 0">
+      <!-- 搜索配置表单（先选择平台与确认参数） -->
+      <div class="search-form" v-if="!isSearchingStarted">
+        <!-- 继续寻才模式专属提示横幅 -->
+        <div v-if="isContinue" class="continue-mode-banner">
+          <div class="banner-badge">
+            <el-icon><RefreshRight /></el-icon>
+            <span>增量继续寻才模式</span>
+          </div>
+          <div class="banner-desc">
+            已继承首次寻才要求（<strong>{{ form.keyword || jobTitle }} · {{ form.city }}</strong>），已自动开启<strong>跨批次全局排重</strong>。请勾选本次要继续深挖的招聘平台：
+          </div>
+        </div>
+
         <!-- 4 大平台矩阵选择与独立登录管理面板 -->
         <div class="platform-grid-section">
           <div class="section-title-row">
@@ -162,33 +173,51 @@
 
     <template #footer>
       <div class="dialog-footer">
-        <el-button v-if="!searching" @click="visible = false">取消</el-button>
-        <el-button v-if="searching" type="danger" plain @click="handleStop">停止检索</el-button>
-        <el-button
-          v-if="!searching && !isFinished"
-          type="primary"
-          @click="handleStartSearch"
-          :disabled="!form.keyword.trim() || selectedPlatformCodes.length === 0"
-        >
-          <el-icon><Search /></el-icon>
-          {{ isContinue ? '立即启动增量继续寻才' : `启动矩阵并发检索 (已选 ${selectedPlatformCodes.length} 个平台)` }}
-        </el-button>
-        <el-button
-          v-if="isFinished"
-          type="primary"
-          @click="handleContinueSearch"
-        >
-          <el-icon><RefreshRight /></el-icon>
-          继续寻找下一批 (增量 {{ form.countPerPlatform }} 人 · 自动排重)
-        </el-button>
-        <el-button
-          v-if="isFinished"
-          type="success"
-          @click="handleCompleteAndClose"
-        >
-          <el-icon><Check /></el-icon>
-          完成并查看 (本批 {{ candidateCount }} 人)
-        </el-button>
+        <!-- 阶段一：表单配置与平台选择阶段 -->
+        <template v-if="!isSearchingStarted">
+          <el-button @click="visible = false">取消</el-button>
+          <el-button
+            :type="isContinue ? 'warning' : 'primary'"
+            @click="handleStartSearch"
+            :disabled="!form.keyword.trim() || selectedPlatformCodes.length === 0"
+          >
+            <el-icon><component :is="isContinue ? Plus : Search" /></el-icon>
+            {{ isContinue ? `立即启动继续寻才 (已选 ${selectedPlatformCodes.length} 个平台 · 自动排重)` : `启动矩阵并发检索 (已选 ${selectedPlatformCodes.length} 个平台)` }}
+          </el-button>
+        </template>
+
+        <!-- 阶段二：检索进行中或已完成阶段 -->
+        <template v-else>
+          <el-button v-if="searching" type="danger" plain @click="handleStop">停止检索</el-button>
+          <el-button v-if="!searching && !isFinished" @click="handleBackToForm">
+            <el-icon><Back /></el-icon> 返回修改配置
+          </el-button>
+          <el-button
+            v-if="!searching && !isFinished"
+            type="primary"
+            @click="handleStartSearch"
+            :disabled="!form.keyword.trim() || selectedPlatformCodes.length === 0"
+          >
+            <el-icon><Search /></el-icon>
+            重新启动检索
+          </el-button>
+          <el-button
+            v-if="isFinished"
+            type="primary"
+            @click="handleContinueSearch"
+          >
+            <el-icon><RefreshRight /></el-icon>
+            继续寻找下一批 (增量 {{ form.countPerPlatform }} 人 · 自动排重)
+          </el-button>
+          <el-button
+            v-if="isFinished"
+            type="success"
+            @click="handleCompleteAndClose"
+          >
+            <el-icon><Check /></el-icon>
+            完成并查看 (本批 {{ candidateCount }} 人)
+          </el-button>
+        </template>
       </div>
     </template>
   </el-dialog>
@@ -206,7 +235,9 @@ import {
   Loading,
   InfoFilled,
   Key,
-  RefreshRight
+  RefreshRight,
+  Plus,
+  Back
 } from '@element-plus/icons-vue'
 
 const props = defineProps<{
@@ -225,6 +256,7 @@ const emit = defineEmits<{
 }>()
 
 const visible = ref(false)
+const isSearchingStarted = ref(false) // 区分表单配置页与运行监控页
 const searching = ref(false)
 const isFinished = ref(false)
 const currentStatusText = ref('正在就绪...')
@@ -305,10 +337,8 @@ const expectedTotalCount = computed(() => {
 watch(() => props.modelValue, (val) => {
   visible.value = val
   if (val) {
-    // 重置状态与表单初始值
-    form.keyword = props.jobTitle || '临床项目经理'
-    form.city = '上海'
-    form.countPerPlatform = 5
+    // 始终先展示配置表单，让用户先选择/确认招聘渠道
+    isSearchingStarted.value = false
     searching.value = false
     isFinished.value = false
     candidateCount.value = 0
@@ -319,13 +349,13 @@ watch(() => props.modelValue, (val) => {
     doneTriggered = false
     searchLogs.value = []
 
+    // 继承第一次寻才的岗位关键词（若已有值则保留，不进行粗暴覆盖）
+    if (!form.keyword) {
+      form.keyword = props.jobTitle || '临床项目经理'
+    }
+
     if (props.isContinue) {
-      currentStatusText.value = '继续寻才模式 — 正在启动增量检索...'
-      searchLogs.value.push({ time: Date.now(), type: 'status', message: '📌 继续寻才模式：自动跳过已有简历，正在连接全渠道检索下一批...' })
-      // 自动启动增量检索
-      nextTick(() => {
-        handleStartSearch()
-      })
+      currentStatusText.value = '继续寻才模式 — 请选择/确认招聘平台后启动'
     } else {
       currentStatusText.value = '准备就绪'
     }
@@ -398,6 +428,7 @@ async function handleStartSearch() {
     return
   }
 
+  isSearchingStarted.value = true
   searching.value = true
   isFinished.value = false
   candidateCount.value = 0
@@ -457,6 +488,12 @@ async function handleStop() {
   searching.value = false
   currentStatusText.value = '已停止搜寻'
   addLog('status', '⏹️ 已手动停止搜寻任务')
+}
+
+// 返回修改平台与参数配置
+function handleBackToForm() {
+  searching.value = false
+  isSearchingStarted.value = false
 }
 
 async function handleContinueSearch() {
@@ -609,6 +646,35 @@ onUnmounted(() => {
   display: flex;
   flex-direction: column;
   gap: 12px;
+
+  .continue-mode-banner {
+    background: linear-gradient(135deg, #fffbeb 0%, #fef3c7 100%);
+    border: 1px solid #fde68a;
+    border-radius: $radius-md;
+    padding: 10px 14px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+
+    .banner-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      font-size: 13px;
+      font-weight: 700;
+      color: #b45309;
+    }
+
+    .banner-desc {
+      font-size: 12px;
+      color: #92400e;
+      line-height: 1.5;
+
+      strong {
+        color: #78350f;
+      }
+    }
+  }
 
   .platform-grid-section {
     display: flex;
