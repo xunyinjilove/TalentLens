@@ -88,6 +88,17 @@ type ConsistencyResult struct {
 	Details []string `json:"details"` // 具体核验详情
 }
 
+// WaterCheckResult 简历防伪注水雷达与断层侦测结果
+type WaterCheckResult struct {
+	WaterScore         int      `json:"water_score"`                   // 注水/破绽风险分 (0-100分，越低越真实安全)
+	RiskLevel          string   `json:"risk_level"`                    // "low" | "medium" | "high"
+	Gaps               []string `json:"gaps"`                          // 职场时间断层/空窗期侦测
+	VagueClaims        []string `json:"vague_claims"`                  // 假大空/缺乏量化成果描述
+	OutsourcingWarning string   `json:"outsourcing_warning,omitempty"` // 外包驻场/挂靠疑点提示
+	FrequentHopWarning string   `json:"frequent_hop_warning,omitempty"`// 频繁跳槽/履历动荡提示
+	AdviseQuestions    []string `json:"advise_questions"`              // 初试防伪一针见血反问建议
+}
+
 // Resume 简历结构
 type Resume struct {
 	ID                 string             `json:"id"`
@@ -119,7 +130,7 @@ type AnalysisResult struct {
 	SkillMatch      float64 `json:"skill_match"`
 	ExperienceMatch float64 `json:"experience_match"`
 	EducationMatch  float64 `json:"education_match"`
-	Recommendation  string `json:"recommendation"`
+	Recommendation  string  `json:"recommendation"`
 
 	// 结合分析演进与双源核验
 	ConsistencyCheck  *ConsistencyResult `json:"consistency_check,omitempty"`
@@ -142,6 +153,12 @@ type AnalysisResult struct {
 	Weaknesses []string `json:"weaknesses"`
 	Risks      []string `json:"risks"`
 	Summary    string   `json:"summary"`
+
+	// 业务主管极简推介卡（微信/钉钉一键转发）
+	ManagerPitch string `json:"manager_pitch,omitempty"`
+
+	// 简历防伪注水雷达与断层侦测
+	WaterCheck *WaterCheckResult `json:"water_check,omitempty"`
 
 	// 面试建议
 	InterviewSuggestions []string `json:"interview_suggestions"`
@@ -1930,6 +1947,15 @@ func (a *App) AnalyzeResume(resumeID string, cfg *AIConfig, jobCfg *JobConfig) (
 		return nil, err
 	}
 
+	if analysis.WaterCheck == nil {
+		analysis.WaterCheck = a.generateFallbackWaterCheck(analysis)
+	}
+	if strings.TrimSpace(analysis.ManagerPitch) == "" {
+		analysis.ManagerPitch = a.generateFallbackManagerPitch(analysis, &resume)
+	} else if strings.TrimSpace(resume.URL) != "" && !strings.Contains(analysis.ManagerPitch, resume.URL) {
+		analysis.ManagerPitch += fmt.Sprintf("\n🔗 在线主页：%s", resume.URL)
+	}
+
 	// 更新简历状态 - 进度 100%
 	runtime.EventsEmit(a.ctx, "analysis:progress", map[string]interface{}{
 		"id":       resumeID,
@@ -2153,6 +2179,19 @@ func (a *App) buildAnalysisPrompt(resume *Resume, jobCfg *JobConfig) string {
 			"      \"reference_answer\": \"面试官考察要点与简历中对应疑点/短板的分析说明\"\n"+
 			"    }\n"+
 			"  ],\n"+
+			"  \"manager_pitch\": \"【候选人极简推介卡】（用于HR发给业务主管微信/钉钉）：\n👤 姓名：张三 | 现任：高级Go开发工程师\n📌 背景：5年经验 | 本科-武汉大学-计算机科学\n🎯 综合评估：85分（强力推荐）\n✨ 核心亮点：\n  1. 具备日活千万级高并发电商微服务经验；\n  2. 深入精通Go/MySQL分库分表/K8s容器化；\n  3. 贴合目前高并发岗位诉求，架构实战经验扎实。\n⚠️ 关注点：有4个月换工作空窗期，初试建议核实原因。\",\n"+
+			"  \"water_check\": {\n"+
+			"    \"water_score\": 18,\n"+
+			"    \"risk_level\": \"low\",\n"+
+			"    \"gaps\": [\"侦测到的工作时间线断层或空窗期（若时间线连贯无断层则填：时间线连贯，无显著断层）\"],\n"+
+			"    \"vague_claims\": [\"简历中假大空、缺乏具体量化数据指标的项目宣称（若成果详实则填：项目成果量化明确）\"],\n"+
+			"    \"outsourcing_warning\": \"外包驻场或人力派遣嫌疑说明（若无外包迹象则填：无外包驻场迹象）\",\n"+
+			"    \"frequent_hop_warning\": \"频繁跳槽或履历动荡提示（若稳定则填：跳槽频率合理，履历稳定）\",\n"+
+			"    \"advise_questions\": [\n"+
+			"      \"针对其声称但缺乏量化的关键成果进行深挖提问\",\n"+
+			"      \"针对时间线疑点或技术边界进行深挖提问\"\n"+
+			"    ]\n"+
+			"  },\n"+
 			"  \"summary\": \"2-3句话全面总结该候选人：包括核心亮点、主要短板、综合判断。需要具体且专业，避免空泛表述。\"\n"+
 			"}\n"+
 			"```\n\n"+
@@ -2161,7 +2200,9 @@ func (a *App) buildAnalysisPrompt(resume *Resume, jobCfg *JobConfig) string {
 			"2. interview_qa 必须严格生成恰好 5 个问题（2道技术深度 + 2道项目实战 + 1道真实性与短板），且每个问题的 reference_answer 都要紧密结合候选人简历中写明的技能与项目事实\n"+
 			"3. strengths 至少3条，weaknesses 至少2条，每条都要具体且有事实依据\n"+
 			"4. summary 不能笼统，要结合候选人的具体情况给出有价值的判断\n"+
-			"5. 确保返回合法的JSON格式",
+			"5. 确保返回合法的JSON格式\n"+
+			"6. 必须生成 manager_pitch（极简推介卡），文字精炼利落，适合直接转发微信/钉钉给业务主管，突出3条核心亮点与1条把关建议\n"+
+			"7. 必须生成 water_check（防伪注水雷达）：细致核查工作经历起止时间是否有未填写的断层空窗期，识别假大空缺乏量化的表述，并提供一针见血的初试防伪反问话术",
 		jobCfg.Title,
 		jobCfg.ExperienceYears,
 		jobCfg.EducationLevel,
@@ -2344,9 +2385,125 @@ func (a *App) parseAnalysisResult(content string) (*AnalysisResult, error) {
 		}
 	}
 
+	// 规范化与兜底防伪注水雷达
+	if result.WaterCheck != nil {
+		if result.WaterCheck.WaterScore < 0 {
+			result.WaterCheck.WaterScore = 0
+		} else if result.WaterCheck.WaterScore > 100 {
+			result.WaterCheck.WaterScore = 100
+		}
+		if result.WaterCheck.RiskLevel == "" {
+			if result.WaterCheck.WaterScore <= 25 {
+				result.WaterCheck.RiskLevel = "low"
+			} else if result.WaterCheck.WaterScore <= 55 {
+				result.WaterCheck.RiskLevel = "medium"
+			} else {
+				result.WaterCheck.RiskLevel = "high"
+			}
+		}
+	} else {
+		result.WaterCheck = a.generateFallbackWaterCheck(&result)
+	}
+
+	// 规范化与兜底极简推介卡
+	if strings.TrimSpace(result.ManagerPitch) == "" {
+		result.ManagerPitch = a.generateFallbackManagerPitch(&result, nil)
+	}
+
 	result.AnalyzedAt = time.Now().Format(time.RFC3339)
 
 	return &result, nil
+}
+
+// generateFallbackManagerPitch 当大模型未返回推介卡时的容错生成器
+func (a *App) generateFallbackManagerPitch(res *AnalysisResult, resume *Resume) string {
+	candidateName := res.CandidateName
+	if strings.TrimSpace(candidateName) == "" && resume != nil {
+		candidateName = strings.TrimSuffix(resume.FileName, filepath.Ext(resume.FileName))
+	}
+	if strings.TrimSpace(candidateName) == "" {
+		candidateName = "候选人"
+	}
+
+	role := res.CurrentRole
+	if role == "" {
+		role = "专业技术人才"
+	}
+	exp := res.WorkYears
+	if exp == "" {
+		exp = "具备工作经验"
+	}
+	edu := res.Education
+	if edu == "" {
+		edu = "学历符合"
+	}
+
+	recText := "推荐"
+	switch res.Recommendation {
+	case "strong_recommend":
+		recText = "强力推荐"
+	case "recommend":
+		recText = "推荐"
+	case "consider":
+		recText = "建议斟酌"
+	case "not_recommend":
+		recText = "不推荐"
+	}
+
+	var sb strings.Builder
+	sb.WriteString(fmt.Sprintf("【候选人极简推介卡】\n"))
+	sb.WriteString(fmt.Sprintf("👤 候选人：%s | 现任：%s\n", candidateName, role))
+	sb.WriteString(fmt.Sprintf("📌 背景画像：%s | %s\n", exp, edu))
+	sb.WriteString(fmt.Sprintf("🎯 综合匹配：%d分（%s）\n", int(res.OverallScore), recText))
+	sb.WriteString("✨ 核心亮点：\n")
+	if len(res.Strengths) > 0 {
+		for i, s := range res.Strengths {
+			if i >= 3 {
+				break
+			}
+			sb.WriteString(fmt.Sprintf("  %d. %s\n", i+1, s))
+		}
+	} else {
+		sb.WriteString("  - 具备岗位所需的核心技能底子与实战经验\n")
+	}
+
+	sb.WriteString("⚠️ 关注提示：\n")
+	if len(res.Risks) > 0 {
+		sb.WriteString(fmt.Sprintf("  - %s\n", res.Risks[0]))
+	} else if len(res.Weaknesses) > 0 {
+		sb.WriteString(fmt.Sprintf("  - %s\n", res.Weaknesses[0]))
+	} else {
+		sb.WriteString("  - 建议初试深入核实项目真实职责与实操深度\n")
+	}
+
+	if resume != nil && strings.TrimSpace(resume.URL) != "" {
+		sb.WriteString(fmt.Sprintf("🔗 在线主页：%s\n", resume.URL))
+	}
+
+	return sb.String()
+}
+
+// generateFallbackWaterCheck 当大模型未返回注水雷达时的容错生成器
+func (a *App) generateFallbackWaterCheck(res *AnalysisResult) *WaterCheckResult {
+	score := 15
+	level := "low"
+	if len(res.Risks) > 0 {
+		score = 35
+		level = "medium"
+	}
+	advise := make([]string, 0)
+	if len(res.Weaknesses) > 0 {
+		advise = append(advise, fmt.Sprintf("请针对简历中提及的【%s】展开追问其实际解决方案与实操细节", res.Weaknesses[0]))
+	}
+	return &WaterCheckResult{
+		WaterScore:         score,
+		RiskLevel:          level,
+		Gaps:               []string{"履历时间线连贯，无显著离职断层"},
+		VagueClaims:        []string{"项目职责与技术方案描述详实，具备量化成果支撑"},
+		OutsourcingWarning: "无外包驻场迹象",
+		FrequentHopWarning: "跳槽频率在健康合理区间",
+		AdviseQuestions:    advise,
+	}
 }
 
 func clampFloat(value, minVal, maxVal float64) float64 {

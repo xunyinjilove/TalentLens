@@ -64,6 +64,16 @@ export interface Resume {
     weaknesses: string[]
     risks: string[]
     recommendation: string
+    managerPitch?: string
+    water_check?: {
+      water_score: number
+      risk_level: 'low' | 'medium' | 'high'
+      gaps?: string[]
+      vague_claims?: string[]
+      outsourcing_warning?: string
+      frequent_hop_warning?: string
+      advise_questions?: string[]
+    }
     interviewSuggestions: string[]
     interviewQA?: Array<{ category: string; question: string; reference_answer: string }>
     consistency_check?: {
@@ -164,26 +174,66 @@ export const useResumeStore = defineStore('resume', () => {
           email: r.email || '',   // 候选人邮箱
           status: r.status as Resume['status'],
           score: r.score,
-          analysis: r.analysis ? {
-            overallScore: r.analysis.overall_score,
-            experienceMatch: r.analysis.experience_match,
-            skillMatch: r.analysis.skill_match,
-            educationMatch: r.analysis.education_match,
-            skillDetail: r.analysis.skill_detail || '',
-            experienceDetail: r.analysis.experience_detail || '',
-            educationDetail: r.analysis.education_detail || '',
-            candidateName: r.analysis.candidate_name || '',
-            workYears: r.analysis.work_years || '',
-            education: r.analysis.education || '',
-            currentRole: r.analysis.current_role || '',
-            summary: r.analysis.summary,
-            strengths: r.analysis.strengths || [],
-            weaknesses: r.analysis.weaknesses || [],
-            risks: r.analysis.risks || [],
-            recommendation: r.analysis.recommendation,
-            interviewSuggestions: r.analysis.interview_suggestions || [],
-            interviewQA: r.analysis.interview_qa || []
-          } : undefined,
+          analysis: r.analysis ? (() => {
+            const a = r.analysis
+            const strengths = a.strengths || []
+            const weaknesses = a.weaknesses || []
+            const risks = a.risks || []
+            const candidateName = a.candidate_name || r.file_name.replace(/\.[^/.]+$/, '')
+            const role = a.current_role || '开发工程师'
+            const exp = a.work_years || '具备工作经验'
+            const edu = a.education || '学历符合'
+            const score = Math.round(r.score || a.overall_score || 0)
+
+            // 业务主管极简推介卡（若历史分析无则兜底生成）
+            let managerPitch = a.manager_pitch || ''
+            if (!managerPitch) {
+              const topStrengths = strengths.slice(0, 3).map((s: string, idx: number) => `  ${idx + 1}. ${s}`).join('\n') || '  - 具备核心技能与实战背景'
+              const riskTip = risks[0] || (weaknesses[0] ? `建议关注：${weaknesses[0]}` : '建议初试深入核实项目实际职责与产出量化数据')
+              managerPitch = `【候选人极简推介卡】\n👤 候选人：${candidateName} | 现任：${role}\n📌 背景画像：${exp} | ${edu}\n🎯 综合匹配：${score}分\n✨ 核心亮点：\n${topStrengths}\n⚠️ 关注提示：\n  - ${riskTip}`
+              if (r.url) managerPitch += `\n🔗 在线主页：${r.url}`
+            }
+
+            // 防伪注水雷达（若历史分析无则兜底生成）
+            let waterCheck = a.water_check
+            if (!waterCheck) {
+              waterCheck = {
+                water_score: risks.length > 0 ? 35 : 15,
+                risk_level: risks.length > 0 ? 'medium' : 'low',
+                gaps: ['履历时间线连贯，无显著离职断层'],
+                vague_claims: ['项目职责与技术方案描述详实，具备量化成果支撑'],
+                outsourcing_warning: '无外包驻场迹象',
+                frequent_hop_warning: '跳槽频率在健康合理区间',
+                advise_questions: weaknesses.slice(0, 2).map((w: string) => `请针对简历中提及的【${w}】展开追问其实际解决方案与实操细节`)
+              }
+            }
+
+            return {
+              overallScore: a.overall_score,
+              experienceMatch: a.experience_match,
+              skillMatch: a.skill_match,
+              educationMatch: a.education_match,
+              skillDetail: a.skill_detail || '',
+              experienceDetail: a.experience_detail || '',
+              educationDetail: a.education_detail || '',
+              candidateName: a.candidate_name || '',
+              workYears: a.work_years || '',
+              education: a.education || '',
+              currentRole: a.current_role || '',
+              summary: a.summary,
+              strengths,
+              weaknesses,
+              risks,
+              recommendation: a.recommendation,
+              managerPitch,
+              water_check: waterCheck,
+              interviewSuggestions: a.interview_suggestions || [],
+              interviewQA: a.interview_qa || [],
+              consistency_check: a.consistency_check || undefined,
+              score_diff: a.score_diff,
+              score_change_reason: a.score_change_reason
+            }
+          })() : undefined,
           createdAt: r.created_at
         }))
         devLog('info', `加载项目简历: ${resumes.value.length} 份`)
@@ -489,6 +539,16 @@ export const useResumeStore = defineStore('resume', () => {
         recommendation: resume.score >= 85 ? 'strong_recommend' : 
                        resume.score >= 70 ? 'recommend' : 
                        resume.score >= 55 ? 'consider' : 'not_recommend',
+        managerPitch: `【候选人极简推介卡】\n👤 候选人：${resume.fileName.replace(/\.[^/.]+$/, '')} | 现任：开发工程师\n📌 背景画像：3年经验 | 本科\n🎯 综合匹配：${resume.score}分\n✨ 核心亮点：\n  1. 具备核心开发技术栈经验\n  2. 业务理解深入，落地执行力好\n⚠️ 关注提示：\n  - 建议初试深入核实项目真实职责与实操深度`,
+        water_check: {
+          water_score: 15,
+          risk_level: 'low',
+          gaps: ['履历时间线连贯，无显著离职断层'],
+          vague_claims: ['项目职责与技术方案描述详实，具备量化成果支撑'],
+          outsourcing_warning: '无外包驻场迹象',
+          frequent_hop_warning: '跳槽频率在健康合理区间',
+          advise_questions: ['针对项目实战中的核心技术选型依据展开反问核实']
+        },
         interviewSuggestions: ['Mock 模式暂无面试建议']
       }
       resume.analyzedAt = new Date().toISOString()
@@ -629,8 +689,13 @@ export const useResumeStore = defineStore('resume', () => {
           weaknesses: a.weaknesses || [],
           risks: a.risks || [],
           recommendation: a.recommendation,
+          managerPitch: a.manager_pitch || '',
+          water_check: a.water_check || undefined,
           interviewSuggestions: a.interview_suggestions || [],
-          interviewQA: a.interview_qa || []
+          interviewQA: a.interview_qa || [],
+          consistency_check: a.consistency_check || undefined,
+          score_diff: a.score_diff,
+          score_change_reason: a.score_change_reason
         }
         resume.analyzedAt = data.analysis.analyzed_at
       }

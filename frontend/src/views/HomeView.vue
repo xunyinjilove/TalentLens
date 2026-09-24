@@ -149,6 +149,14 @@
                   </span>
                 </div>
                 <div class="header-attach-btn-wrap">
+                  <button
+                    v-if="resumeStore.selectedResume.status === 'done' && resumeStore.selectedResume.analysis"
+                    class="pitch-card-top-btn"
+                    @click="handleOpenPitchDialog"
+                    title="一键生成/复制极简推介卡，推给用人部门业务主管"
+                  >
+                    <el-icon><Share /></el-icon> 📋 微信/钉钉推介卡
+                  </button>
                   <button class="attach-upload-btn" @click="handleAttachResume(resumeStore.selectedResume.id)" title="选择或更新该候选人的完整 PDF/Word 简历并执行双源深度终审">
                     <el-icon><Paperclip /></el-icon> {{ resumeStore.selectedResume.has_attachment ? '更新完整附件' : '📎 补充完整附件简历' }}
                   </button>
@@ -220,6 +228,105 @@
                   </div>
                 </div>
 
+                <!-- 🛡️ 简历防伪注水雷达与断层侦测器 (WaterCheck Radar) -->
+                <div class="water-radar-card" :class="getWaterRiskClass(resumeStore.selectedResume.analysis?.water_check?.risk_level)">
+                  <div class="water-radar-header">
+                    <div class="radar-title-group">
+                      <div class="radar-icon-shield" :class="resumeStore.selectedResume.analysis?.water_check?.risk_level || 'low'">
+                        <el-icon><Warning v-if="resumeStore.selectedResume.analysis?.water_check?.risk_level === 'high'" /><Check v-else /></el-icon>
+                      </div>
+                      <div class="radar-title-text-wrap">
+                        <div class="radar-main-title">
+                          <span class="title-bold">🛡️ 简历防伪注水与破绽雷达</span>
+                          <span class="radar-risk-pill" :class="resumeStore.selectedResume.analysis?.water_check?.risk_level || 'low'">
+                            {{ getWaterRiskTitle(resumeStore.selectedResume.analysis?.water_check) }}
+                          </span>
+                        </div>
+                        <div class="radar-sub-desc">
+                          AI 深度侦测：职场时间线断层空窗、假大空缺乏量化描述、外包驻场与跳槽动荡隐患
+                        </div>
+                      </div>
+                    </div>
+                    <div class="radar-score-box" :class="resumeStore.selectedResume.analysis?.water_check?.risk_level || 'low'">
+                      <div class="radar-score-num">{{ resumeStore.selectedResume.analysis?.water_check?.water_score ?? 15 }}</div>
+                      <div class="radar-score-caption">注水破绽分 (越低越真实)</div>
+                    </div>
+                  </div>
+
+                  <div class="water-radar-grid">
+                    <!-- 1. 职场时间断层侦测 -->
+                    <div class="radar-grid-item gaps-box">
+                      <div class="grid-item-title">
+                        <el-icon><Clock /></el-icon> 职场时间断层与空窗侦测
+                      </div>
+                      <div class="grid-item-content">
+                        <div v-if="hasGaps(resumeStore.selectedResume.analysis?.water_check)" class="gap-list">
+                          <div v-for="(gap, gIdx) in resumeStore.selectedResume.analysis?.water_check?.gaps" :key="gIdx" class="gap-item alert">
+                            <span class="gap-dot">⚠️</span>
+                            <span class="gap-text">{{ gap }}</span>
+                          </div>
+                        </div>
+                        <div v-else class="gap-item safe">
+                          <el-icon><CircleCheck /></el-icon> 履历时间线连贯，未侦测到异常离职断层
+                        </div>
+                      </div>
+                    </div>
+
+                    <!-- 2. 假大空与欠缺量化佐证 -->
+                    <div class="radar-grid-item vague-box">
+                      <div class="grid-item-title">
+                        <el-icon><Aim /></el-icon> 欠缺量化佐证 / 夸大嫌疑
+                      </div>
+                      <div class="grid-item-content">
+                        <div v-if="hasVagueClaims(resumeStore.selectedResume.analysis?.water_check)" class="vague-list">
+                          <div v-for="(claim, cIdx) in resumeStore.selectedResume.analysis?.water_check?.vague_claims" :key="cIdx" class="vague-item alert">
+                            <span class="claim-dot">🔍</span>
+                            <span class="claim-text">{{ claim }}</span>
+                          </div>
+                        </div>
+                        <div v-else class="vague-item safe">
+                          <el-icon><CircleCheck /></el-icon> 项目职责与业绩成果具备具体量化指标，扎实度高
+                        </div>
+                      </div>
+                    </div>
+
+                    <!-- 3. 外包派遣与履历动荡风险 -->
+                    <div class="radar-grid-item stability-box">
+                      <div class="grid-item-title">
+                        <el-icon><Briefcase /></el-icon> 外包驻场 & 稳定性研判
+                      </div>
+                      <div class="grid-item-content">
+                        <div v-if="resumeStore.selectedResume.analysis?.water_check?.outsourcing_warning && !resumeStore.selectedResume.analysis?.water_check?.outsourcing_warning.includes('无')" class="alert-pill outsourcing">
+                          <span class="pill-label">🏢 外包/驻场提醒:</span>
+                          <span class="pill-msg">{{ resumeStore.selectedResume.analysis?.water_check?.outsourcing_warning }}</span>
+                        </div>
+                        <div v-if="resumeStore.selectedResume.analysis?.water_check?.frequent_hop_warning && !resumeStore.selectedResume.analysis?.water_check?.frequent_hop_warning.includes('合理') && !resumeStore.selectedResume.analysis?.water_check?.frequent_hop_warning.includes('无') && !resumeStore.selectedResume.analysis?.water_check?.frequent_hop_warning.includes('稳定')" class="alert-pill hopping">
+                          <span class="pill-label">⏳ 稳定性提醒:</span>
+                          <span class="pill-msg">{{ resumeStore.selectedResume.analysis?.water_check?.frequent_hop_warning }}</span>
+                        </div>
+                        <div v-if="isStabilityClean(resumeStore.selectedResume.analysis?.water_check)" class="stability-safe">
+                          <el-icon><CircleCheck /></el-icon> 无明显外包挂靠痕迹，跳槽频率在健康合理区间
+                        </div>
+                      </div>
+                    </div>
+
+                    <!-- 4. 初试防伪一针见血反问 -->
+                    <div class="radar-grid-item interview-probe-box" v-if="resumeStore.selectedResume.analysis?.water_check?.advise_questions?.length">
+                      <div class="grid-item-title">
+                        <el-icon><QuestionFilled /></el-icon> 初试防伪反问建议（破水核验）
+                      </div>
+                      <div class="grid-item-content">
+                        <div class="probe-list">
+                          <div v-for="(q, qIdx) in resumeStore.selectedResume.analysis?.water_check?.advise_questions" :key="qIdx" class="probe-item">
+                            <span class="probe-num">追问{{ qIdx + 1 }}</span>
+                            <span class="probe-text">{{ q }}</span>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
                 <!-- 候选人在线直达与沟通专区 -->
                 <div class="candidate-portal-bar">
                   <div class="portal-header">
@@ -227,6 +334,13 @@
                     <span class="portal-sub">直连招聘平台候选人详情页，可直接在线联系、查看最新动态或加收藏</span>
                   </div>
                   <div class="portal-actions">
+                    <button
+                      class="portal-act-btn highlight"
+                      @click="handleOpenPitchDialog"
+                      title="生成微信/钉钉极简推介卡，支持一键复制与微调"
+                    >
+                      <el-icon><Share /></el-icon> 极简推介卡 (微信/钉钉)
+                    </button>
                     <button
                       class="portal-act-btn primary"
                       :disabled="!resumeStore.selectedResume.url"
@@ -459,6 +573,46 @@
       @refresh="handleRefreshProject"
     />
 
+    <!-- 业务主管极简推介卡弹窗 -->
+    <el-dialog
+      v-model="showPitchDialog"
+      title="📢 业务主管极简推介卡（微信 / 钉钉一键转发）"
+      width="600px"
+      destroy-on-close
+      class="pitch-card-dialog"
+    >
+      <div class="pitch-dialog-body">
+        <div class="pitch-tip-banner">
+          💡 专为向业务主管/用人部门推人设计。提炼 3 条核心硬核亮点与关键把关提醒，主管在手机微信/钉钉 10 秒即可拍板是否初试！
+        </div>
+        <div class="pitch-preview-card">
+          <div class="pitch-preview-header">
+            <span class="pitch-tag">推介卡文案预览（可直接编辑微调）</span>
+            <div class="pitch-card-tools">
+              <el-button size="small" text type="primary" @click="resetPitchText">
+                <el-icon><RefreshRight /></el-icon> 恢复默认
+              </el-button>
+            </div>
+          </div>
+          <el-input
+            v-model="currentPitchText"
+            type="textarea"
+            :rows="12"
+            placeholder="推介卡生成中..."
+            class="pitch-textarea"
+          />
+        </div>
+      </div>
+      <template #footer>
+        <div class="pitch-dialog-footer">
+          <el-button @click="showPitchDialog = false">关闭</el-button>
+          <el-button type="primary" @click="copyPitchText">
+            <el-icon><DocumentCopy /></el-icon> 一键复制到剪贴板
+          </el-button>
+        </div>
+      </template>
+    </el-dialog>
+
     <!-- 开发者调试面板 (F12 切换) -->
     <DevPanel />
   </div>
@@ -473,7 +627,7 @@ import {
   CircleCheck, Warning, ChatLineSquare, Clock, Loading, CircleClose,
   RefreshRight, Download, Tickets, QuestionFilled, DocumentCopy, InfoFilled, Search,
   ChatDotRound, DocumentAdd, Connection, CloseBold, Paperclip, Compass, Check, Message,
-  Link, TopRight, Plus
+  Link, TopRight, Plus, Share, Aim
 } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import TitleBar from '../components/TitleBar.vue'
@@ -503,6 +657,8 @@ const jobTitle = ref('高级Go开发工程师')
 const showConfigGuide = ref(false)
 const showBossDialog = ref(false)
 const bossDialogContinueMode = ref(false) // true=继续寻才模式（跳过已有候选人）
+const showPitchDialog = ref(false) // 业务主管推介卡弹窗
+const currentPitchText = ref('')   // 当前推介卡文案
 const animatedDetailScore = ref(0)
 let scoreAnimationFrame: number | null = null
 
@@ -631,6 +787,95 @@ async function handleCopyAllQA() {
   } catch (err) {
     ElMessage.error('复制失败，请手动选择复制')
   }
+}
+
+// ---------------------------------------------------------------------
+// 业务主管极简推介卡（微信 / 钉钉一键推送）
+// ---------------------------------------------------------------------
+function getPitchCardText(resume: any): string {
+  if (resume.analysis?.managerPitch) {
+    return resume.analysis.managerPitch
+  }
+  const a = resume.analysis
+  const candidateName = a?.candidateName || resume.fileName.replace(/\.[^/.]+$/, '')
+  const role = a?.currentRole || '开发工程师'
+  const exp = a?.workYears || '具备工作经验'
+  const edu = a?.education || '学历符合'
+  const score = resume.score || a?.overallScore || 0
+  const topStrengths = (a?.strengths || []).slice(0, 3).map((s: string, idx: number) => `  ${idx + 1}. ${s}`).join('\n') || '  - 具备核心开发技能与实战背景'
+  const risk = (a?.risks && a.risks[0]) || (a?.weaknesses && a.weaknesses[0]) || '建议初试深入核实项目真实职责与实操深度'
+
+  let text = `【候选人极简推介卡】\n👤 候选人：${candidateName} | 现任：${role}\n📌 背景画像：${exp} | ${edu}\n🎯 综合匹配：${Math.round(score)}分\n✨ 核心亮点：\n${topStrengths}\n⚠️ 关注提示：\n  - ${risk}`
+  if (resume.url) {
+    text += `\n🔗 在线主页：${resume.url}`
+  }
+  return text
+}
+
+function handleOpenPitchDialog() {
+  const resume = resumeStore.selectedResume
+  if (!resume || !resume.analysis) {
+    ElMessage.warning('候选人尚未完成分析，无法生成推介卡')
+    return
+  }
+  currentPitchText.value = getPitchCardText(resume)
+  showPitchDialog.value = true
+}
+
+function resetPitchText() {
+  const resume = resumeStore.selectedResume
+  if (resume) {
+    currentPitchText.value = getPitchCardText(resume)
+    ElMessage.info('已恢复默认推介卡内容')
+  }
+}
+
+async function copyPitchText() {
+  if (!currentPitchText.value) return
+  try {
+    await navigator.clipboard.writeText(currentPitchText.value)
+    ElMessage.success('✅ 已复制主管推介卡！可直接在微信/钉钉中粘贴给业务主管')
+    showPitchDialog.value = false
+  } catch (err: any) {
+    ElMessage.error(`复制失败: ${err.message || err}`)
+  }
+}
+
+// ---------------------------------------------------------------------
+// 简历防伪注水雷达与断层侦测器
+// ---------------------------------------------------------------------
+function getWaterRiskClass(riskLevel?: string): string {
+  if (riskLevel === 'high') return 'risk-high'
+  if (riskLevel === 'medium') return 'risk-medium'
+  return 'risk-low'
+}
+
+function getWaterRiskTitle(waterCheck?: any): string {
+  if (!waterCheck) return '真实度高 · 扎实可信'
+  if (waterCheck.risk_level === 'high') return '注水嫌疑高 · 高风险'
+  if (waterCheck.risk_level === 'medium') return '存在疑点 · 中风险'
+  return '真实度高 · 扎实可信'
+}
+
+function hasGaps(waterCheck?: any): boolean {
+  if (!waterCheck || !waterCheck.gaps || waterCheck.gaps.length === 0) return false
+  const first = waterCheck.gaps[0]
+  if (first.includes('时间线连贯') || first.includes('无显著断层')) return false
+  return true
+}
+
+function hasVagueClaims(waterCheck?: any): boolean {
+  if (!waterCheck || !waterCheck.vague_claims || waterCheck.vague_claims.length === 0) return false
+  const first = waterCheck.vague_claims[0]
+  if (first.includes('量化明确') || first.includes('详实') || first.includes('无')) return false
+  return true
+}
+
+function isStabilityClean(waterCheck?: any): boolean {
+  if (!waterCheck) return true
+  const hasOutsourcing = waterCheck.outsourcing_warning && !waterCheck.outsourcing_warning.includes('无')
+  const hasHopping = waterCheck.frequent_hop_warning && !waterCheck.frequent_hop_warning.includes('合理') && !waterCheck.frequent_hop_warning.includes('无') && !waterCheck.frequent_hop_warning.includes('稳定')
+  return !hasOutsourcing && !hasHopping
 }
 
 async function handleCopyError(resume: any) {
@@ -2015,6 +2260,380 @@ onUnmounted(() => {
     color: #ffffff;
     border-color: #0284c7;
     transform: translateY(-1px);
+  }
+}
+
+.pitch-card-top-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+  color: #ffffff;
+  border: none;
+  padding: 5px 12px;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  box-shadow: 0 2px 6px rgba(16, 185, 129, 0.25);
+  transition: all 0.2s ease;
+
+  &:hover {
+    background: linear-gradient(135deg, #059669 0%, #047857 100%);
+    transform: translateY(-1px);
+    box-shadow: 0 4px 10px rgba(16, 185, 129, 0.35);
+  }
+}
+
+.portal-act-btn.highlight {
+  background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+  color: #ffffff;
+  border: 1px solid #059669;
+  font-weight: 600;
+  box-shadow: 0 2px 6px rgba(16, 185, 129, 0.25);
+
+  &:hover {
+    background: linear-gradient(135deg, #059669 0%, #047857 100%);
+    color: #ffffff;
+    transform: translateY(-1px);
+  }
+}
+
+// 🛡️ 简历防伪注水雷达与断层侦测器
+.water-radar-card {
+  margin: 14px 0 16px 0;
+  padding: 16px 18px;
+  background: #ffffff;
+  border-radius: 12px;
+  border: 1px solid #e2e8f0;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.03);
+  transition: all 0.2s ease;
+
+  &.risk-low {
+    border-color: #a7f3d0;
+    background: linear-gradient(180deg, #f0fdf4 0%, #ffffff 50px);
+  }
+
+  &.risk-medium {
+    border-color: #fed7aa;
+    background: linear-gradient(180deg, #fffbeb 0%, #ffffff 50px);
+  }
+
+  &.risk-high {
+    border-color: #fecaca;
+    background: linear-gradient(180deg, #fef2f2 0%, #ffffff 50px);
+  }
+
+  .water-radar-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding-bottom: 12px;
+    border-bottom: 1px solid rgba(226, 232, 240, 0.8);
+    margin-bottom: 14px;
+
+    .radar-title-group {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+
+      .radar-icon-shield {
+        width: 38px;
+        height: 38px;
+        border-radius: 10px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 20px;
+
+        &.low {
+          background: #dcfce7;
+          color: #15803d;
+        }
+        &.medium {
+          background: #fef3c7;
+          color: #d97706;
+        }
+        &.high {
+          background: #fee2e2;
+          color: #b91c1c;
+        }
+      }
+
+      .radar-title-text-wrap {
+        display: flex;
+        flex-direction: column;
+        gap: 3px;
+
+        .radar-main-title {
+          display: flex;
+          align-items: center;
+          gap: 8px;
+
+          .title-bold {
+            font-size: 14.5px;
+            font-weight: 700;
+            color: #0f172a;
+          }
+
+          .radar-risk-pill {
+            font-size: 11px;
+            font-weight: 600;
+            padding: 2px 8px;
+            border-radius: 9999px;
+
+            &.low {
+              background: #dcfce7;
+              color: #166534;
+              border: 1px solid #86efac;
+            }
+            &.medium {
+              background: #fef3c7;
+              color: #92400e;
+              border: 1px solid #fde68a;
+            }
+            &.high {
+              background: #fee2e2;
+              color: #991b1b;
+              border: 1px solid #fca5a5;
+            }
+          }
+        }
+
+        .radar-sub-desc {
+          font-size: 11.5px;
+          color: #64748b;
+        }
+      }
+    }
+
+    .radar-score-box {
+      text-align: right;
+      padding: 4px 12px;
+      border-radius: 8px;
+
+      &.low { background: rgba(34, 197, 94, 0.08); }
+      &.medium { background: rgba(245, 158, 11, 0.08); }
+      &.high { background: rgba(239, 68, 68, 0.08); }
+
+      .radar-score-num {
+        font-size: 20px;
+        font-weight: 800;
+        font-family: 'SF Mono', Monaco, Menlo, Consolas, monospace;
+        line-height: 1.1;
+
+        & { color: #0f172a; }
+      }
+
+      .radar-score-caption {
+        font-size: 10px;
+        color: #64748b;
+        margin-top: 2px;
+      }
+    }
+  }
+
+  .water-radar-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+    gap: 12px;
+
+    .radar-grid-item {
+      background: #f8fafc;
+      border: 1px solid #e2e8f0;
+      border-radius: 8px;
+      padding: 10px 12px;
+
+      .grid-item-title {
+        font-size: 12px;
+        font-weight: 600;
+        color: #334155;
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        margin-bottom: 8px;
+        padding-bottom: 5px;
+        border-bottom: 1px dashed #cbd5e1;
+
+        .el-icon {
+          font-size: 13px;
+          color: #64748b;
+        }
+      }
+
+      .grid-item-content {
+        font-size: 11.5px;
+        line-height: 1.5;
+
+        .safe {
+          display: flex;
+          align-items: center;
+          gap: 6px;
+          color: #16a34a;
+          font-weight: 500;
+          padding: 4px 0;
+
+          .el-icon { font-size: 13px; color: #16a34a; }
+        }
+
+        .alert {
+          display: flex;
+          align-items: flex-start;
+          gap: 5px;
+          margin-bottom: 5px;
+          color: #b91c1c;
+
+          &:last-child { margin-bottom: 0; }
+          .gap-dot, .claim-dot { flex-shrink: 0; font-size: 12px; }
+          .gap-text, .claim-text { flex: 1; word-break: break-all; }
+        }
+
+        .alert-pill {
+          display: flex;
+          flex-direction: column;
+          gap: 2px;
+          padding: 6px 8px;
+          border-radius: 6px;
+          margin-bottom: 6px;
+
+          &:last-child { margin-bottom: 0; }
+
+          &.outsourcing {
+            background: #fff7ed;
+            border: 1px solid #fed7aa;
+            .pill-label { font-weight: 600; color: #c2410c; }
+            .pill-msg { color: #9a3412; }
+          }
+
+          &.hopping {
+            background: #fef2f2;
+            border: 1px solid #fecaca;
+            .pill-label { font-weight: 600; color: #b91c1c; }
+            .pill-msg { color: #991b1b; }
+          }
+        }
+
+        .stability-safe {
+          display: flex;
+          align-items: center;
+          gap: 6px;
+          color: #16a34a;
+          font-weight: 500;
+          padding: 4px 0;
+          .el-icon { font-size: 13px; color: #16a34a; }
+        }
+
+        .probe-list {
+          display: flex;
+          flex-direction: column;
+          gap: 6px;
+
+          .probe-item {
+            display: flex;
+            align-items: flex-start;
+            gap: 6px;
+            background: #eff6ff;
+            border: 1px solid #bfdbfe;
+            padding: 6px 8px;
+            border-radius: 6px;
+
+            .probe-num {
+              flex-shrink: 0;
+              font-size: 10px;
+              font-weight: 700;
+              background: #2563eb;
+              color: #ffffff;
+              padding: 1px 5px;
+              border-radius: 3px;
+            }
+
+            .probe-text {
+              flex: 1;
+              color: #1e3a8a;
+              font-size: 11px;
+            }
+          }
+        }
+      }
+    }
+  }
+}
+
+// 业务主管极简推介卡弹窗
+:deep(.pitch-card-dialog) {
+  border-radius: 14px;
+  overflow: hidden;
+
+  .el-dialog__header {
+    margin: 0;
+    padding: 16px 20px;
+    background: #f8fafc;
+    border-bottom: 1px solid #e2e8f0;
+
+    .el-dialog__title {
+      font-size: 15px;
+      font-weight: 700;
+      color: #0f172a;
+    }
+  }
+
+  .el-dialog__body {
+    padding: 18px 20px;
+  }
+
+  .pitch-tip-banner {
+    background: #f0fdf4;
+    border: 1px solid #bbf7d0;
+    border-radius: 8px;
+    padding: 10px 14px;
+    font-size: 12px;
+    color: #166534;
+    line-height: 1.5;
+    margin-bottom: 14px;
+  }
+
+  .pitch-preview-card {
+    border: 1px solid #e2e8f0;
+    border-radius: 10px;
+    overflow: hidden;
+
+    .pitch-preview-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      background: #f8fafc;
+      padding: 8px 12px;
+      border-bottom: 1px solid #e2e8f0;
+
+      .pitch-tag {
+        font-size: 12px;
+        font-weight: 600;
+        color: #475569;
+      }
+    }
+
+    .pitch-textarea {
+      :deep(textarea) {
+        border: none;
+        box-shadow: none;
+        font-family: 'SF Mono', Monaco, Menlo, Consolas, monospace;
+        font-size: 12.5px;
+        line-height: 1.6;
+        color: #1e293b;
+        padding: 12px;
+        background: #ffffff;
+
+        &:focus {
+          box-shadow: none;
+        }
+      }
+    }
+  }
+
+  .pitch-dialog-footer {
+    display: flex;
+    justify-content: flex-end;
+    gap: 10px;
   }
 }
 
