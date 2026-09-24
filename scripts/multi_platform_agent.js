@@ -1108,8 +1108,14 @@ async function autoNavigateAndSearch(page, platformKey, cfg, options) {
     const emailMatch = (cleanedRawText || '').match(emailRegex);
     const candidateEmail = emailMatch ? emailMatch[1] : '';
 
-    // 候选人在线直达链接（便于一键点击/复制联系）
-    const candidateUrl = item.url || (page.url() || '');
+    // 候选人在线直达链接（严密校验：仅保留独立候选人详情页，杜绝回退到通用搜索列表页）
+    const isDetailLink = (u) => {
+      if (!u) return false;
+      const low = u.toLowerCase();
+      if (low.includes('/talent/search') || low.includes('/search') || low.includes('/recommend') || low.includes('/navigate')) return false;
+      return low.includes('id=') || low.includes('seq=') || low.includes('user') || low.includes('resume') || low.includes('detail') || low.includes('geek');
+    };
+    const candidateUrl = isDetailLink(item.url) ? item.url : '';
 
     const formattedContent = `【${cfg.name} 真实推荐牛人档案】${dupTag}
 姓名 / 称谓：${item.name}
@@ -1118,7 +1124,7 @@ async function autoNavigateAndSearch(page, platformKey, cfg, options) {
 目标城市：${options.city}
 基本画像：${item.infoText || '详见卡片信息'}
 任职履历快照：${cleanedWorkText || '详见卡片完整信息'}
-在线直达网址：${candidateUrl}
+在线直达网址：${candidateUrl || '（平台内嵌卡片推荐，可于企业工作台直接联系）'}
 联系方式：${candidateEmail ? candidateEmail : '平台默认隐私保护（需通过在线打招呼或索取完整简历获取）'}
 ${cleanedAdvantage ? `\n【个人综合优势】\n${cleanedAdvantage}\n` : ''}
 【核心专业技能】

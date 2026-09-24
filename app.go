@@ -21,6 +21,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/ledongthuc/pdf"
@@ -959,20 +960,49 @@ func (a *App) StartProjectAnalysis(projectID string, cfg *AIConfig) {
 		}
 
 		total := len(pendingIDs)
-		for i, id := range pendingIDs {
-			runtime.EventsEmit(a.ctx, "batch:progress", map[string]interface{}{
-				"current":   i + 1,
-				"total":     total,
-				"resumeId":  id,
+		if total == 0 {
+			p.Status = "completed"
+			a.saveProject(p)
+			runtime.EventsEmit(a.ctx, "batch:completed", map[string]interface{}{
+				"total":     0,
 				"projectId": projectID,
 			})
-
-			_, err := a.AnalyzeResume(id, cfg, &p.JobConfig)
-			if err != nil {
-				log.Printf("分析简历 %s 失败: %v", id, err)
-			}
-			time.Sleep(500 * time.Millisecond)
+			return
 		}
+
+		// 工业级 Worker Pool 并发控制：并发度设为 3，既避免触发大模型频控限制，又提速 3 倍
+		const maxWorkers = 3
+		sem := make(chan struct{}, maxWorkers)
+		var wg sync.WaitGroup
+		var processedCount int32
+
+		for _, id := range pendingIDs {
+			wg.Add(1)
+			sem <- struct{}{} // 申请工作槽位（超出则阻塞等待）
+
+			go func(resumeID string) {
+				defer func() {
+					<-sem // 释放工作槽位
+					wg.Done()
+				}()
+
+				_, err := a.AnalyzeResume(resumeID, cfg, &p.JobConfig)
+				if err != nil {
+					log.Printf("分析简历 %s 失败: %v", resumeID, err)
+				}
+
+				curr := atomic.AddInt32(&processedCount, 1)
+				runtime.EventsEmit(a.ctx, "batch:progress", map[string]interface{}{
+					"current":   curr,
+					"total":     total,
+					"resumeId":  resumeID,
+					"projectId": projectID,
+				})
+			}(id)
+		}
+
+		// 等待当前批次全部完成
+		wg.Wait()
 
 		p.Status = "completed"
 		a.saveProject(p)
@@ -1017,7 +1047,6 @@ func (a *App) TestPlatformLogin(platform string) bool {
 		filepath.Join(filepath.Dir(os.Args[0]), "scripts", "multi_platform_agent.js"),
 		filepath.Join(filepath.Dir(os.Args[0]), "..", "scripts", "multi_platform_agent.js"),
 		filepath.Join(filepath.Dir(os.Args[0]), "..", "..", "scripts", "multi_platform_agent.js"),
-		"D:\\HR\\TalentLens-main\\scripts\\multi_platform_agent.js",
 	}
 
 	var scriptPath string
@@ -1094,7 +1123,6 @@ func (a *App) ExecuteBossCandidateAction(actionType string, candidateName string
 		filepath.Join("scripts", "boss_agent.js"),
 		filepath.Join(filepath.Dir(os.Args[0]), "scripts", "multi_platform_agent.js"),
 		filepath.Join(filepath.Dir(os.Args[0]), "..", "scripts", "multi_platform_agent.js"),
-		"D:\\HR\\TalentLens-main\\scripts\\multi_platform_agent.js",
 	}
 
 	var scriptPath string
@@ -1411,7 +1439,6 @@ func (a *App) StartMultiPlatformSearch(projectID string, keyword string, city st
 		filepath.Join(filepath.Dir(os.Args[0]), "scripts", "multi_platform_agent.js"),
 		filepath.Join(filepath.Dir(os.Args[0]), "..", "scripts", "multi_platform_agent.js"),
 		filepath.Join(filepath.Dir(os.Args[0]), "..", "..", "scripts", "multi_platform_agent.js"),
-		"D:\\HR\\TalentLens-main\\scripts\\multi_platform_agent.js",
 	}
 
 	var scriptPath string
@@ -1945,22 +1972,45 @@ func (a *App) StartBatchAnalysis(resumeIDs []string, cfg *AIConfig, jobCfg *JobC
 	}
 	go func() {
 		total := len(resumeIDs)
-		for i, id := range resumeIDs {
-			// 发送进度
-			runtime.EventsEmit(a.ctx, "batch:progress", map[string]interface{}{
-				"current":  i + 1,
-				"total":    total,
-				"resumeId": id,
+		if total == 0 {
+			runtime.EventsEmit(a.ctx, "batch:completed", map[string]interface{}{
+				"total": 0,
 			})
-
-			_, err := a.AnalyzeResume(id, cfg, jobCfg)
-			if err != nil {
-				log.Printf("分析简历 %s 失败: %v", id, err)
-			}
-
-			// 防止请求过快
-			time.Sleep(500 * time.Millisecond)
+			return
 		}
+
+		// 工业级 Worker Pool 并发控制：并发度设为 3
+		const maxWorkers = 3
+		sem := make(chan struct{}, maxWorkers)
+		var wg sync.WaitGroup
+		var processedCount int32
+
+		for _, id := range resumeIDs {
+			wg.Add(1)
+			sem <- struct{}{} // 申请工作槽位
+
+			go func(resumeID string) {
+				defer func() {
+					<-sem // 释放工作槽位
+					wg.Done()
+				}()
+
+				_, err := a.AnalyzeResume(resumeID, cfg, jobCfg)
+				if err != nil {
+					log.Printf("分析简历 %s 失败: %v", resumeID, err)
+				}
+
+				curr := atomic.AddInt32(&processedCount, 1)
+				runtime.EventsEmit(a.ctx, "batch:progress", map[string]interface{}{
+					"current":  curr,
+					"total":    total,
+					"resumeId": resumeID,
+				})
+			}(id)
+		}
+
+		// 等待所有简历分析任务完成
+		wg.Wait()
 
 		runtime.EventsEmit(a.ctx, "batch:completed", map[string]interface{}{
 			"total": total,
