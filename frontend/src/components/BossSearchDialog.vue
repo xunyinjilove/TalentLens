@@ -195,6 +195,7 @@ const props = defineProps<{
   jobTitle?: string
   expYears?: number
   eduLevel?: string
+  isContinue?: boolean  // true=继续寻才模式，自动跳过已有候选人
 }>()
 
 const emit = defineEmits<{
@@ -289,7 +290,12 @@ watch(() => props.modelValue, (val) => {
     isFinished.value = false
     candidateCount.value = 0
     searchLogs.value = []
-    currentStatusText.value = '准备就绪'
+    if (props.isContinue) {
+      currentStatusText.value = '继续寻才模式 — 将自动跳过已有候选人'
+      searchLogs.value.push({ time: Date.now(), type: 'status', message: '📌 继续寻才模式：将在已有候选人基础上继续抓取，自动排重不重复' })
+    } else {
+      currentStatusText.value = '准备就绪'
+    }
   }
 })
 

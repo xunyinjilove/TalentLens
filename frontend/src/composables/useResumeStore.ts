@@ -36,6 +36,8 @@ export interface Resume {
   fileType: string
   fileSize: number
   content?: string
+  url?: string   // 在线候选人主页 URL（矩阵寻才抓取时填充）
+  email?: string // 候选人邮箱
   status: 'pending' | 'analyzing' | 'done' | 'error'
   score?: number
   initial_score?: number
@@ -158,6 +160,8 @@ export const useResumeStore = defineStore('resume', () => {
           fileType: r.file_type,
           fileSize: r.file_size,
           content: r.content,
+          url: r.url || '',       // 在线候选人主页 URL
+          email: r.email || '',   // 候选人邮箱
           status: r.status as Resume['status'],
           score: r.score,
           analysis: r.analysis ? {
@@ -551,6 +555,8 @@ export const useResumeStore = defineStore('resume', () => {
       fileType: data.file_type,
       fileSize: data.file_size,
       content: data.content,
+      url: data.url || '',       // 在线候选人主页 URL（矩阵寻才填充）
+      email: data.email || '',   // 候选人邮箱
       status: (data.status as Resume['status']) || 'pending',
       score: data.score,
       createdAt: data.created_at

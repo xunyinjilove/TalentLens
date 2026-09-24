@@ -43,11 +43,20 @@
             <div class="section-btns">
               <button
                 class="action-btn boss-btn"
-                @click="showBossDialog = true"
+                @click="openBossDialog(false)"
                 title="4合1 全渠道矩阵寻才（BOSS直聘、智联、前程无忧、猎聘）"
               >
                 <el-icon><Search /></el-icon>
                 <span>矩阵寻才</span>
+              </button>
+              <button
+                class="action-btn continue-btn"
+                @click="openBossDialog(true)"
+                :disabled="resumeStore.resumes.length === 0"
+                title="在当前已抓取结果基础上，继续向下抓取更多候选人（自动排重）"
+              >
+                <el-icon><Plus /></el-icon>
+                <span>继续寻才</span>
               </button>
               <button class="action-btn primary" @click="handleStartAnalysis" :disabled="resumeStore.isAnalyzing">
                 <el-icon v-if="!resumeStore.isAnalyzing"><VideoPlay /></el-icon>
@@ -446,6 +455,7 @@
       :job-title="projectStore.currentProject?.job_config?.title || jobTitle"
       :exp-years="projectStore.currentProject?.job_config?.experience_years"
       :edu-level="projectStore.currentProject?.job_config?.education_level"
+      :is-continue="bossDialogContinueMode"
       @refresh="handleRefreshProject"
     />
 
@@ -463,7 +473,7 @@ import {
   CircleCheck, Warning, ChatLineSquare, Clock, Loading, CircleClose,
   RefreshRight, Download, Tickets, QuestionFilled, DocumentCopy, InfoFilled, Search,
   ChatDotRound, DocumentAdd, Connection, CloseBold, Paperclip, Compass, Check, Message,
-  Link, TopRight
+  Link, TopRight, Plus
 } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import TitleBar from '../components/TitleBar.vue'
@@ -492,8 +502,15 @@ const contentLoading = ref(false)
 const jobTitle = ref('高级Go开发工程师')
 const showConfigGuide = ref(false)
 const showBossDialog = ref(false)
+const bossDialogContinueMode = ref(false) // true=继续寻才模式（跳过已有候选人）
 const animatedDetailScore = ref(0)
 let scoreAnimationFrame: number | null = null
+
+// 打开矩阵寻才弹窗（isContinue=true 时为继续寻才模式）
+function openBossDialog(isContinue: boolean) {
+  bossDialogContinueMode.value = isContinue
+  showBossDialog.value = true
+}
 
 async function handleRefreshProject() {
   if (projectId.value) {
@@ -1045,6 +1062,28 @@ onMounted(async () => {
     }
     &:active {
       transform: translateY(0);
+    }
+  }
+
+  &.continue-btn {
+    background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%);
+    border-color: #d97706;
+    color: #ffffff;
+    font-weight: 600;
+    box-shadow: 0 2px 6px rgba(245, 158, 11, 0.25);
+
+    &:hover:not(:disabled) {
+      background: linear-gradient(135deg, #d97706 0%, #b45309 100%);
+      transform: translateY(-1px);
+      box-shadow: 0 4px 10px rgba(245, 158, 11, 0.35);
+    }
+    &:active {
+      transform: translateY(0);
+    }
+    &:disabled {
+      opacity: 0.45;
+      cursor: not-allowed;
+      transform: none;
     }
   }
 }
