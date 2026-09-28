@@ -158,54 +158,36 @@
 
             <!-- 🚫 一票否决红线 -->
             <div class="expand-full" style="margin-top: 14px;">
-              <div class="label-row">
-                <label class="expand-label text-danger">🚫 用人部门一票否决红线 (Deal Breakers / 触碰直接淘汰降级)</label>
-                <div class="quick-tags">
-                  <span class="quick-title">快捷填入:</span>
-                  <button type="button" class="quick-pill danger" @click="addQuickRedLine('全日制统招本科及以上硬卡')">+ 统招本科硬卡</button>
-                  <button type="button" class="quick-pill danger" @click="addQuickRedLine('杜绝频繁跳槽（近3年换工作>3次）')">+ 拒频繁跳槽</button>
-                  <button type="button" class="quick-pill danger" @click="addQuickRedLine('严禁纯外包派遣/人力驻场经历')">+ 严禁外包经历</button>
-                  <button type="button" class="quick-pill danger" @click="addQuickRedLine('核心必备技术必须具备实操经验')">+ 硬卡技能实战</button>
-                </div>
-              </div>
-              <el-select
+              <label class="expand-label text-danger" style="margin-bottom: 8px; display: block;">
+                🚫 用人部门一票否决红线 (Deal Breakers / 触碰直接淘汰降级)
+              </label>
+              <TagInput
                 v-model="currentJobConfig.redLines"
-                multiple
-                filterable
-                allow-create
-                default-first-option
-                placeholder="输入红线要求并回车添加（如：必须全日制统招、非外包出身、严禁频繁跳槽）"
-                style="width: 100%"
+                tag-type="danger"
+                placeholder="输入红线要求，回车即可添加一条（如：非全日制硬卡、频繁跳槽等）"
+                quick-title="快捷填入:"
+                :preset-list="commonRedLines"
+                storage-key="talentlens_custom_redlines"
+                add-prompt-title="新增一票否决红线快捷项"
                 @change="saveJobConfigToStorage"
-              >
-                <el-option v-for="rl in commonRedLines" :key="rl" :label="rl" :value="rl" />
-              </el-select>
+              />
             </div>
 
             <!-- ⭐ 核心优先加分项 -->
             <div class="expand-full" style="margin-top: 14px;">
-              <div class="label-row">
-                <label class="expand-label text-warning">⭐ 用人部门核心优先加分项 (Bonus Points / 优质候选人特质)</label>
-                <div class="quick-tags">
-                  <span class="quick-title">快捷填入:</span>
-                  <button type="button" class="quick-pill warning" @click="addQuickBonus('知名大厂/独角兽/头部上市企业背书')">+ 知名大厂背书</button>
-                  <button type="button" class="quick-pill warning" @click="addQuickBonus('主导过日活千万级系统高并发微服务实战')">+ 高并发架构实战</button>
-                  <button type="button" class="quick-pill warning" @click="addQuickBonus('具备5人以上团队技术管理与带教经验')">+ 团队管理经验</button>
-                  <button type="button" class="quick-pill warning" @click="addQuickBonus('开源项目主要贡献者或具备核心发明专利')">+ 开源专利背书</button>
-                </div>
-              </div>
-              <el-select
+              <label class="expand-label text-warning" style="margin-bottom: 8px; display: block;">
+                ⭐ 用人部门核心优先加分项 (Bonus Points / 优质候选人特质)
+              </label>
+              <TagInput
                 v-model="currentJobConfig.bonusPoints"
-                multiple
-                filterable
-                allow-create
-                default-first-option
-                placeholder="输入加分项并回车添加（如：知名大厂背书、高并发实战经验、带过团队）"
-                style="width: 100%"
+                tag-type="warning"
+                placeholder="输入加分要求，回车即可添加一条（如：知名大厂背景、有海外项目等）"
+                quick-title="快捷填入:"
+                :preset-list="commonBonusPoints"
+                storage-key="talentlens_custom_bonuses"
+                add-prompt-title="新增优先加分项快捷项"
                 @change="saveJobConfigToStorage"
-              >
-                <el-option v-for="bp in commonBonusPoints" :key="bp" :label="bp" :value="bp" />
-              </el-select>
+              />
             </div>
 
             <div class="expand-footer">
@@ -389,6 +371,7 @@ import TitleBar from '../components/TitleBar.vue'
 import LanguageSwitcher from '../components/LanguageSwitcher.vue'
 import DevPanel from '../components/DevPanel.vue'
 import JobPresetPicker from '../components/JobPresetPicker.vue'
+import TagInput from '../components/TagInput.vue'
 import { useProjectStore } from '../composables/useProjectStore'
 import { saveCustomJobPreset, type JobPreset } from '../data/jobPresets'
 
