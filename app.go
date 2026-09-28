@@ -64,6 +64,8 @@ type JobConfig struct {
 	ExperienceYears int      `json:"experience_years"`
 	EducationLevel  string   `json:"education_level"`
 	JobDescription  string   `json:"job_description,omitempty"`
+	RedLines        []string `json:"red_lines,omitempty"`    // 一票否决红线 (Deal Breakers / 准入底线)
+	BonusPoints     []string `json:"bonus_points,omitempty"` // 优先加分项 (Bonus Points / 优质优选)
 }
 
 // Project 招聘项目
@@ -159,6 +161,10 @@ type AnalysisResult struct {
 
 	// 简历防伪注水雷达与断层侦测
 	WaterCheck *WaterCheckResult `json:"water_check,omitempty"`
+
+	// 岗位画像核验：一票否决红线与优先加分项
+	RedLineViolations []string `json:"red_line_violations,omitempty"` // 触碰的红线列表（若有则一票否决/严重扣分）
+	BonusMatches      []string `json:"bonus_matches,omitempty"`      // 命中的核心加分项列表
 
 	// 面试建议
 	InterviewSuggestions []string `json:"interview_suggestions"`
@@ -2053,6 +2059,14 @@ func (a *App) buildAnalysisPrompt(resume *Resume, jobCfg *JobConfig) string {
 	if strings.TrimSpace(jobCfg.JobDescription) != "" {
 		jobDescBlock = fmt.Sprintf("- 岗位职责与技能要求:\n```\n%s\n```\n", jobCfg.JobDescription)
 	}
+	redLinesBlock := ""
+	if len(jobCfg.RedLines) > 0 {
+		redLinesBlock = fmt.Sprintf("- 🚫 用人部门一票否决红线 (Deal Breakers / 违规一律不予录用):\n  * %s\n", strings.Join(jobCfg.RedLines, "\n  * "))
+	}
+	bonusBlock := ""
+	if len(jobCfg.BonusPoints) > 0 {
+		bonusBlock = fmt.Sprintf("- ⭐ 用人部门优先加分项 (Bonus Points / 优质加分特质):\n  * %s\n", strings.Join(jobCfg.BonusPoints, "\n  * "))
+	}
 
 	systemPrompt := "你是一位拥有15年经验的资深人力资源专家和猎头顾问。你的专长是精准评估候选人与岗位的匹配度。\n" +
 		"你必须基于简历中的客观事实进行分析，不得凭空臆造简历中没有的信息。\n" +
@@ -2086,6 +2100,8 @@ func (a *App) buildAnalysisPrompt(resume *Resume, jobCfg *JobConfig) string {
 			"- 最低工作年限: %d 年\n"+
 			"- 最低学历: %s\n"+
 			"- 核心必备技能: %s\n"+
+			"%s"+
+			"%s"+
 			"%s"+
 			"- 补充要求:\n- %s\n\n"+
 			"## 候选人简历材料\n"+
@@ -2137,6 +2153,12 @@ func (a *App) buildAnalysisPrompt(resume *Resume, jobCfg *JobConfig) string {
 			"  \"experience_detail\": \"详细分析工作经历与岗位的匹配程度，包括行业相关度、项目复杂度、职责范围等\",\n"+
 			"  \"education_detail\": \"分析学历背景、专业对口程度、是否有相关认证或培训\",\n"+
 			"  \"recommendation\": \"recommend\",\n"+
+			"  \"red_line_violations\": [\n"+
+			"    \"触碰的一票否决红线及事实依据（例如：统招本科红线违规，简历为成人自考大专；若未触碰任何红线则必须返回空数组 []）\"\n"+
+			"  ],\n"+
+			"  \"bonus_matches\": [\n"+
+			"    \"符合的优先加分项及具体成果依据（例如：具备日活千万高并发经验，主导过大型系统重构；若未匹配则必须返回空数组 []）\"\n"+
+			"  ],\n"+
 			"  \"strengths\": [\n"+
 			"    \"具体的优势1（必须引用简历中的事实依据）\",\n"+
 			"    \"具体的优势2\",\n"+
@@ -2202,12 +2224,17 @@ func (a *App) buildAnalysisPrompt(resume *Resume, jobCfg *JobConfig) string {
 			"4. summary 不能笼统，要结合候选人的具体情况给出有价值的判断\n"+
 			"5. 确保返回合法的JSON格式\n"+
 			"6. 必须生成 manager_pitch（极简推介卡），文字精炼利落，适合直接转发微信/钉钉给业务主管，突出3条核心亮点与1条把关建议\n"+
-			"7. 必须生成 water_check（防伪注水雷达）：细致核查工作经历起止时间是否有未填写的断层空窗期，识别假大空缺乏量化的表述，并提供一针见血的初试防伪反问话术",
+			"7. 必须生成 water_check（防伪注水雷达）：细致核查工作经历起止时间是否有未填写的断层空窗期，识别假大空缺乏量化的表述，并提供一针见血的初试防伪反问话术\n"+
+			"8. 严格执行用人部门红线裁决准则（最高优先级）：\n"+
+			"   - 逐项扫描岗位设定的「一票否决红线」；一旦发现候选人事实违规（如学历不符、非统招全日制、出现外包、缺乏硬卡必备技能等），必须填入 red_line_violations，并在 recommendation 中强制判定为 \"not_recommend\"，综合分 overall_score 压至 50 分以下，并在 manager_pitch 顶部醒目标注 \"【触碰用人红线警告】\"；\n"+
+			"   - 逐项对照「优先加分项」，如属实满足则填入 bonus_matches，并在综合评分与亮点中给予充分加分肯定。",
 		jobCfg.Title,
 		jobCfg.ExperienceYears,
 		jobCfg.EducationLevel,
 		skills,
 		jobDescBlock,
+		redLinesBlock,
+		bonusBlock,
 		requirements,
 		resumeBlock,
 		mergedInstruction,
@@ -2385,6 +2412,14 @@ func (a *App) parseAnalysisResult(content string) (*AnalysisResult, error) {
 		}
 	}
 
+	// 红线一票否决门禁裁决：若触碰红线，强制判定为 not_recommend 并限制分数
+	if len(result.RedLineViolations) > 0 {
+		result.Recommendation = "not_recommend"
+		if result.OverallScore > 50 {
+			result.OverallScore = 50
+		}
+	}
+
 	// 规范化与兜底防伪注水雷达
 	if result.WaterCheck != nil {
 		if result.WaterCheck.WaterScore < 0 {
@@ -2452,6 +2487,12 @@ func (a *App) generateFallbackManagerPitch(res *AnalysisResult, resume *Resume) 
 
 	var sb strings.Builder
 	sb.WriteString(fmt.Sprintf("【候选人极简推介卡】\n"))
+	if len(res.RedLineViolations) > 0 {
+		sb.WriteString(fmt.Sprintf("🚨 触碰用人红线：%s\n", strings.Join(res.RedLineViolations, "；")))
+	}
+	if len(res.BonusMatches) > 0 {
+		sb.WriteString(fmt.Sprintf("⭐ 命中优先加分：%s\n", strings.Join(res.BonusMatches, "；")))
+	}
 	sb.WriteString(fmt.Sprintf("👤 候选人：%s | 现任：%s\n", candidateName, role))
 	sb.WriteString(fmt.Sprintf("📌 背景画像：%s | %s\n", exp, edu))
 	sb.WriteString(fmt.Sprintf("🎯 综合匹配：%d分（%s）\n", int(res.OverallScore), recText))

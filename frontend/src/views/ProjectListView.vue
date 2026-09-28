@@ -59,6 +59,35 @@
                 +{{ (currentJobConfig.requiredSkills || []).length - 8 }}项
               </span>
             </div>
+            <div v-if="(currentJobConfig.redLines || []).length" class="skills-wrap redlines-wrap">
+              <span class="skill-label text-danger">🚫 红线:</span>
+              <el-tag
+                v-for="rl in (currentJobConfig.redLines || []).slice(0, 2)"
+                :key="rl"
+                size="small"
+                type="danger"
+                effect="plain"
+                class="skill-tag"
+              >
+                {{ rl }}
+              </el-tag>
+              <span v-if="(currentJobConfig.redLines || []).length > 2" class="more-skills text-danger">
+                +{{ (currentJobConfig.redLines || []).length - 2 }}条
+              </span>
+            </div>
+            <div v-if="(currentJobConfig.bonusPoints || []).length" class="skills-wrap bonus-wrap">
+              <span class="skill-label text-warning">⭐ 加分:</span>
+              <el-tag
+                v-for="bp in (currentJobConfig.bonusPoints || []).slice(0, 2)"
+                :key="bp"
+                size="small"
+                type="warning"
+                effect="plain"
+                class="skill-tag"
+              >
+                {{ bp }}
+              </el-tag>
+            </div>
           </div>
 
           <div class="strip-right">
@@ -126,6 +155,59 @@
                 @change="saveJobConfigToStorage"
               />
             </div>
+
+            <!-- 🚫 一票否决红线 -->
+            <div class="expand-full" style="margin-top: 14px;">
+              <div class="label-row">
+                <label class="expand-label text-danger">🚫 用人部门一票否决红线 (Deal Breakers / 触碰直接淘汰降级)</label>
+                <div class="quick-tags">
+                  <span class="quick-title">快捷填入:</span>
+                  <button type="button" class="quick-pill danger" @click="addQuickRedLine('全日制统招本科及以上硬卡')">+ 统招本科硬卡</button>
+                  <button type="button" class="quick-pill danger" @click="addQuickRedLine('杜绝频繁跳槽（近3年换工作>3次）')">+ 拒频繁跳槽</button>
+                  <button type="button" class="quick-pill danger" @click="addQuickRedLine('严禁纯外包派遣/人力驻场经历')">+ 严禁外包经历</button>
+                  <button type="button" class="quick-pill danger" @click="addQuickRedLine('核心必备技术必须具备实操经验')">+ 硬卡技能实战</button>
+                </div>
+              </div>
+              <el-select
+                v-model="currentJobConfig.redLines"
+                multiple
+                filterable
+                allow-create
+                default-first-option
+                placeholder="输入红线要求并回车添加（如：必须全日制统招、非外包出身、严禁频繁跳槽）"
+                style="width: 100%"
+                @change="saveJobConfigToStorage"
+              >
+                <el-option v-for="rl in commonRedLines" :key="rl" :label="rl" :value="rl" />
+              </el-select>
+            </div>
+
+            <!-- ⭐ 核心优先加分项 -->
+            <div class="expand-full" style="margin-top: 14px;">
+              <div class="label-row">
+                <label class="expand-label text-warning">⭐ 用人部门核心优先加分项 (Bonus Points / 优质候选人特质)</label>
+                <div class="quick-tags">
+                  <span class="quick-title">快捷填入:</span>
+                  <button type="button" class="quick-pill warning" @click="addQuickBonus('知名大厂/独角兽/头部上市企业背书')">+ 知名大厂背书</button>
+                  <button type="button" class="quick-pill warning" @click="addQuickBonus('主导过日活千万级系统高并发微服务实战')">+ 高并发架构实战</button>
+                  <button type="button" class="quick-pill warning" @click="addQuickBonus('具备5人以上团队技术管理与带教经验')">+ 团队管理经验</button>
+                  <button type="button" class="quick-pill warning" @click="addQuickBonus('开源项目主要贡献者或具备核心发明专利')">+ 开源专利背书</button>
+                </div>
+              </div>
+              <el-select
+                v-model="currentJobConfig.bonusPoints"
+                multiple
+                filterable
+                allow-create
+                default-first-option
+                placeholder="输入加分项并回车添加（如：知名大厂背书、高并发实战经验、带过团队）"
+                style="width: 100%"
+                @change="saveJobConfigToStorage"
+              >
+                <el-option v-for="bp in commonBonusPoints" :key="bp" :label="bp" :value="bp" />
+              </el-select>
+            </div>
+
             <div class="expand-footer">
               <span class="save-hint">修改将自动同步保存并在新建项目中生效</span>
               <el-button size="small" type="primary" @click="saveJobConfigToStorage(true)">
@@ -326,7 +408,9 @@ const currentJobConfig = reactive({
   requiredSkills: ['临床试验方案设计', '质量控制', 'SOP标准操作', '药监核查', '生物/医学背景'] as string[],
   experienceYears: 3,
   educationLevel: '本科',
-  jobDescription: '岗位职责：\n1. 制定项目管理计划，按计划完成所负责的项目启动、开展及结束工作，确保通过药监部门核查；\n2. 根据项目研发资料、指导原则、行业标准等要求，设计临床试验方案；\n3. 对所负责的临床试验项目进行全面的质量控制与管理，确保所有试验严格按照临床试验方案、标准操作程序和相关法规进行；\n4. 根据临床试验相关规范要求，完成临床研究的各阶段报批文件包括但不限于临床报告；\n5. 作为公司对外代表，建立并保持与机构的良好关系。\n\n任职要求：\n1. 生物学、检验学、医学或药学等相关专业背景，本科及以上学历；\n2. 高度责任心和抗压能力，可适应出差；\n3. 优秀的沟通表达能力、发现和解决问题的能力。'
+  jobDescription: '岗位职责：\n1. 制定项目管理计划，按计划完成所负责的项目启动、开展及结束工作，确保通过药监部门核查；\n2. 根据项目研发资料、指导原则、行业标准等要求，设计临床试验方案；\n3. 对所负责的临床试验项目进行全面的质量控制与管理，确保所有试验严格按照临床试验方案、标准操作程序和相关法规进行；\n4. 根据临床试验相关规范要求，完成临床研究的各阶段报批文件包括但不限于临床报告；\n5. 作为公司对外代表，建立并保持与机构的良好关系。\n\n任职要求：\n1. 生物学、检验学、医学或药学等相关专业背景，本科及以上学历；\n2. 高度责任心和抗压能力，可适应出差；\n3. 优秀的沟通表达能力、发现和解决问题的能力。',
+  redLines: ['拒绝频繁跳槽（近3年换工作>3次）', '学历硬卡统招全日制本科及以上', '严禁无临床试验项目落地经验'] as string[],
+  bonusPoints: ['有知名三甲医院或上市药企背书', '主导过国家级I/II/III期临床试验', '具备PMP项目管理认证'] as string[]
 })
 
 const departmentOptions = [
@@ -346,6 +430,41 @@ const commonSkillsList = [
   '检验士/师', '科室会/学术讲座', '海外销售', '客户开拓', '自身免疫', '试剂研发',
   'Go', 'Python', 'Java', 'JavaScript', 'TypeScript', 'React', 'Vue', 'MySQL', 'Redis'
 ]
+
+const commonRedLines = [
+  '全日制统招本科及以上硬卡',
+  '杜绝频繁跳槽（近3年换工作>3次）',
+  '严禁纯外包派遣/人力驻场经历',
+  '硬卡专业对口（必须相关专业）',
+  '工作年限硬性达标（严禁年限造假）',
+  '核心必备技术栈必须具备生产实操经验'
+]
+
+const commonBonusPoints = [
+  '知名大厂/独角兽/头部上市企业背书',
+  '主导过日活千万级系统高并发微服务实战',
+  '具备5人以上团队技术管理与带教经验',
+  '开源项目主要贡献者或具备核心发明专利',
+  '具备行业权威专家资格或国际专业认证'
+]
+
+function addQuickRedLine(line: string) {
+  if (!currentJobConfig.redLines) currentJobConfig.redLines = []
+  if (!currentJobConfig.redLines.includes(line)) {
+    currentJobConfig.redLines.push(line)
+    saveJobConfigToStorage(false)
+    ElMessage.success(`已添加红线：${line}`)
+  }
+}
+
+function addQuickBonus(bonus: string) {
+  if (!currentJobConfig.bonusPoints) currentJobConfig.bonusPoints = []
+  if (!currentJobConfig.bonusPoints.includes(bonus)) {
+    currentJobConfig.bonusPoints.push(bonus)
+    saveJobConfigToStorage(false)
+    ElMessage.success(`已添加加分项：${bonus}`)
+  }
+}
 
 // 新建项目表单（包含业务描述字段）
 const newProject = reactive({
@@ -368,6 +487,8 @@ function loadJobConfigFromStorage() {
         currentJobConfig.experienceYears = s.job.experienceYears ?? currentJobConfig.experienceYears
         currentJobConfig.educationLevel = s.job.educationLevel || currentJobConfig.educationLevel
         currentJobConfig.jobDescription = s.job.jobDescription || currentJobConfig.jobDescription
+        currentJobConfig.redLines = s.job.redLines || currentJobConfig.redLines || []
+        currentJobConfig.bonusPoints = s.job.bonusPoints || currentJobConfig.bonusPoints || []
       }
     } catch {}
   }
@@ -386,7 +507,9 @@ function saveJobConfigToStorage(showMessage = false) {
       requiredSkills: [...currentJobConfig.requiredSkills],
       experienceYears: currentJobConfig.experienceYears,
       educationLevel: currentJobConfig.educationLevel,
-      jobDescription: currentJobConfig.jobDescription
+      jobDescription: currentJobConfig.jobDescription,
+      redLines: [...(currentJobConfig.redLines || [])],
+      bonusPoints: [...(currentJobConfig.bonusPoints || [])]
     }
     localStorage.setItem('goresume_settings', JSON.stringify(s))
     if (showMessage) {
@@ -408,6 +531,8 @@ function handlePresetSelect(preset: JobPreset | null) {
     currentJobConfig.experienceYears = preset.experienceYears
     currentJobConfig.educationLevel = preset.educationLevel
     currentJobConfig.jobDescription = preset.jobDescription || preset.description || ''
+    currentJobConfig.redLines = preset.redLines ? [...preset.redLines] : []
+    currentJobConfig.bonusPoints = preset.bonusPoints ? [...preset.bonusPoints] : []
     saveJobConfigToStorage(false)
     ElMessage.success(`已切换为岗位：${preset.name}`)
   } else {
@@ -431,6 +556,8 @@ function saveCurrentAsNewTemplate() {
     educationLevel: currentJobConfig.educationLevel,
     jobDescription: currentJobConfig.jobDescription,
     description: currentJobConfig.jobDescription ? currentJobConfig.jobDescription.slice(0, 60) + '...' : '',
+    redLines: [...(currentJobConfig.redLines || [])],
+    bonusPoints: [...(currentJobConfig.bonusPoints || [])],
     isCustom: true
   }
   saveCustomJobPreset(newPreset)
@@ -487,7 +614,9 @@ async function handleCreate() {
     required_skills: [...currentJobConfig.requiredSkills],
     experience_years: currentJobConfig.experienceYears,
     education_level: currentJobConfig.educationLevel,
-    job_description: currentJobConfig.jobDescription
+    job_description: currentJobConfig.jobDescription,
+    red_lines: [...(currentJobConfig.redLines || [])],
+    bonus_points: [...(currentJobConfig.bonusPoints || [])]
   }
   const result = await projectStore.createProject(
     newProject.name.trim(),
@@ -676,14 +805,52 @@ $text-muted: #86868b;
   .label-row {
     display: flex;
     justify-content: space-between;
-    align-items: baseline;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 8px;
     margin-bottom: 6px;
 
     .label-tip {
       font-size: 11px;
       color: $text-muted;
     }
+
+    .quick-tags {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      flex-wrap: wrap;
+
+      .quick-title {
+        font-size: 11px;
+        color: #64748b;
+      }
+
+      .quick-pill {
+        border: none;
+        padding: 2px 7px;
+        border-radius: 4px;
+        font-size: 11px;
+        cursor: pointer;
+        transition: all 0.15s ease;
+
+        &.danger {
+          background: #fee2e2;
+          color: #dc2626;
+          &:hover { background: #fecaca; }
+        }
+
+        &.warning {
+          background: #fef3c7;
+          color: #d97706;
+          &:hover { background: #fde68a; }
+        }
+      }
+    }
   }
+
+  .text-danger { color: #dc2626 !important; font-weight: 600; }
+  .text-warning { color: #d97706 !important; font-weight: 600; }
 
   .expand-footer {
     display: flex;

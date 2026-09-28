@@ -9,6 +9,8 @@ export interface JobPreset {
   experienceYears: number
   educationLevel: string
   description?: string
+  redLines?: string[]
+  bonusPoints?: string[]
 }
 
 export interface JobCategory {
