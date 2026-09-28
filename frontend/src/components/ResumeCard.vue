@@ -20,6 +20,12 @@
         <span v-if="(resume as any).is_merged_analysis || (resume as any).has_attachment" class="merged-badge" title="已完成微简历与完整附件结合终审">
           ⭐ 终审
         </span>
+        <span v-if="resume.analysis?.redLineViolations && resume.analysis.redLineViolations.length > 0" class="redline-pill" title="触碰用人部门一票否决红线，已直接淘汰">
+          🚫 触碰红线
+        </span>
+        <span v-else-if="resume.analysis?.bonusMatches && resume.analysis.bonusMatches.length > 0" class="bonus-pill" title="命中用人部门优先加分项">
+          ⭐ 加分达成
+        </span>
       </div>
 
       <div class="card-body">
@@ -391,6 +397,28 @@ $radius-md: 10px;
       color: #b45309;
       background: #fef3c7;
       border: 1px solid #fde68a;
+      padding: 1px 6px;
+      border-radius: 10px;
+      flex-shrink: 0;
+    }
+
+    .redline-pill {
+      font-size: 10px;
+      font-weight: 600;
+      color: #dc2626;
+      background: #fee2e2;
+      border: 1px solid #fca5a5;
+      padding: 1px 6px;
+      border-radius: 10px;
+      flex-shrink: 0;
+    }
+
+    .bonus-pill {
+      font-size: 10px;
+      font-weight: 600;
+      color: #ca8a04;
+      background: #fef9c3;
+      border: 1px solid #fde047;
       padding: 1px 6px;
       border-radius: 10px;
       flex-shrink: 0;

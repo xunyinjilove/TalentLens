@@ -189,6 +189,48 @@
                   </div>
                 </div>
 
+                <!-- 🚫 触碰用人部门一票否决红线警告 -->
+                <div v-if="resumeStore.selectedResume.analysis?.redLineViolations && resumeStore.selectedResume.analysis.redLineViolations.length > 0" class="redline-alert-card">
+                  <div class="redline-alert-header">
+                    <div class="redline-title-group">
+                      <div class="redline-badge-icon">
+                        <el-icon><CircleClose /></el-icon>
+                      </div>
+                      <div class="redline-title-text">
+                        <span class="redline-title">🚫 触碰用人部门一票否决红线 (Deal Breakers)</span>
+                        <span class="redline-sub">该候选人违反岗位硬性考核红线，已被系统一票否决淘汰，综合评分已强制降级锁定（≤50分）</span>
+                      </div>
+                    </div>
+                  </div>
+                  <ul class="redline-violations-list">
+                    <li v-for="(violation, vIdx) in resumeStore.selectedResume.analysis.redLineViolations" :key="vIdx" class="redline-violation-item">
+                      <el-icon><Warning /></el-icon>
+                      <span>{{ violation }}</span>
+                    </li>
+                  </ul>
+                </div>
+
+                <!-- ⭐ 达成用人部门优先加分项 -->
+                <div v-if="resumeStore.selectedResume.analysis?.bonusMatches && resumeStore.selectedResume.analysis.bonusMatches.length > 0" class="bonus-match-card">
+                  <div class="bonus-header">
+                    <div class="bonus-title-group">
+                      <div class="bonus-badge-icon">
+                        <el-icon><Check /></el-icon>
+                      </div>
+                      <div class="bonus-title-text">
+                        <span class="bonus-title">⭐ 达成用人部门优先加分项 (Bonus Points)</span>
+                        <span class="bonus-sub">该候选人具备用人部门高优先级青睐特征，建议重点推介与优先安排面试</span>
+                      </div>
+                    </div>
+                  </div>
+                  <ul class="bonus-matches-list">
+                    <li v-for="(bonus, bIdx) in resumeStore.selectedResume.analysis.bonusMatches" :key="bIdx" class="bonus-match-item">
+                      <el-icon><Check /></el-icon>
+                      <span>{{ bonus }}</span>
+                    </li>
+                  </ul>
+                </div>
+
                 <!-- 双源结合分析：初筛 ➔ 终审演进与一致性核验看板 -->
                 <div v-if="resumeStore.selectedResume.is_merged_analysis || resumeStore.selectedResume.analysis?.consistency_check" class="merged-evolution-card">
                   <div class="evo-header">
@@ -805,7 +847,17 @@ function getPitchCardText(resume: any): string {
   const topStrengths = (a?.strengths || []).slice(0, 3).map((s: string, idx: number) => `  ${idx + 1}. ${s}`).join('\n') || '  - 具备核心开发技能与实战背景'
   const risk = (a?.risks && a.risks[0]) || (a?.weaknesses && a.weaknesses[0]) || '建议初试深入核实项目真实职责与实操深度'
 
-  let text = `【候选人极简推介卡】\n👤 候选人：${candidateName} | 现任：${role}\n📌 背景画像：${exp} | ${edu}\n🎯 综合匹配：${Math.round(score)}分\n✨ 核心亮点：\n${topStrengths}\n⚠️ 关注提示：\n  - ${risk}`
+  let redLineNotice = ''
+  if (a?.redLineViolations && a.redLineViolations.length > 0) {
+    redLineNotice = `\n🚨 触碰用人红线：${a.redLineViolations.join('；')}`
+  }
+
+  let bonusNotice = ''
+  if (a?.bonusMatches && a.bonusMatches.length > 0) {
+    bonusNotice = `\n⭐ 命中优先加分：${a.bonusMatches.join('；')}`
+  }
+
+  let text = `【候选人极简推介卡】\n👤 候选人：${candidateName} | 现任：${role}\n📌 背景画像：${exp} | ${edu}\n🎯 综合匹配：${Math.round(score)}分${redLineNotice}${bonusNotice}\n✨ 核心亮点：\n${topStrengths}\n⚠️ 关注提示：\n  - ${risk}`
   if (resume.url) {
     text += `\n🔗 在线主页：${resume.url}`
   }
@@ -1994,6 +2046,162 @@ onUnmounted(() => {
       background: #dcfce7;
       border-color: #86efac;
       transform: translateY(-1px);
+    }
+  }
+}
+
+// 红线一票否决警告卡片
+.redline-alert-card {
+  margin: 12px 0 16px 0;
+  padding: 14px 18px;
+  background: #fef2f2;
+  border: 1.5px solid #f87171;
+  border-radius: 12px;
+  box-shadow: 0 2px 8px rgba(220, 38, 38, 0.08);
+
+  .redline-alert-header {
+    margin-bottom: 8px;
+
+    .redline-title-group {
+      display: flex;
+      align-items: flex-start;
+      gap: 10px;
+
+      .redline-badge-icon {
+        width: 28px;
+        height: 28px;
+        border-radius: 50%;
+        background: #ef4444;
+        color: #ffffff;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 16px;
+        flex-shrink: 0;
+      }
+
+      .redline-title-text {
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+
+        .redline-title {
+          font-size: 13.5px;
+          font-weight: 700;
+          color: #991b1b;
+        }
+
+        .redline-sub {
+          font-size: 11.5px;
+          color: #b91c1c;
+        }
+      }
+    }
+  }
+
+  .redline-violations-list {
+    margin: 0;
+    padding: 0;
+    list-style: none;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+
+    .redline-violation-item {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 12px;
+      font-weight: 600;
+      color: #b91c1c;
+      background: #fee2e2;
+      padding: 6px 10px;
+      border-radius: 6px;
+      border-left: 3px solid #dc2626;
+
+      .el-icon {
+        color: #dc2626;
+        font-size: 14px;
+        flex-shrink: 0;
+      }
+    }
+  }
+}
+
+// 加分达成看板
+.bonus-match-card {
+  margin: 12px 0 16px 0;
+  padding: 14px 18px;
+  background: #fefce8;
+  border: 1.5px solid #fde047;
+  border-radius: 12px;
+  box-shadow: 0 2px 8px rgba(202, 138, 4, 0.08);
+
+  .bonus-header {
+    margin-bottom: 8px;
+
+    .bonus-title-group {
+      display: flex;
+      align-items: flex-start;
+      gap: 10px;
+
+      .bonus-badge-icon {
+        width: 28px;
+        height: 28px;
+        border-radius: 50%;
+        background: #eab308;
+        color: #ffffff;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 16px;
+        flex-shrink: 0;
+      }
+
+      .bonus-title-text {
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+
+        .bonus-title {
+          font-size: 13.5px;
+          font-weight: 700;
+          color: #854d0e;
+        }
+
+        .bonus-sub {
+          font-size: 11.5px;
+          color: #a16207;
+        }
+      }
+    }
+  }
+
+  .bonus-matches-list {
+    margin: 0;
+    padding: 0;
+    list-style: none;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+
+    .bonus-match-item {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 12px;
+      font-weight: 600;
+      color: #854d0e;
+      background: #fef9c3;
+      padding: 6px 10px;
+      border-radius: 6px;
+      border-left: 3px solid #ca8a04;
+
+      .el-icon {
+        color: #ca8a04;
+        font-size: 14px;
+        flex-shrink: 0;
+      }
     }
   }
 }

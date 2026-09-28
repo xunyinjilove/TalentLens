@@ -172,6 +172,56 @@
               />
             </div>
 
+            <!-- 🚫 一票否决红线 -->
+            <div class="form-item" style="margin-top: 14px;">
+              <div class="field-label-wrap" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; flex-wrap: wrap; gap: 8px;">
+                <label class="text-danger" style="font-weight: 600;">🚫 用人部门一票否决红线 (Deal Breakers / 触碰直接淘汰降级)</label>
+                <div class="quick-tags">
+                  <span class="quick-title">快捷填入:</span>
+                  <button type="button" class="quick-pill danger" @click="addQuickRedLine('全日制统招本科及以上硬卡')">+ 统招本科硬卡</button>
+                  <button type="button" class="quick-pill danger" @click="addQuickRedLine('杜绝频繁跳槽（近3年换工作>3次）')">+ 拒频繁跳槽</button>
+                  <button type="button" class="quick-pill danger" @click="addQuickRedLine('严禁纯外包派遣/人力驻场经历')">+ 严禁外包经历</button>
+                  <button type="button" class="quick-pill danger" @click="addQuickRedLine('核心必备技术必须具备实操经验')">+ 硬卡技能实战</button>
+                </div>
+              </div>
+              <el-select
+                v-model="jobForm.redLines"
+                multiple
+                filterable
+                allow-create
+                default-first-option
+                placeholder="输入红线要求并回车添加（如：必须全日制统招、非外包出身、严禁频繁跳槽）"
+                class="full-width"
+              >
+                <el-option v-for="rl in commonRedLines" :key="rl" :label="rl" :value="rl" />
+              </el-select>
+            </div>
+
+            <!-- ⭐ 核心优先加分项 -->
+            <div class="form-item" style="margin-top: 14px;">
+              <div class="field-label-wrap" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; flex-wrap: wrap; gap: 8px;">
+                <label class="text-warning" style="font-weight: 600;">⭐ 用人部门核心优先加分项 (Bonus Points / 优质候选人特质)</label>
+                <div class="quick-tags">
+                  <span class="quick-title">快捷填入:</span>
+                  <button type="button" class="quick-pill warning" @click="addQuickBonus('知名大厂/独角兽/头部上市企业背书')">+ 知名大厂背书</button>
+                  <button type="button" class="quick-pill warning" @click="addQuickBonus('主导过日活千万级系统高并发微服务实战')">+ 高并发架构实战</button>
+                  <button type="button" class="quick-pill warning" @click="addQuickBonus('具备5人以上团队技术管理与带教经验')">+ 团队管理经验</button>
+                  <button type="button" class="quick-pill warning" @click="addQuickBonus('开源项目主要贡献者或具备核心发明专利')">+ 开源专利背书</button>
+                </div>
+              </div>
+              <el-select
+                v-model="jobForm.bonusPoints"
+                multiple
+                filterable
+                allow-create
+                default-first-option
+                placeholder="输入加分项并回车添加（如：知名大厂背书、高并发实战经验、带过团队）"
+                class="full-width"
+              >
+                <el-option v-for="bp in commonBonusPoints" :key="bp" :label="bp" :value="bp" />
+              </el-select>
+            </div>
+
             <div class="form-item actions" style="display: flex; gap: 12px; margin-top: 20px;">
               <el-button type="primary" @click="saveSettings" round>
                 <el-icon><Check /></el-icon>
@@ -335,7 +385,9 @@ const jobForm = reactive({
   requiredSkills: ['临床试验方案设计', '质量控制', 'SOP标准操作', '药监核查', '生物/医学背景'] as string[],
   experienceYears: 3,
   educationLevel: '本科',
-  jobDescription: '岗位职责：\n1. 制定项目管理计划，按计划完成所负责的项目启动、开展及结束工作，确保通过药监部门核查；\n2. 根据项目研发资料、指导原则、行业标准等要求，设计临床试验方案；\n3. 对所负责的临床试验项目进行全面的质量控制与管理，确保所有试验严格按照临床试验方案、标准操作程序和相关法规进行；\n4. 根据临床试验相关规范要求，完成临床研究的各阶段报批文件包括但不限于临床报告；\n5. 作为公司对外代表，建立并保持与机构的良好关系。\n\n任职要求：\n1. 生物学、检验学、医学或药学等相关专业背景，本科及以上学历；\n2. 高度责任心和抗压能力，可适应出差；\n3. 优秀的沟通表达能力、发现和解决问题的能力。'
+  jobDescription: '岗位职责：\n1. 制定项目管理计划，按计划完成所负责的项目启动、开展及结束工作，确保通过药监部门核查；\n2. 根据项目研发资料、指导原则、行业标准等要求，设计临床试验方案；\n3. 对所负责的临床试验项目进行全面的质量控制与管理，确保所有试验严格按照临床试验方案、标准操作程序和相关法规进行；\n4. 根据临床试验相关规范要求，完成临床研究的各阶段报批文件包括但不限于临床报告；\n5. 作为公司对外代表，建立并保持与机构的良好关系。\n\n任职要求：\n1. 生物学、检验学、医学或药学等相关专业背景，本科及以上学历；\n2. 高度责任心和抗压能力，可适应出差；\n3. 优秀的沟通表达能力、发现和解决问题的能力。',
+  redLines: [] as string[],
+  bonusPoints: [] as string[]
 })
 
 const analysisForm = reactive({
@@ -354,6 +406,30 @@ const commonSkills = [
   'Docker', 'Kubernetes', 'Linux', 'Git',
   '需求分析', 'PRD撰写', '数据分析', '用户研究'
 ]
+
+const commonRedLines = [
+  '全日制统招本科及以上硬卡', '杜绝频繁跳槽（近3年换工作>3次）', '严禁纯外包派遣/人力驻场经历', '核心必备技术必须具备实操经验',
+  '统招本科以下不考虑', '非对口医药/生物专业硬卡', '无独立负责大型项目经验'
+]
+
+const commonBonusPoints = [
+  '知名大厂/独角兽/头部上市企业背书', '主导过日活千万级系统高并发微服务实战', '具备5人以上团队技术管理与带教经验', '开源项目主要贡献者或具备核心发明专利',
+  '头部IVD/药企大厂背景', '持有PCR上岗证/检验师资格', '硕士及以上学历优选'
+]
+
+function addQuickRedLine(tag: string) {
+  if (!jobForm.redLines) jobForm.redLines = []
+  if (!jobForm.redLines.includes(tag)) {
+    jobForm.redLines.push(tag)
+  }
+}
+
+function addQuickBonus(tag: string) {
+  if (!jobForm.bonusPoints) jobForm.bonusPoints = []
+  if (!jobForm.bonusPoints.includes(tag)) {
+    jobForm.bonusPoints.push(tag)
+  }
+}
 
 const currentProvider = computed<Provider | null>(() => {
   return getProviderById(aiForm.provider) || null
@@ -375,6 +451,8 @@ function handlePresetSelect(preset: JobPreset | null) {
     jobForm.experienceYears = preset.experienceYears
     jobForm.educationLevel = preset.educationLevel
     jobForm.jobDescription = preset.jobDescription || preset.description || ''
+    jobForm.redLines = preset.redLines ? [...preset.redLines] : []
+    jobForm.bonusPoints = preset.bonusPoints ? [...preset.bonusPoints] : []
   } else {
     selectedPresetId.value = 'custom'
   }
@@ -395,6 +473,8 @@ function saveAsCustomPreset() {
     educationLevel: jobForm.educationLevel,
     jobDescription: jobForm.jobDescription,
     description: jobForm.jobDescription ? jobForm.jobDescription.slice(0, 60) + '...' : '',
+    redLines: [...(jobForm.redLines || [])],
+    bonusPoints: [...(jobForm.bonusPoints || [])],
     isCustom: true
   }
   saveCustomJobPreset(newPreset)
@@ -438,7 +518,9 @@ function saveSettings() {
       requiredSkills: [...jobForm.requiredSkills],
       experienceYears: jobForm.experienceYears,
       educationLevel: jobForm.educationLevel,
-      jobDescription: jobForm.jobDescription
+      jobDescription: jobForm.jobDescription,
+      redLines: [...(jobForm.redLines || [])],
+      bonusPoints: [...(jobForm.bonusPoints || [])]
     },
     analysis: { maxConcurrent: analysisForm.maxConcurrent, autoStart: analysisForm.autoStart }
   }
@@ -461,6 +543,8 @@ function resetSettings() {
   jobForm.experienceYears = 5
   jobForm.educationLevel = '本科'
   jobForm.jobDescription = ''
+  jobForm.redLines = []
+  jobForm.bonusPoints = []
   analysisForm.maxConcurrent = 3
   analysisForm.autoStart = false
   selectedPresetId.value = ''
@@ -535,6 +619,8 @@ onMounted(async () => {
         jobForm.experienceYears = s.job.experienceYears ?? jobForm.experienceYears
         jobForm.educationLevel = s.job.educationLevel || jobForm.educationLevel
         jobForm.jobDescription = s.job.jobDescription || jobForm.jobDescription
+        jobForm.redLines = s.job.redLines || []
+        jobForm.bonusPoints = s.job.bonusPoints || []
       }
       if (s.analysis) {
         analysisForm.maxConcurrent = s.analysis.maxConcurrent ?? analysisForm.maxConcurrent
@@ -736,6 +822,42 @@ onMounted(async () => {
   display: flex;
   gap: 16px;
 }
+
+.quick-tags {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+
+  .quick-title {
+    font-size: 11px;
+    color: #64748b;
+  }
+
+  .quick-pill {
+    border: none;
+    padding: 2px 7px;
+    border-radius: 4px;
+    font-size: 11px;
+    cursor: pointer;
+    transition: all 0.15s ease;
+
+    &.danger {
+      background: #fee2e2;
+      color: #dc2626;
+      &:hover { background: #fecaca; }
+    }
+
+    &.warning {
+      background: #fef3c7;
+      color: #d97706;
+      &:hover { background: #fde68a; }
+    }
+  }
+}
+
+.text-danger { color: #dc2626 !important; font-weight: 600; }
+.text-warning { color: #d97706 !important; font-weight: 600; }
 
 .flex-1 {
   flex: 1;

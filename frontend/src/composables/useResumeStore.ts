@@ -74,6 +74,8 @@ export interface Resume {
       frequent_hop_warning?: string
       advise_questions?: string[]
     }
+    redLineViolations?: string[]
+    bonusMatches?: string[]
     interviewSuggestions: string[]
     interviewQA?: Array<{ category: string; question: string; reference_answer: string }>
     consistency_check?: {
@@ -227,6 +229,8 @@ export const useResumeStore = defineStore('resume', () => {
               recommendation: a.recommendation,
               managerPitch,
               water_check: waterCheck,
+              redLineViolations: a.red_line_violations || [],
+              bonusMatches: a.bonus_matches || [],
               interviewSuggestions: a.interview_suggestions || [],
               interviewQA: a.interview_qa || [],
               consistency_check: a.consistency_check || undefined,
@@ -691,6 +695,8 @@ export const useResumeStore = defineStore('resume', () => {
           recommendation: a.recommendation,
           managerPitch: a.manager_pitch || '',
           water_check: a.water_check || undefined,
+          redLineViolations: a.red_line_violations || [],
+          bonusMatches: a.bonus_matches || [],
           interviewSuggestions: a.interview_suggestions || [],
           interviewQA: a.interview_qa || [],
           consistency_check: a.consistency_check || undefined,

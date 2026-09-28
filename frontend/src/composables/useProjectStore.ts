@@ -17,6 +17,8 @@ export interface Project {
     experience_years: number
     education_level: string
     job_description?: string
+    red_lines?: string[]
+    bonus_points?: string[]
   }
   resume_ids: string[]
   status: 'draft' | 'analyzing' | 'completed'
