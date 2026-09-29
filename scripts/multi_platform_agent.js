@@ -161,6 +161,34 @@ async function ensurePlatformPage(page, cfg) {
   return { ok: false, reason: lastError || '浏览器仍停留在非招聘网站页面' };
 }
 
+async function submit51jobSearch(page, keyword) {
+  const filled = await page.evaluate(targetKeyword => {
+    const inputs = Array.from(document.querySelectorAll('input'));
+    const input = document.querySelector('.talent_search_keywords_input input, .talent_search_keywords input') || inputs.find(item => {
+      const placeholder = (item.placeholder || '').trim();
+      return placeholder.includes('搜索职位名') || placeholder.includes('职位名') || placeholder.includes('关键词') || placeholder.includes('搜索');
+    });
+    if (!input) return false;
+    input.focus();
+    input.value = targetKeyword;
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    input.dispatchEvent(new Event('change', { bubbles: true }));
+    return true;
+  }, keyword);
+  if (!filled) return { ok: false, reason: '没有找到岗位关键词输入框' };
+
+  await new Promise(resolve => setTimeout(resolve, 500));
+  const clicked = await page.evaluate(() => {
+    // 只点击真正的按钮。外层 div 的 innerText 同样是“搜索”，点它不会触发检索。
+    const button = document.querySelector('.talent_search_head_right button.search_button') ||
+      Array.from(document.querySelectorAll('button')).find(item => (item.innerText || '').trim() === '搜索');
+    if (!button || button.disabled) return false;
+    button.click();
+    return true;
+  });
+  return clicked ? { ok: true } : { ok: false, reason: '没有找到可点击的搜索按钮' };
+}
+
 // 跨批次与全局排重缓存
 const seenCandidateKeys = new Set();
 let safetyStopped = false;
@@ -956,7 +984,10 @@ async function launchPlatformBrowser(cfg, browserPath, profileDir) {
     }
     return browser;
   } catch (err1) {
-    sendMsg('status', { platform: cfg.code, message: `⚠️ Puppeteer 直启失败 (${err1.message.substring(0, 80)})，尝试 CDP 回退...` });
+    const reused = /Failed to launch the browser process: Code: 0/i.test(err1.message || '');
+    sendMsg('status', { platform: cfg.code, message: reused
+      ? `【${cfg.name}】Edge 已复用现有窗口，正在连接浏览器会话...`
+      : `【${cfg.name}】直启未完成，正在尝试浏览器调试连接：${err1.message.substring(0, 80)}` });
   }
 
   // ─── 模式3: 手动 spawn Edge + CDP connect ───
@@ -1318,41 +1349,17 @@ async function autoNavigateAndSearch(page, platformKey, cfg, searchKeyword) {
 
       // 无论何种途径进入搜索页，自动输入关键词并触发搜索
       try {
-        const filled = await page.evaluate((targetKw) => {
-          const inputs = Array.from(document.querySelectorAll('input'));
-          const target = document.querySelector('.talent_search_keywords_input input, .talent_search_keywords input') || inputs.find(i => {
-            const p = (i.placeholder || '').trim();
-            return p.includes('搜索职位名') || p.includes('职位名') || p.includes('关键词') || p.includes('搜索');
-          });
-          if (target) {
-            target.focus();
-            target.value = targetKw;
-            // 触发 Vue 3 / Element Plus 响应式双向绑定事件 (v-model)
-            target.dispatchEvent(new Event('input', { bubbles: true }));
-            target.dispatchEvent(new Event('change', { bubbles: true }));
-            return true;
-          }
+        const submitted = await submit51jobSearch(page, kw);
+        if (!submitted.ok) {
+          sendMsg('error', { platform: platformKey, message: `【前程无忧】未提交关键词搜索：${submitted.reason}` });
           return false;
-        }, kw);
-
-        if (filled) {
-          sendMsg('status', {
-            platform: platformKey,
-            message: `⌨️ 正在自动输入搜索关键词「${kw}」并检索...`
-          });
-          await new Promise(r => setTimeout(r, 500));
-          
-          // 点击搜索按钮
-          await page.evaluate(() => {
-            const btns = Array.from(document.querySelectorAll('button, .el-button, div, span'));
-            const searchBtn = btns.find(b => b.innerText && b.innerText.trim() === '搜索');
-            if (searchBtn) {
-              searchBtn.click();
-            }
-          });
-          await new Promise(r => setTimeout(r, 2500));
         }
-      } catch (e) {}
+        sendMsg('status', { platform: platformKey, message: `已点击【前程无忧】搜索按钮，等待关键词「${kw}」的候选人列表...` });
+        await new Promise(r => setTimeout(r, 2500));
+      } catch (e) {
+        sendMsg('error', { platform: platformKey, message: `【前程无忧】提交关键词搜索失败：${e.message}` });
+        return false;
+      }
 
     } else if (platformKey === 'zhaopin') {
       try {
@@ -1398,7 +1405,11 @@ async function autoNavigateAndSearch(page, platformKey, cfg, searchKeyword) {
         }
       } catch (e) {}
     }
-  } catch (err) {}
+    return true;
+  } catch (err) {
+    sendMsg('error', { platform: platformKey, message: `【${cfg.name}】打开检索页失败：${err.message}` });
+    return false;
+  }
 }
 
   sendMsg('status', {
@@ -1476,7 +1487,9 @@ async function autoNavigateAndSearch(page, platformKey, cfg, searchKeyword) {
 
       // 1. 自动执行平台寻路与关键词检索
       if (activeKeyword !== currentKeyword) {
-        await autoNavigateAndSearch(page, platformKey, cfg, currentKeyword);
+        if (!await autoNavigateAndSearch(page, platformKey, cfg, currentKeyword)) {
+          return outcome(allPlatformSavedList, '未能提交关键词搜索');
+        }
         activeKeyword = currentKeyword;
       }
 
@@ -1544,7 +1557,9 @@ async function autoNavigateAndSearch(page, platformKey, cfg, searchKeyword) {
               timeout: 20000
             }).catch(() => {});
             await new Promise(r => setTimeout(r, 2000));
-            await autoNavigateAndSearch(page, platformKey, cfg, currentKeyword);
+            if (!await autoNavigateAndSearch(page, platformKey, cfg, currentKeyword)) {
+              return outcome(allPlatformSavedList, '重试时未能提交关键词搜索');
+            }
           }
         }
         if (pollAttempts >= 3) break;
@@ -1977,4 +1992,4 @@ if (require.main === module) {
   });
 }
 
-module.exports = { allocateQuota, smoothScroll, keepPageActiveInBackground, setBrowserWindowState, isBrowserStartPage, isPlatformPageUrl, ensurePlatformPage, detectCaptcha, extractCandidatesAcrossFrames, selectFreshCandidates, advanceSearchResults, main };
+module.exports = { allocateQuota, smoothScroll, keepPageActiveInBackground, setBrowserWindowState, isBrowserStartPage, isPlatformPageUrl, ensurePlatformPage, submit51jobSearch, detectCaptcha, extractCandidatesAcrossFrames, selectFreshCandidates, advanceSearchResults, main };
