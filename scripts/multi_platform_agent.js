@@ -136,6 +136,17 @@ function isBrowserStartPage(url) {
     || /^https?:\/\/ntp\.msn\.cn\/edge\/ntp(?:[/?#]|$)/i.test(url);
 }
 
+function browserLaunchArgs(cfg, profileDir, isLoginTest) {
+  return [
+    `--remote-debugging-port=${cfg.debugPort}`,
+    `--user-data-dir=${profileDir}`,
+    '--no-first-run',
+    '--no-default-browser-check',
+    isLoginTest ? '--start-maximized' : '--start-minimized',
+    cfg.homeUrl
+  ];
+}
+
 function isPlatformPageUrl(url, cfg) {
   try {
     const host = new URL(url).hostname.toLowerCase();
@@ -162,6 +173,14 @@ async function ensurePlatformPage(page, cfg) {
 }
 
 async function submit51jobSearch(page, keyword) {
+  if (typeof page.url === 'function' && !/ehire\.51job\.com\/Revision\/talent\/search/i.test(page.url())) {
+    return { ok: false, reason: '当前页面不是前程无忧人才搜索页' };
+  }
+  try {
+    await page.waitForSelector('.talent_search_head_right button.search_button', { timeout: 10000 });
+  } catch (error) {
+    return { ok: false, reason: '人才搜索页未加载出搜索按钮' };
+  }
   const filled = await page.evaluate(targetKeyword => {
     const inputs = Array.from(document.querySelectorAll('input'));
     const input = document.querySelector('.talent_search_keywords_input input, .talent_search_keywords input') || inputs.find(item => {
@@ -177,16 +196,38 @@ async function submit51jobSearch(page, keyword) {
   }, keyword);
   if (!filled) return { ok: false, reason: '没有找到岗位关键词输入框' };
 
-  await new Promise(resolve => setTimeout(resolve, 500));
-  const clicked = await page.evaluate(() => {
-    // 只点击真正的按钮。外层 div 的 innerText 同样是“搜索”，点它不会触发检索。
-    const button = document.querySelector('.talent_search_head_right button.search_button') ||
-      Array.from(document.querySelectorAll('button')).find(item => (item.innerText || '').trim() === '搜索');
-    if (!button || button.disabled) return false;
-    button.click();
-    return true;
-  });
-  return clicked ? { ok: true } : { ok: false, reason: '没有找到可点击的搜索按钮' };
+  for (let attempt = 0; attempt < 3; attempt++) {
+    await new Promise(resolve => setTimeout(resolve, 500));
+    const clicked = await page.evaluate(() => {
+      // 外层 div 的 innerText 同样是“搜索”，只能点击真正的按钮。
+      const button = document.querySelector('.talent_search_head_right button.search_button') ||
+        Array.from(document.querySelectorAll('button')).find(item => (item.innerText || '').trim() === '搜索');
+      if (!button || button.disabled) return false;
+      button.click();
+      return true;
+    });
+    if (!clicked) return { ok: false, reason: '没有找到可点击的搜索按钮' };
+
+    // 单纯调用 click() 不等于平台已经开始查询；必须等初始提示消失或结果卡片出现。
+    for (let poll = 0; poll < 10; poll++) {
+      await new Promise(resolve => setTimeout(resolve, 500));
+      const state = await page.evaluate(() => ({
+        cards: document.querySelectorAll('.talent-search-container .card').length,
+        waiting: (document.body?.innerText || '').includes('输入关键词搜索，寻找匹配人才')
+      }));
+      if (state.cards > 0 || !state.waiting) return { ok: true };
+    }
+  }
+  return { ok: false, reason: '搜索按钮已点击，但页面仍显示“输入关键词搜索”，检索未生效' };
+}
+
+async function closeUnusedStartPages(browser, selectedPage) {
+  const pages = await browser.pages();
+  for (const page of pages) {
+    if (page !== selectedPage && isBrowserStartPage(page.url())) {
+      await page.close().catch(() => {});
+    }
+  }
 }
 
 // 跨批次与全局排重缓存
@@ -936,14 +977,12 @@ async function enrichCandidatesWithFullDetail(page, browser, candidates, platfor
   return enriched;
 }
 
-// 弹性三模浏览器唤起
-// 模式1: 连接已有 CDP 端口  →  模式2: 清残 + Puppeteer 直启  →  模式3: 清残 + CDP spawn 回退
+// 优先复用已有调试会话；没有会话时只启动一次 Edge，避免直启失败后再次启动产生第二个窗口。
 async function launchPlatformBrowser(cfg, browserPath, profileDir) {
   const debugPort = cfg.debugPort;
   const isLoginTest = options.testLoginPlatform === cfg.code;
-  const windowModeArg = isLoginTest ? '--start-maximized' : '--start-minimized';
 
-  // ─── 模式1: 尝试连接已经在跑的浏览器实例 ───
+  // 先连接已经在跑的浏览器实例。
   try {
     const browser = await puppeteer.connect({
       browserURL: `http://127.0.0.1:${debugPort}`,
@@ -958,46 +997,15 @@ async function launchPlatformBrowser(cfg, browserPath, profileDir) {
     // 没有在跑的实例，继续下面的流程
   }
 
-  // ─── 清理残留进程 & 锁文件 ───
+  // 清理仅属于当前平台隔离 profile 的残留进程与锁文件。
   sendMsg('status', { platform: cfg.code, message: `🧹 清理【${cfg.name}】残留浏览器进程...` });
   killBrowserByProfile(profileDir);
   await new Promise(r => setTimeout(r, 1500)); // 等进程完全退出
   clearProfileLocks(profileDir);
 
-  // ─── 模式2: Puppeteer 直接启动 ───
-  try {
-    const browser = await puppeteer.launch({
-      executablePath: browserPath,
-      headless: false,
-      defaultViewport: null,
-      ignoreDefaultArgs: ['--enable-automation'],
-      args: [
-        `--user-data-dir=${profileDir}`,
-        `--remote-debugging-port=${debugPort}`,
-        '--no-first-run',
-        '--no-default-browser-check',
-        windowModeArg
-      ]
-    });
-    if (!isLoginTest) {
-      await setBrowserWindowState(browser, 'minimized');
-    }
-    return browser;
-  } catch (err1) {
-    const reused = /Failed to launch the browser process: Code: 0/i.test(err1.message || '');
-    sendMsg('status', { platform: cfg.code, message: reused
-      ? `【${cfg.name}】Edge 已复用现有窗口，正在连接浏览器会话...`
-      : `【${cfg.name}】直启未完成，正在尝试浏览器调试连接：${err1.message.substring(0, 80)}` });
-  }
-
-  // ─── 模式3: 手动 spawn Edge + CDP connect ───
-  const child = spawn(browserPath, [
-    `--remote-debugging-port=${debugPort}`,
-    `--user-data-dir=${profileDir}`,
-    '--no-first-run',
-    '--no-default-browser-check',
-    windowModeArg
-  ], { detached: true, stdio: 'ignore', windowsHide: true });
+  // Edge 只启动一次，并直接打开平台网址；不先打开新标签页再启动第二个 Edge。
+  const child = spawn(browserPath, browserLaunchArgs(cfg, profileDir, isLoginTest),
+    { detached: true, stdio: 'ignore', windowsHide: true });
   child.unref();
 
   for (let i = 0; i < 20; i++) {
@@ -1014,7 +1022,7 @@ async function launchPlatformBrowser(cfg, browserPath, profileDir) {
     } catch (e) {}
   }
 
-  throw new Error(`无法启动浏览器 (profile: ${path.basename(profileDir)})，请确保没有其他 Edge 窗口占用该配置文件`);
+  throw new Error(`无法连接刚启动的浏览器 (profile: ${path.basename(profileDir)})，请检查该配置文件是否被其他 Edge 窗口占用`);
 }
 
 // 统一抓取单个平台 (返回 null 表示启动/连接失败，返回 [] 表示成功连接但无结果)
@@ -1068,17 +1076,9 @@ async function scrapePlatform(platformKey, browserPath, targetCount, keywordPlan
     }
   }
 
-  // 自动清理多余的 about:blank 空白标签页，避免界面上残留空白标签页
+  // 自动清理隔离 profile 中多余的 Edge 新标签页，避免额外窗口留在前台。
   try {
-    pages = await browser.pages();
-    for (const p of pages) {
-      if (p !== page) {
-        const u = p.url() || '';
-        if (!u || u === 'about:blank') {
-          await p.close().catch(() => {});
-        }
-      }
-    }
+    await closeUnusedStartPages(browser, page);
   } catch (e) {}
 
   // 仅在扫码登录测试时激活置顶窗口，常规寻才检索时维持后台沙盒最小化
@@ -1144,14 +1144,9 @@ async function scrapePlatform(platformKey, browserPath, targetCount, keywordPlan
     return outcome([], '招聘网站未能打开');
   }
 
-  // 导航完成后清理空白页；常规检索保持最小化，避免切换标签时抢占输入焦点。
+  // 导航完成后再次清理新标签页；常规检索保持最小化。
   try {
-    const curPages = await browser.pages();
-    for (const p of curPages) {
-      if (p !== page && (p.url() === 'about:blank' || !p.url())) {
-        await p.close().catch(() => {});
-      }
-    }
+    await closeUnusedStartPages(browser, page);
     if (isLoginTest) await page.bringToFront();
     else await setBrowserWindowState(page, 'minimized');
   } catch (e) {}
@@ -1311,39 +1306,13 @@ async function autoNavigateAndSearch(page, platformKey, cfg, searchKeyword) {
   try {
     if (platformKey === '51job') {
       let curUrl = page.url() || '';
-      // 如果当前还在工作台首页 (navigate)，立即进入“人才搜索”
-      if (curUrl.toLowerCase().includes('navigate') || curUrl.endsWith('.com/') || curUrl.endsWith('.com') || curUrl.includes('MainLogin')) {
+      // 不在人才搜索页时直接进入目标页，避免点击同名的菜单父容器。
+      if (!/\/Revision\/talent\/search/i.test(curUrl)) {
         sendMsg('status', {
           platform: platformKey,
           message: `🧭 正在自动跳转至【前程无忧】人才搜索中心...`
         });
-
-        // 尝试在页面左侧菜单点击“人才搜索”或“人才望远镜”
-        let clicked = false;
-        try {
-          clicked = await page.evaluate(() => {
-            const elements = Array.from(document.querySelectorAll('a, span, li, div, p'));
-            const target = elements.find(el => {
-              const t = (el.innerText || '').trim();
-              return t === '人才搜索' || t === '人才望远镜' || t === '搜索简历';
-            });
-            if (target) {
-              target.click();
-              return true;
-            }
-            return false;
-          });
-        } catch (e) {}
-
-        // 若 DOM 点击未发生跳转，直接跳转到最新版 Revision/talent/search
-        if (!clicked || !page.url().includes('/talent/search')) {
-          try {
-            await page.goto('https://ehire.51job.com/Revision/talent/search', {
-              waitUntil: 'domcontentloaded',
-              timeout: 20000
-            });
-          } catch (e) {}
-        }
+        await page.goto(cfg.homeUrl, { waitUntil: 'domcontentloaded', timeout: 20000 });
         await new Promise(r => setTimeout(r, 2000));
       }
 
@@ -1354,8 +1323,7 @@ async function autoNavigateAndSearch(page, platformKey, cfg, searchKeyword) {
           sendMsg('error', { platform: platformKey, message: `【前程无忧】未提交关键词搜索：${submitted.reason}` });
           return false;
         }
-        sendMsg('status', { platform: platformKey, message: `已点击【前程无忧】搜索按钮，等待关键词「${kw}」的候选人列表...` });
-        await new Promise(r => setTimeout(r, 2500));
+        sendMsg('status', { platform: platformKey, message: `【前程无忧】关键词「${kw}」已触发检索，正在读取候选人列表...` });
       } catch (e) {
         sendMsg('error', { platform: platformKey, message: `【前程无忧】提交关键词搜索失败：${e.message}` });
         return false;
@@ -1992,4 +1960,4 @@ if (require.main === module) {
   });
 }
 
-module.exports = { allocateQuota, smoothScroll, keepPageActiveInBackground, setBrowserWindowState, isBrowserStartPage, isPlatformPageUrl, ensurePlatformPage, submit51jobSearch, detectCaptcha, extractCandidatesAcrossFrames, selectFreshCandidates, advanceSearchResults, main };
+module.exports = { allocateQuota, smoothScroll, keepPageActiveInBackground, setBrowserWindowState, isBrowserStartPage, browserLaunchArgs, closeUnusedStartPages, isPlatformPageUrl, ensurePlatformPage, submit51jobSearch, detectCaptcha, extractCandidatesAcrossFrames, selectFreshCandidates, advanceSearchResults, main };

@@ -84,17 +84,34 @@ test('Edge MSN start page is not mistaken for a recruiting login page', async ()
   assert.equal(agent.isPlatformPageUrl(page.url(), cfg), true);
 });
 
+test('Edge starts once on the recruiting URL in a minimized window', () => {
+  const cfg = { debugPort: 9503, homeUrl: 'https://ehire.51job.com/Revision/talent/search' };
+  assert.deepEqual(agent.browserLaunchArgs(cfg, 'C:\\TalentLens\\51job_profile', false), [
+    '--remote-debugging-port=9503', '--user-data-dir=C:\\TalentLens\\51job_profile',
+    '--no-first-run', '--no-default-browser-check', '--start-minimized', cfg.homeUrl
+  ]);
+});
+
+test('unused Edge new-tab window is closed without closing the recruiting tab', async () => {
+  let closed = 0;
+  const selected = { url: () => 'https://ehire.51job.com/Revision/talent/search', close: async () => { throw Error('search tab must stay open'); } };
+  const startPage = { url: () => 'edge://newtab/', close: async () => { closed++; } };
+  await agent.closeUnusedStartPages({ pages: async () => [selected, startPage] }, selected);
+  assert.equal(closed, 1);
+});
+
 test('51job search clicks the real button instead of its same-text parent', async () => {
   let parentClicks = 0;
   let buttonClicks = 0;
   const input = { value: '', placeholder: '搜索职位名', focus() {}, dispatchEvent() {} };
   const parent = { innerText: '搜索', click() { parentClicks++; } };
-  const button = { innerText: '搜索', disabled: false, click() { buttonClicks++; } };
+  const button = { innerText: '搜索', disabled: false, click() { buttonClicks++; global.document.body.innerText = ''; } };
   global.document = {
+    body: { innerText: '输入关键词搜索，寻找匹配人才' },
     querySelector: selector => selector.includes('button.search_button') ? button : input,
-    querySelectorAll: selector => selector === 'input' ? [input] : selector === 'button' ? [button] : [parent, button]
+    querySelectorAll: selector => selector.includes('.talent-search-container') ? [] : selector === 'input' ? [input] : selector === 'button' ? [button] : [parent, button]
   };
-  const page = { evaluate: async (fn, ...args) => fn(...args) };
+  const page = { url: () => 'https://ehire.51job.com/Revision/talent/search', waitForSelector: async () => {}, evaluate: async (fn, ...args) => fn(...args) };
   try {
     assert.deepEqual(await agent.submit51jobSearch(page, '软件测试工程师'), { ok: true });
     assert.equal(input.value, '软件测试工程师');
@@ -108,14 +125,35 @@ test('51job search clicks the real button instead of its same-text parent', asyn
 test('51job search reports failure when the button is missing', async () => {
   const input = { value: '', focus() {}, dispatchEvent() {} };
   global.document = {
+    body: { innerText: '输入关键词搜索，寻找匹配人才' },
     querySelector: selector => selector.includes('button.search_button') ? null : input,
     querySelectorAll: selector => selector === 'button' ? [] : [input]
   };
   try {
-    assert.deepEqual(await agent.submit51jobSearch({ evaluate: async (fn, ...args) => fn(...args) }, '软件测试工程师'), {
+    assert.deepEqual(await agent.submit51jobSearch({ waitForSelector: async () => {}, evaluate: async (fn, ...args) => fn(...args) }, '软件测试工程师'), {
       ok: false,
       reason: '没有找到可点击的搜索按钮'
     });
+  } finally {
+    delete global.document;
+  }
+});
+
+test('51job search never reports success while the initial prompt remains', async () => {
+  let clicks = 0;
+  const input = { value: '', focus() {}, dispatchEvent() {} };
+  const button = { innerText: '搜索', disabled: false, click() { clicks++; } };
+  global.document = {
+    body: { innerText: '输入关键词搜索，寻找匹配人才' },
+    querySelector: selector => selector.includes('button.search_button') ? button : input,
+    querySelectorAll: selector => selector.includes('.talent-search-container') ? [] : selector === 'button' ? [button] : [input]
+  };
+  const page = { waitForSelector: async () => {}, evaluate: async (fn, ...args) => fn(...args) };
+  try {
+    const result = await agent.submit51jobSearch(page, '软件测试工程师');
+    assert.equal(result.ok, false);
+    assert.match(result.reason, /检索未生效/);
+    assert.equal(clicks, 3);
   } finally {
     delete global.document;
   }
