@@ -132,11 +132,23 @@ const PLATFORM_CONFIGS = {
 };
 
 function isBrowserStartPage(url) {
-  return !url || url === 'about:blank' || /^(?:edge|chrome):\/\/(?:newtab|new-tab-page)\/?(?:[?#].*)?$/i.test(url);
+  return !url || url === 'about:blank' || /^(?:edge|chrome):\/\/(?:newtab|new-tab-page)\/?(?:[?#].*)?$/i.test(url)
+    || /^https?:\/\/ntp\.msn\.cn\/edge\/ntp(?:[/?#]|$)/i.test(url);
+}
+
+function isPlatformPageUrl(url, cfg) {
+  try {
+    const host = new URL(url).hostname.toLowerCase();
+    const homeHost = new URL(cfg.homeUrl).hostname.toLowerCase();
+    const domain = homeHost.split('.').slice(-2).join('.');
+    return host === domain || host.endsWith(`.${domain}`);
+  } catch (e) {
+    return false;
+  }
 }
 
 async function ensurePlatformPage(page, cfg) {
-  if (!isBrowserStartPage(page.url())) return { ok: true };
+  if (isPlatformPageUrl(page.url(), cfg)) return { ok: true };
   let lastError = '';
   for (const url of [cfg.homeUrl, cfg.loginUrl]) {
     try {
@@ -144,9 +156,9 @@ async function ensurePlatformPage(page, cfg) {
     } catch (error) {
       lastError = error.message;
     }
-    if (!isBrowserStartPage(page.url())) return { ok: true };
+    if (isPlatformPageUrl(page.url(), cfg)) return { ok: true };
   }
-  return { ok: false, reason: lastError || '浏览器仍停留在新标签页' };
+  return { ok: false, reason: lastError || '浏览器仍停留在非招聘网站页面' };
 }
 
 // 跨批次与全局排重缓存
@@ -1096,7 +1108,7 @@ async function scrapePlatform(platformKey, browserPath, targetCount, keywordPlan
   if (!navigation.ok) {
     sendMsg('error', {
       platform: platformKey,
-      message: `【${cfg.name}】招聘网站未能打开，当前仍是浏览器新标签页：${navigation.reason}`
+      message: `【${cfg.name}】招聘网站未能打开：${navigation.reason}`
     });
     return outcome([], '招聘网站未能打开');
   }
@@ -1117,8 +1129,8 @@ async function scrapePlatform(platformKey, browserPath, targetCount, keywordPlan
   const checkAuth = async () => {
     try {
       const curUrl = page.url() || '';
-      if (isBrowserStartPage(curUrl)) {
-        return { logged: false, curUrl, reason: 'blank_url' };
+      if (!isPlatformPageUrl(curUrl, cfg)) {
+        return { logged: false, curUrl, reason: 'wrong_page' };
       }
 
       const domAuth = await page.evaluate((code) => {
@@ -1193,7 +1205,21 @@ async function scrapePlatform(platformKey, browserPath, targetCount, keywordPlan
   });
 
   let authResult = await checkAuth();
-
+  if (!authResult.logged && authResult.reason === 'ok') {
+    await new Promise(r => setTimeout(r, 1500));
+    authResult = await checkAuth();
+  }
+  for (let attempt = 0; attempt < 3 && !authResult.logged && authResult.reason === 'wrong_page'; attempt++) {
+    sendMsg('status', { platform: platformKey, message: `【${cfg.name}】浏览器停留在新标签页，正在重新进入招聘网站（${attempt + 1}/3）...` });
+    const recovery = await ensurePlatformPage(page, cfg);
+    if (!recovery.ok) break;
+    await new Promise(r => setTimeout(r, 1200));
+    authResult = await checkAuth();
+  }
+  if (authResult.reason === 'wrong_page') {
+    sendMsg('error', { platform: platformKey, message: `【${cfg.name}】浏览器仍未进入招聘网站，检索未启动。请查看 Edge 是否停在新标签页。` });
+    return outcome([], '浏览器未进入招聘网站');
+  }
   if (!authResult.logged) {
     await setBrowserWindowState(page, 'normal');
     await page.bringToFront().catch(() => {});
@@ -1208,6 +1234,7 @@ async function scrapePlatform(platformKey, browserPath, targetCount, keywordPlan
     });
 
     const startTime = Date.now();
+    let pageRecoveries = 0;
     while (Date.now() - startTime < 300000) { // 5分钟等待
       await new Promise(r => setTimeout(r, 2000));
       try {
@@ -1218,6 +1245,19 @@ async function scrapePlatform(platformKey, browserPath, targetCount, keywordPlan
       } catch (e) {}
 
       authResult = await checkAuth();
+      if (authResult.reason === 'wrong_page') {
+        if (++pageRecoveries > 3) {
+          sendMsg('error', { platform: platformKey, message: `【${cfg.name}】浏览器反复返回新标签页，已停止当前渠道检索。` });
+          return outcome([], '浏览器反复返回新标签页');
+        }
+        const recovery = await ensurePlatformPage(page, cfg);
+        if (!recovery.ok) {
+          sendMsg('error', { platform: platformKey, message: `【${cfg.name}】重新进入招聘网站失败：${recovery.reason}` });
+          return outcome([], '重新进入招聘网站失败');
+        }
+        await new Promise(r => setTimeout(r, 1200));
+        authResult = await checkAuth();
+      }
       if (authResult.logged) {
         break;
       }
@@ -1937,4 +1977,4 @@ if (require.main === module) {
   });
 }
 
-module.exports = { allocateQuota, smoothScroll, keepPageActiveInBackground, setBrowserWindowState, isBrowserStartPage, ensurePlatformPage, detectCaptcha, extractCandidatesAcrossFrames, selectFreshCandidates, advanceSearchResults, main };
+module.exports = { allocateQuota, smoothScroll, keepPageActiveInBackground, setBrowserWindowState, isBrowserStartPage, isPlatformPageUrl, ensurePlatformPage, detectCaptcha, extractCandidatesAcrossFrames, selectFreshCandidates, advanceSearchResults, main };

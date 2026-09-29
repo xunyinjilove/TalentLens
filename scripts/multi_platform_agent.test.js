@@ -69,6 +69,21 @@ test('Edge new tab navigates to the recruiting site before login is checked', as
   assert.equal(agent.isBrowserStartPage(page.url()), false);
 });
 
+test('Edge MSN start page is not mistaken for a recruiting login page', async () => {
+  let currentUrl = 'https://ntp.msn.cn/edge/ntp?locale=zh-CN';
+  const cfg = { homeUrl: 'https://ehire.51job.com/Revision/talent/search', loginUrl: 'https://ehire.51job.com/MainLogin.aspx' };
+  const visits = [];
+  const page = {
+    url: () => currentUrl,
+    goto: async url => { visits.push(url); currentUrl = url; }
+  };
+  assert.equal(agent.isBrowserStartPage(currentUrl), true);
+  assert.equal(agent.isPlatformPageUrl(currentUrl, cfg), false);
+  assert.deepEqual(await agent.ensurePlatformPage(page, cfg), { ok: true });
+  assert.deepEqual(visits, [cfg.homeUrl]);
+  assert.equal(agent.isPlatformPageUrl(page.url(), cfg), true);
+});
+
 test('captcha detection error is treated as unsafe', async () => {
   const result = await agent.detectCaptcha({ url: () => 'https://example.test', evaluate: async () => { throw Error('context lost'); }, frames: () => [] });
   assert.equal(result.detected, true);
