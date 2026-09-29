@@ -9,10 +9,26 @@ test('quota preserves total and zero weight', () => {
   assert.deepEqual(agent.allocateQuota(10, [{ ratio: 99 }, { ratio: 1 }, { ratio: 0 }]), [10, 0, 0]);
 });
 
-test('scroll sends actual deltaY', async () => {
-  const deltas = [];
-  await agent.smoothScroll({ mouse: { wheel: async arg => deltas.push(arg.deltaY) } }, 450, 80);
-  assert.equal(deltas.reduce((a, b) => a + b, 0), 450);
+test('minimized search scrolls the list without mouse wheel events', async () => {
+  const body = {};
+  const scroller = { parentElement: body, scrollTop: 0, scrollHeight: 2000, clientHeight: 500 };
+  const card = { parentElement: scroller };
+  global.document = { body, querySelector: () => card };
+  const page = {
+    evaluate: async (fn, ...args) => fn(...args),
+    mouse: { wheel: async () => { throw Error('mouse wheel must not be used'); } }
+  };
+  await agent.smoothScroll(page, 450, 80);
+  assert.equal(scroller.scrollTop, 450);
+  delete global.document;
+});
+
+test('background search enables page focus emulation', async () => {
+  const commands = [];
+  const session = { send: async (command, args) => commands.push({ command, args }) };
+  const page = { target: () => ({ createCDPSession: async () => session }) };
+  assert.equal(await agent.keepPageActiveInBackground(page), session);
+  assert.deepEqual(commands, [{ command: 'Emulation.setFocusEmulationEnabled', args: { enabled: true } }]);
 });
 
 test('browser minimization targets a page window and releases its CDP session', async () => {
@@ -129,9 +145,14 @@ test('pagination only advances when candidate page actually changes', async () =
 test('virtual list scroll counts as progress until its real bottom', async () => {
   const body = {};
   const scroller = {
-    parentElement: body, scrollHeight: 2000, clientHeight: 500, scrollTop: 0,
+    parentElement: body, scrollHeight: 2000, clientHeight: 500,
     getBoundingClientRect: () => ({ left: 0, top: 0, width: 800, height: 500 })
   };
+  let scrollTop = 0;
+  Object.defineProperty(scroller, 'scrollTop', {
+    get: () => scrollTop,
+    set: value => { scrollTop = Math.max(0, Math.min(1500, value)); }
+  });
   const card = {
     parentElement: scroller, offsetParent: {}, getClientRects: () => [1],
     querySelector: selector => selector.includes('.firstline .name') ? { textContent: '同一组卡片' } : null,
@@ -145,7 +166,7 @@ test('virtual list scroll counts as progress until its real bottom', async () =>
   };
   const page = {
     frames: () => [page], evaluate: async (fn, ...args) => fn(...args),
-    mouse: { move: async () => {}, wheel: async ({ deltaY }) => { scroller.scrollTop = Math.min(1500, scroller.scrollTop + deltaY); } }
+    mouse: { wheel: async () => { throw Error('mouse wheel must not be used'); } }
   };
   assert.equal(await agent.advanceSearchResults(page), true);
   scroller.scrollTop = 1500;
