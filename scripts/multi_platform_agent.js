@@ -448,6 +448,61 @@ async function setBrowserWindowState(browserOrPage, state = 'minimized') {
   }
 }
 
+// CDP 在已有 Edge 窗口内创建后台标签页；browser.newPage() 会激活窗口并抢走 HR 的焦点。
+async function createBackgroundPage(browser, sourcePage, url) {
+  const session = await sourcePage.target().createCDPSession();
+  let targetId;
+  try {
+    ({ targetId } = await session.send('Target.createTarget', {
+      url: new URL(url, sourcePage.url()).href,
+      background: true
+    }));
+    const target = await browser.waitForTarget(item => item._targetId === targetId, { timeout: 8000 });
+    const page = await target.page();
+    if (!page) throw new Error('后台详情标签页未就绪');
+    return page;
+  } catch (error) {
+    if (targetId) await session.send('Target.closeTarget', { targetId }).catch(() => {});
+    throw error;
+  } finally {
+    await session.detach().catch(() => {});
+  }
+}
+
+// 前程无忧用 window.open 打开详情。仅在本次卡片点击的同步调用中截取 URL，不真正弹出前台标签页。
+async function capture51jobDetailUrl(page, candidate) {
+  const result = await page.evaluate((name, expectedText) => {
+    const cards = Array.from(document.querySelectorAll('.talent-search-container .card'));
+    const sameName = cards.filter(card => {
+      const nameEl = card.querySelector('.firstline .name, span.name, .name');
+      return (nameEl?.innerText || '').trim() === name;
+    });
+    const card = sameName.find(item => (item.innerText || '').trim() === expectedText.trim()) ||
+      (sameName.length === 1 ? sameName[0] : null);
+    if (!card) return { clicked: false, url: '' };
+    const clickTarget = card.querySelector('.firstline .name, span.name, .name') || card;
+    const originalOpen = window.open;
+    let openedUrl = '';
+    try {
+      window.open = function(url) { openedUrl = String(url || ''); return null; };
+      clickTarget.click();
+    } finally {
+      window.open = originalOpen;
+    }
+    return { clicked: true, url: openedUrl };
+  }, candidate.name, candidate.rawCardText || '');
+  if (!result.clicked || !result.url) return { ...result, url: '' };
+  try {
+    const url = new URL(result.url, page.url());
+    if (url.hostname !== 'ehire.51job.com' || !url.pathname.includes('/talent/resume/detail')) {
+      return { clicked: true, url: '' };
+    }
+    return { clicked: true, url: url.href };
+  } catch (error) {
+    return { clicked: true, url: '' };
+  }
+}
+
 // 全渠道安全验证码深度多模态感知函数（覆盖 BOSS直聘、猎聘网、智联招聘、前程无忧）
 async function detectCaptcha(page) {
   try {
@@ -820,27 +875,60 @@ async function enrichCandidatesWithFullDetail(page, browser, candidates, platfor
     let fullDetailText = '';
 
     try {
-      // 1. 若候选人已有独立详情 URL，优先直接开独立标签页后台提取（不干扰主页面列表状态）
+      // 1. 若已有独立详情 URL，用 CDP 后台标签页提取，不激活 Edge 窗口。
       const isDirectDetail = cand.url && (cand.url.includes('id=') || cand.url.includes('seq=') || cand.url.includes('ResumeView') || cand.url.includes('geek'));
       if (isDirectDetail) {
         let directPage = null;
+        let directFocusSession = null;
         try {
-          directPage = await browser.newPage();
-          await directPage.goto(cand.url, { waitUntil: 'domcontentloaded', timeout: 8000 }).catch(() => {});
-          if (!await waitForCaptchaResolved(directPage, platformKey, cfg)) return null;
+          directPage = await createBackgroundPage(browser, page, cand.url);
+          directFocusSession = await keepPageActiveInBackground(directPage);
           await directPage.waitForFunction(
             () => document.body && document.body.innerText.length > 200,
-            { timeout: 3000 }
+            { timeout: 5000 }
           ).catch(() => {});
+          if (!await waitForCaptchaResolved(directPage, platformKey, cfg)) return null;
           fullDetailText = await directPage.evaluate(() => document.body.innerText).catch(() => '');
         } catch (e) {
         } finally {
+          if (directFocusSession) {
+            await directFocusSession.send('Emulation.setFocusEmulationEnabled', { enabled: false }).catch(() => {});
+            await directFocusSession.detach().catch(() => {});
+          }
           if (directPage) await directPage.close().catch(() => {});
         }
       }
 
-      // 2. 若未通过直接 URL 拿到正文，执行主列表卡片拟人点击与抽屉监听
-      if (!fullDetailText || fullDetailText.length < 200) {
+      // 2. 前程无忧卡片会同步调用 window.open；截取详情 URL 后再用后台标签页加载。
+      if (platformKey === '51job' && (!fullDetailText || fullDetailText.length < 200)) {
+        const captured = await capture51jobDetailUrl(page, cand);
+        if (captured.url) {
+          let detailPage = null;
+          let detailFocusSession = null;
+          try {
+            detailPage = await createBackgroundPage(browser, page, captured.url);
+            detailFocusSession = await keepPageActiveInBackground(detailPage);
+            await detailPage.waitForFunction(
+              () => document.body && document.body.innerText.length > 200,
+              { timeout: 5000 }
+            ).catch(() => {});
+            if (!await waitForCaptchaResolved(detailPage, platformKey, cfg)) return null;
+            fullDetailText = await detailPage.evaluate(() => document.body.innerText).catch(() => '');
+            if (fullDetailText.length > 200) cand.url = captured.url;
+          } finally {
+            if (detailFocusSession) {
+              await detailFocusSession.send('Emulation.setFocusEmulationEnabled', { enabled: false }).catch(() => {});
+              await detailFocusSession.detach().catch(() => {});
+            }
+            if (detailPage) await detailPage.close().catch(() => {});
+          }
+        } else {
+          sendMsg('status', { platform: platformKey, message: `【前程无忧】未取得 ${cand.name} 的独立详情地址，保留已核实的列表信息。` });
+        }
+      }
+
+      // 3. 其他平台仍使用卡片点击和抽屉监听。
+      if (platformKey !== '51job' && (!fullDetailText || fullDetailText.length < 200)) {
         let newPagePromise = new Promise(resolve => {
           const handler = async target => {
             try {
@@ -1960,4 +2048,4 @@ if (require.main === module) {
   });
 }
 
-module.exports = { allocateQuota, smoothScroll, keepPageActiveInBackground, setBrowserWindowState, isBrowserStartPage, browserLaunchArgs, closeUnusedStartPages, isPlatformPageUrl, ensurePlatformPage, submit51jobSearch, detectCaptcha, extractCandidatesAcrossFrames, selectFreshCandidates, advanceSearchResults, main };
+module.exports = { allocateQuota, smoothScroll, keepPageActiveInBackground, setBrowserWindowState, createBackgroundPage, capture51jobDetailUrl, isBrowserStartPage, browserLaunchArgs, closeUnusedStartPages, isPlatformPageUrl, ensurePlatformPage, submit51jobSearch, detectCaptcha, extractCandidatesAcrossFrames, selectFreshCandidates, advanceSearchResults, main };

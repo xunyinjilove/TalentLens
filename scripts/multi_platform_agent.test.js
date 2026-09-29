@@ -55,6 +55,59 @@ test('browser minimization targets a page window and releases its CDP session', 
   assert.equal(detached, true);
 });
 
+test('detail tab is created in the background without activating the browser', async () => {
+  const commands = [];
+  let detached = false;
+  const detailPage = { url: () => 'https://ehire.51job.com/Revision/talent/resume/detail?resumeId=42' };
+  const session = {
+    send: async (command, args) => {
+      commands.push({ command, args });
+      return { targetId: 'detail-target' };
+    },
+    detach: async () => { detached = true; }
+  };
+  const sourcePage = {
+    url: () => 'https://ehire.51job.com/Revision/talent/search',
+    target: () => ({ createCDPSession: async () => session })
+  };
+  const browser = {
+    newPage: async () => { throw Error('foreground newPage must not be used'); },
+    waitForTarget: async predicate => {
+      const target = { _targetId: 'detail-target', page: async () => detailPage };
+      assert.equal(predicate(target), true);
+      return target;
+    }
+  };
+  assert.equal(await agent.createBackgroundPage(browser, sourcePage, '//ehire.51job.com/Revision/talent/resume/detail?resumeId=42'), detailPage);
+  assert.deepEqual(commands[0], {
+    command: 'Target.createTarget',
+    args: { url: detailPage.url(), background: true }
+  });
+  assert.equal(detached, true);
+});
+
+test('51job captures the exact candidate detail URL without opening a foreground tab', async () => {
+  const originalOpen = () => { throw Error('foreground popup must not open'); };
+  global.window = { open: originalOpen };
+  const wrongName = { innerText: '陈先生', click: () => global.window.open('//ehire.51job.com/Revision/talent/resume/detail?resumeId=1', '_blank') };
+  const rightName = { innerText: '陈先生', click: () => global.window.open('//ehire.51job.com/Revision/talent/resume/detail?resumeId=2', '_blank') };
+  const wrongCard = { innerText: '陈先生\n8年经验', querySelector: () => wrongName };
+  const rightCard = { innerText: '陈先生\n12年经验', querySelector: () => rightName };
+  global.document = { querySelectorAll: () => [wrongCard, rightCard] };
+  const page = {
+    url: () => 'https://ehire.51job.com/Revision/talent/search',
+    evaluate: async (fn, ...args) => fn(...args)
+  };
+  try {
+    const result = await agent.capture51jobDetailUrl(page, { name: '陈先生', rawCardText: rightCard.innerText });
+    assert.equal(result.url, 'https://ehire.51job.com/Revision/talent/resume/detail?resumeId=2');
+    assert.equal(global.window.open, originalOpen);
+  } finally {
+    delete global.window;
+    delete global.document;
+  }
+});
+
 test('Edge new tab navigates to the recruiting site before login is checked', async () => {
   let currentUrl = 'edge://newtab/';
   const visits = [];
