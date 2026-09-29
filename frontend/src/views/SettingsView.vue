@@ -333,7 +333,12 @@ import ProviderGuide from '../components/ProviderGuide.vue'
 import JobPresetPicker from '../components/JobPresetPicker.vue'
 import TagInput from '../components/TagInput.vue'
 import { providers, getProviderById, getRecommendedProvider, type Provider } from '../data/providers'
-import { saveCustomJobPreset, type JobPreset } from '../data/jobPresets'
+import {
+  saveCustomJobPreset,
+  getMergedPreset,
+  savePresetCustomization,
+  type JobPreset
+} from '../data/jobPresets'
 
 const router = useRouter()
 const { t } = useI18n()
@@ -429,13 +434,14 @@ function handleProviderChange(providerId: string) {
 function handlePresetSelect(preset: JobPreset | null) {
   if (preset) {
     selectedPresetId.value = preset.id
-    jobForm.title = preset.name
-    jobForm.requiredSkills = [...preset.requiredSkills]
-    jobForm.experienceYears = preset.experienceYears
-    jobForm.educationLevel = preset.educationLevel
-    jobForm.jobDescription = preset.jobDescription || preset.description || ''
-    jobForm.redLines = preset.redLines ? [...preset.redLines] : []
-    jobForm.bonusPoints = preset.bonusPoints ? [...preset.bonusPoints] : []
+    const merged = getMergedPreset(preset)
+    jobForm.title = merged.name
+    jobForm.requiredSkills = [...merged.requiredSkills]
+    jobForm.experienceYears = merged.experienceYears
+    jobForm.educationLevel = merged.educationLevel
+    jobForm.jobDescription = merged.jobDescription || merged.description || ''
+    jobForm.redLines = merged.redLines ? [...merged.redLines] : []
+    jobForm.bonusPoints = merged.bonusPoints ? [...merged.bonusPoints] : []
   } else {
     selectedPresetId.value = 'custom'
   }
@@ -509,6 +515,27 @@ function saveSettings() {
   }
   try {
     localStorage.setItem('goresume_settings', JSON.stringify(settings))
+
+    // 核心持久化：同时以当前选中的模板 ID 或岗位标题为 Key，持久化保存到模板定制库中
+    const currentKey = selectedPresetId.value || jobForm.title
+    if (currentKey && currentKey !== 'custom') {
+      savePresetCustomization(currentKey, {
+        title: jobForm.title,
+        requiredSkills: [...jobForm.requiredSkills],
+        experienceYears: jobForm.experienceYears,
+        educationLevel: jobForm.educationLevel,
+        jobDescription: jobForm.jobDescription,
+        redLines: [...(jobForm.redLines || [])],
+        bonusPoints: [...(jobForm.bonusPoints || [])]
+      })
+      if (jobForm.title && jobForm.title !== currentKey) {
+        savePresetCustomization(jobForm.title, {
+          redLines: [...(jobForm.redLines || [])],
+          bonusPoints: [...(jobForm.bonusPoints || [])]
+        })
+      }
+    }
+
     ElMessage.success(t('settings.saved'))
   } catch (e) {
     ElMessage.error('保存失败')

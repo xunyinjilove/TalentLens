@@ -10,12 +10,14 @@ export const LOCALE_OPTIONS = [
   { value: 'en-US', label: 'English', flag: '🇺🇸' }
 ]
 
+type LocaleCode = 'zh-CN' | 'zh-TW' | 'en-US'
+
 // 获取默认语言
-function getDefaultLocale(): string {
+function getDefaultLocale(): LocaleCode {
   // 优先从 localStorage 读取
   const saved = localStorage.getItem('goresume_locale')
   if (saved && LOCALE_OPTIONS.some(opt => opt.value === saved)) {
-    return saved
+    return saved as LocaleCode
   }
   
   // 其次根据浏览器语言判断
@@ -50,7 +52,7 @@ const i18n = createI18n({
 })
 
 // 切换语言函数
-export function setLocale(locale: string) {
+export function setLocale(locale: LocaleCode) {
   if (LOCALE_OPTIONS.some(opt => opt.value === locale)) {
     i18n.global.locale.value = locale
     localStorage.setItem('goresume_locale', locale)

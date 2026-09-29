@@ -23,8 +23,14 @@
         <span v-if="resume.analysis?.redLineViolations && resume.analysis.redLineViolations.length > 0" class="redline-pill" title="触碰用人部门一票否决红线，已直接淘汰">
           🚫 触碰红线
         </span>
+        <span v-else-if="resume.analysis?.redLineStatus === 'pending'" class="redline-pill" title="红线材料不足，需人工核实">
+          ❓ 红线待核实
+        </span>
         <span v-else-if="resume.analysis?.bonusMatches && resume.analysis.bonusMatches.length > 0" class="bonus-pill" title="命中用人部门优先加分项">
           ⭐ 加分达成
+        </span>
+        <span v-if="(resume as any).source_keyword" class="source-kw-badge" :title="'派生检索词: ' + (resume as any).source_keyword">
+          {{ (resume as any).source_keyword }}
         </span>
       </div>
 
@@ -422,6 +428,21 @@ $radius-md: 10px;
       padding: 1px 6px;
       border-radius: 10px;
       flex-shrink: 0;
+    }
+
+    .source-kw-badge {
+      font-size: 10px;
+      font-weight: 600;
+      color: #0369a1;
+      background: #e0f2fe;
+      border: 1px solid #bae6fd;
+      padding: 1px 6px;
+      border-radius: 10px;
+      flex-shrink: 0;
+      max-width: 90px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
     }
   }
 

@@ -172,6 +172,9 @@
                     <span v-if="resumeStore.selectedResume.analysis.currentRole">{{ resumeStore.selectedResume.analysis.currentRole }}</span>
                     <span v-if="resumeStore.selectedResume.analysis.workYears">{{ resumeStore.selectedResume.analysis.workYears }}经验</span>
                     <span v-if="resumeStore.selectedResume.analysis.education">{{ resumeStore.selectedResume.analysis.education }}</span>
+                    <span v-if="resumeStore.selectedResume.source_keyword" class="candidate-source-kw-badge" title="配额调度派生词条">
+                      <el-icon><Filter /></el-icon> 来源词: {{ resumeStore.selectedResume.source_keyword }}
+                    </span>
                     <span v-if="resumeStore.selectedResume.email" class="candidate-email-badge" title="点击复制候选人联系邮箱" @click="copyCandidateEmail">
                       <el-icon><Message /></el-icon> {{ resumeStore.selectedResume.email }}
                       <el-icon class="copy-icon"><DocumentCopy /></el-icon>
@@ -190,22 +193,25 @@
                 </div>
 
                 <!-- 🚫 触碰用人部门一票否决红线警告 -->
-                <div v-if="resumeStore.selectedResume.analysis?.redLineViolations && resumeStore.selectedResume.analysis.redLineViolations.length > 0" class="redline-alert-card">
+                 <div v-if="resumeStore.selectedResume.analysis?.redLineChecks?.length" class="redline-alert-card">
                   <div class="redline-alert-header">
                     <div class="redline-title-group">
                       <div class="redline-badge-icon">
                         <el-icon><CircleClose /></el-icon>
                       </div>
                       <div class="redline-title-text">
-                        <span class="redline-title">🚫 触碰用人部门一票否决红线 (Deal Breakers)</span>
-                        <span class="redline-sub">该候选人违反岗位硬性考核红线，已被系统一票否决淘汰，综合评分已强制降级锁定（≤50分）</span>
+                         <span class="redline-title">岗位红线逐项核验：{{ resumeStore.selectedResume.analysis.redLineStatus === 'failed' ? '不满足' : resumeStore.selectedResume.analysis.redLineStatus === 'pending' ? '待核实' : '满足' }}</span>
+                         <span class="redline-sub">待核实项目须人工确认；明确不满足时不推荐且分数低于50。</span>
                       </div>
                     </div>
                   </div>
                   <ul class="redline-violations-list">
-                    <li v-for="(violation, vIdx) in resumeStore.selectedResume.analysis.redLineViolations" :key="vIdx" class="redline-violation-item">
+                     <li v-for="(check, vIdx) in resumeStore.selectedResume.analysis.redLineChecks" :key="vIdx" class="redline-violation-item">
                       <el-icon><Warning /></el-icon>
-                      <span>{{ violation }}</span>
+                      <span>{{ check.status === 'met' ? '满足' : check.status === 'violated' ? '不满足' : '待核实' }} · {{ check.criterion }}{{ check.evidence ? `（依据：${check.evidence}）` : '（简历未给出可核对依据）' }}</span>
+                      <el-button size="small" text type="success" @click="handleReviewRedLine(check.criterion, 'met')">确认满足</el-button>
+                      <el-button size="small" text type="danger" @click="handleReviewRedLine(check.criterion, 'violated')">确认不满足</el-button>
+                      <el-button size="small" text @click="handleReviewRedLine(check.criterion, 'unknown')">待核实</el-button>
                     </li>
                   </ul>
                 </div>
@@ -484,6 +490,7 @@
                 <div v-if="resumeStore.selectedResume.analysis.interviewQA && resumeStore.selectedResume.analysis.interviewQA.length > 0" class="qa-section">
                   <div class="qa-section-head">
                     <h4><el-icon><QuestionFilled /></el-icon> AI 预面试提纲与参考回答 ({{ resumeStore.selectedResume.analysis.interviewQA.length }}题)</h4>
+                    <el-button size="small" type="primary" @click="showInterviewDialog = true">开始 / 继续 AI 文字初面</el-button>
                     <button class="copy-qa-btn" @click="handleCopyAllQA" title="一键复制全套提纲">
                       <el-icon><DocumentCopy /></el-icon> 复制全套提纲
                     </button>
@@ -609,11 +616,13 @@
       :project-id="projectId"
       :project-name="projectName"
       :job-title="projectStore.currentProject?.job_config?.title || jobTitle"
+      :job-description="projectStore.currentProject?.job_config?.description || projectStore.currentJobConfig?.description"
       :exp-years="projectStore.currentProject?.job_config?.experience_years"
       :edu-level="projectStore.currentProject?.job_config?.education_level"
       :is-continue="bossDialogContinueMode"
       @refresh="handleRefreshProject"
     />
+    <AIInterviewDialog v-model="showInterviewDialog" :resume-id="resumeStore.selectedResume?.id || ''" />
 
     <!-- 业务主管极简推介卡弹窗 -->
     <el-dialog
@@ -669,9 +678,9 @@ import {
   CircleCheck, Warning, ChatLineSquare, Clock, Loading, CircleClose,
   RefreshRight, Download, Tickets, QuestionFilled, DocumentCopy, InfoFilled, Search,
   ChatDotRound, DocumentAdd, Connection, CloseBold, Paperclip, Compass, Check, Message,
-  Link, TopRight, Plus, Share, Aim
+  Link, TopRight, Plus, Share, Aim, Filter
 } from '@element-plus/icons-vue'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import TitleBar from '../components/TitleBar.vue'
 import DropZone from '../components/DropZone.vue'
 import ResumeCard from '../components/ResumeCard.vue'
@@ -679,6 +688,7 @@ import LanguageSwitcher from '../components/LanguageSwitcher.vue'
 import AIConfigGuide from '../components/AIConfigGuide.vue'
 import DevPanel from '../components/DevPanel.vue'
 import BossSearchDialog from '../components/BossSearchDialog.vue'
+import AIInterviewDialog from '../components/AIInterviewDialog.vue'
 import { useResumeStore } from '../composables/useResumeStore'
 import { useProjectStore } from '../composables/useProjectStore'
 
@@ -698,6 +708,25 @@ const contentLoading = ref(false)
 const jobTitle = ref('高级Go开发工程师')
 const showConfigGuide = ref(false)
 const showBossDialog = ref(false)
+const showInterviewDialog = ref(false)
+
+async function handleReviewRedLine(criterion: string, status: 'met' | 'violated' | 'unknown') {
+  const resume = resumeStore.selectedResume
+  if (!resume) return
+  let evidence = ''
+  if (status !== 'unknown') {
+    try {
+      const result = await ElMessageBox.prompt(`请输入核实「${criterion}」的简历原文或初面回答依据`, 'HR 红线复核', { inputValidator: value => !!value?.trim() || '请填写核实依据' })
+      evidence = result.value.trim()
+    } catch { return }
+  }
+  try {
+    const App = await import('../../wailsjs/go/main/App')
+    await App.SetReviewedRedLine(resume.id, criterion, status, evidence)
+    if (projectId.value) await resumeStore.loadProjectResumes(projectId.value)
+    ElMessage.success('红线核实结果已保存')
+  } catch (err: any) { ElMessage.error(`保存红线复核失败：${err.message || err}`) }
+}
 const bossDialogContinueMode = ref(false) // true=继续寻才模式（跳过已有候选人）
 const showPitchDialog = ref(false) // 业务主管推介卡弹窗
 const currentPitchText = ref('')   // 当前推介卡文案
@@ -2405,6 +2434,19 @@ onUnmounted(() => {
       margin-left: 4px;
     }
   }
+}
+
+.candidate-source-kw-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: #f0fdf4;
+  color: #166534;
+  border: 1px solid #bbf7d0;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 11.5px;
+  font-weight: 600;
 }
 
 .candidate-email-badge {

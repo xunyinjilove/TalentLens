@@ -30,7 +30,9 @@ const techJobs: JobPreset[] = [
     preferredSkills: ['Node.js', 'Webpack', 'Vite', 'GraphQL', '性能优化'],
     experienceYears: 5,
     educationLevel: '本科',
-    description: '负责公司核心产品的前端架构设计与开发'
+    description: '负责公司核心产品的前端架构设计与开发',
+    redLines: ['学历统招全日制本科及以上', '严禁纯外包驻场派遣经历', '工作年限不足5年硬卡'],
+    bonusPoints: ['主导过大型前端工程化重构与性能优化', '熟悉Node.js微服务或全栈全流程架构', '有知名开源项目贡献']
   },
   {
     id: 'frontend-junior',
@@ -51,7 +53,9 @@ const techJobs: JobPreset[] = [
     preferredSkills: ['Kubernetes', 'gRPC', 'Kafka', '微服务', '分布式系统'],
     experienceYears: 5,
     educationLevel: '本科',
-    description: '负责后端服务架构设计与核心功能开发'
+    description: '负责后端服务架构设计与核心功能开发',
+    redLines: ['统招全日制本科及以上', '严禁纯外包驻场派遣经历', '无高并发高可用生产项目落地经验'],
+    bonusPoints: ['知名大厂/独角兽背景', '主导过微服务架构重构或自研网关', '具备大型系统高可用高并发实战经验']
   },
   {
     id: 'backend-java',
@@ -371,7 +375,9 @@ const medicalJobs: JobPreset[] = [
     experienceYears: 3,
     educationLevel: '本科',
     description: '负责体外诊断试剂临床试验全流程方案设计、质量管理与药监申报',
-    jobDescription: '岗位职责：\n1. 制定项目管理计划，按计划完成所负责的项目启动、开展及结束工作，确保通过药监部门核查；\n2. 根据项目研发资料、指导原则、行业标准等要求，设计临床试验方案；\n3. 对所负责的临床试验项目进行全面的质量控制与管理，确保所有试验严格按照临床试验方案、标准操作程序和相关法规进行；\n4. 根据临床试验相关规范要求，完成临床研究的各阶段报批文件包括但不限于临床报告；\n5. 作为公司对外代表，建立并保持与机构的良好关系；\n6. 领导交办的其他工作。\n\n任职要求：\n1. 生物学、检验学、医学或药学等相关专业背景，本科及以上学历；\n2. 高度责任心和抗压能力，可适应出差；\n3. 优秀的沟通表达能力、发现和解决问题的能力。'
+    jobDescription: '岗位职责：\n1. 制定项目管理计划，按计划完成所负责的项目启动、开展及结束工作，确保通过药监部门核查；\n2. 根据项目研发资料、指导原则、行业标准等要求，设计临床试验方案；\n3. 对所负责的临床试验项目进行全面的质量控制与管理，确保所有试验严格按照临床试验方案、标准操作程序和相关法规进行；\n4. 根据临床试验相关规范要求，完成临床研究的各阶段报批文件包括但不限于临床报告；\n5. 作为公司对外代表，建立并保持与机构的良好关系；\n6. 领导交办的其他工作。\n\n任职要求：\n1. 生物学、检验学、医学或药学等相关专业背景，本科及以上学历；\n2. 高度责任心和抗压能力，可适应出差；\n3. 优秀的沟通表达能力、发现和解决问题的能力。',
+    redLines: ['拒绝频繁跳槽（近3年换工作>3次）', '学历硬卡统招全日制本科及以上', '严禁无临床试验项目落地经验'],
+    bonusPoints: ['有知名三甲医院或上市药企背书', '主导过国家级I/II/III期临床试验', '具备PMP项目管理认证']
   },
   {
     id: 'ivd-intl-sales',
@@ -383,7 +389,9 @@ const medicalJobs: JobPreset[] = [
     experienceYears: 2,
     educationLevel: '本科',
     description: '负责公司体外诊断(IVD)产品在海外市场的销售与客户开拓',
-    jobDescription: '岗位职责：\n1. 负责公司体外诊断产品在海外市场的销售；\n2. 开拓海外客户；\n3. 负责产品推广、信息收集、工作汇报。\n\n任职资格：\n1. 本科及以上学历，检验、生物等相关专业；\n2. 二年以上相关工作经验；\n3. 英语沟通能力好；\n4. 好学、勤奋、踏实、稳重；\n5. 可以驻点在上海或者深圳。\n\n薪酬福利：基本工资+销售提成+各类福利+各类补贴+年终奖'
+    jobDescription: '岗位职责：\n1. 负责公司体外诊断产品在海外市场的销售；\n2. 开拓海外客户；\n3. 负责产品推广、信息收集、工作汇报。\n\n任职资格：\n1. 本科及以上学历，检验、生物等相关专业；\n2. 二年以上相关工作经验；\n3. 英语沟通能力好；\n4. 好学、勤奋、踏实、稳重；\n5. 可以驻点在上海或者深圳。\n\n薪酬福利：基本工资+销售提成+各类福利+各类补贴+年终奖',
+    redLines: ['英语听说读写不流利者硬卡', '无IVD或医疗器械外贸经历者不考虑'],
+    bonusPoints: ['具备独立开发海外经销商及医院终端实绩', '常驻海外或拥有多国本地化客户资源']
   },
   {
     id: 'ivd-rd-pm-autoimmunity',
@@ -395,7 +403,9 @@ const medicalJobs: JobPreset[] = [
     experienceYears: 3,
     educationLevel: '本科',
     description: '负责自身免疫诊断试剂的研发、优化与上市前后技术支持',
-    jobDescription: '工作内容：\n1. 负责自身免疫诊断试剂的研发工作，包括产品上市前后的开发、优化、改进；\n2. 根据市场反馈与要求，不断调整优化产品质量与性能；\n3. 密切关注市场需求与技术动态，设计产品优化改进方案，完成对现有产品的技术改进。\n\n任职要求：\n1. 生物学、医学、检验学专业毕业，本科以上学历，有3年自身免疫诊断试剂研发相关经验、具备项目管理经验；\n2. 热爱实验室工作，动手能力强，工作有条理；\n3. 有良好的科学文献阅读能力和较强的文字表达能力。'
+    jobDescription: '工作内容：\n1. 负责自身免疫诊断试剂的研发工作，包括产品上市前后的开发、优化、改进；\n2. 根据市场反馈与要求，不断调整优化产品质量与性能；\n3. 密切关注市场需求与技术动态，设计产品优化改进方案，完成对现有产品的技术改进。\n\n任职要求：\n1. 生物学、医学、检验学专业毕业，本科以上学历，有3年自身免疫诊断试剂研发相关经验、具备项目管理经验；\n2. 热爱实验室工作，动手能力强，工作有条理；\n3. 有良好的科学文献阅读能力和较强的文字表达能力。',
+    redLines: ['非医学/检验/生物相关专业硬卡', '无体外诊断试剂研发实验室经验者淘汰'],
+    bonusPoints: ['拥有自身免疫类化学发光产品完整拿证经验', '具备发明专利或国家级课题主持经历']
   },
   {
     id: 'ivd-scra',
@@ -407,7 +417,9 @@ const medicalJobs: JobPreset[] = [
     experienceYears: 3,
     educationLevel: '本科',
     description: '负责体外诊断试剂临床验证全流程监查、质量跟进与机构协调',
-    jobDescription: '岗位职责：\n1. 协调解决临床试验过程中出现的问题，协助处理临床数据；\n2. 制定监查计划，制作监查报告，确保临床研究按进度完成；\n3. 根据临床试验要求，及时回收、录入数据；\n4. 负责临床研究质量、研究进度的监查及临床试验工作的协调等；\n5. 领导交办的其他工作。\n\n任职要求：\n1. 生物、药学、医学等相关专业，本科以上学历；有体外诊断试剂临床验证监查实习经验者优先；\n2. 有较强的沟通表达能力，能经常出差；\n3. 诚恳踏实、敬业进取。'
+    jobDescription: '岗位职责：\n1. 协调解决临床试验过程中出现的问题，协助处理临床数据；\n2. 制定监查计划，制作监查报告，确保临床研究按进度完成；\n3. 根据临床试验要求，及时回收、录入数据；\n4. 负责临床研究质量、研究进度的监查及临床试验工作的协调等；\n5. 领导交办的其他工作。\n\n任职要求：\n1. 生物、药学、医学等相关专业，本科以上学历；有体外诊断试剂临床验证监查实习经验者优先；\n2. 有较强的沟通表达能力，能经常出差；\n3. 诚恳踏实、敬业进取。',
+    redLines: ['统招专科及以下学历硬卡', '不能适应经常性出差者淘汰'],
+    bonusPoints: ['具备GCP培训证书且有知名药企/CRO背景', '有完整化学发光试剂临床验证跟进经验']
   },
   {
     id: 'ivd-app-specialist',
@@ -558,21 +570,70 @@ export function deleteCustomJobPreset(presetId: string): void {
   localStorage.setItem(CUSTOM_PRESETS_KEY, JSON.stringify(list))
 }
 
-// 获取所有岗位（包含系统预设 + 自定义）
+// 用户针对岗位模板保存的定制化配置键名（保存用户保存的红线机制、加分项及详情）
+const PRESET_CUSTOMIZATIONS_KEY = 'talentlens_preset_customizations'
+
+// 获取所有岗位模板的用户个性化定制配置（红线、加分项、技能、要求详情等）
+export function getAllPresetCustomizations(): Record<string, Partial<JobPreset>> {
+  try {
+    const raw = localStorage.getItem(PRESET_CUSTOMIZATIONS_KEY)
+    if (!raw) return {}
+    return JSON.parse(raw) || {}
+  } catch {
+    return {}
+  }
+}
+
+// 获取某个特定岗位模板的用户个性化定制配置
+export function getPresetCustomization(presetIdOrName: string): Partial<JobPreset> | undefined {
+  if (!presetIdOrName) return undefined
+  const all = getAllPresetCustomizations()
+  return all[presetIdOrName]
+}
+
+// 保存某个岗位模板的用户个性化配置（永久记住用户保存的红线机制和加分项）
+export function savePresetCustomization(presetIdOrName: string, customConfig: Partial<JobPreset>): void {
+  if (!presetIdOrName) return
+  const all = getAllPresetCustomizations()
+  all[presetIdOrName] = {
+    ...(all[presetIdOrName] || {}),
+    ...customConfig
+  }
+  try {
+    localStorage.setItem(PRESET_CUSTOMIZATIONS_KEY, JSON.stringify(all))
+  } catch (e) {}
+}
+
+// 合并用户针对该模板已保存的个性化配置（红线、加分项等）
+export function getMergedPreset(preset: JobPreset): JobPreset {
+  if (!preset) return preset
+  const custom = getPresetCustomization(preset.id) || getPresetCustomization(preset.name)
+  if (!custom) return preset
+  return {
+    ...preset,
+    ...custom,
+    requiredSkills: custom.requiredSkills ? [...custom.requiredSkills] : [...preset.requiredSkills],
+    redLines: custom.redLines ? [...custom.redLines] : (preset.redLines ? [...preset.redLines] : []),
+    bonusPoints: custom.bonusPoints ? [...custom.bonusPoints] : (preset.bonusPoints ? [...preset.bonusPoints] : [])
+  }
+}
+
+// 获取所有岗位（包含系统预设 + 自定义，并自动融入用户已保存的定制红线）
 export function getAllPresets(): JobPreset[] {
-  return [...getCustomJobPresets(), ...jobCategories.flatMap(cat => cat.presets)]
+  return [...getCustomJobPresets(), ...jobCategories.flatMap(cat => cat.presets)].map(p => getMergedPreset(p))
 }
 
 // 根据ID获取岗位
 export function getPresetById(id: string): JobPreset | undefined {
-  return getAllPresets().find(p => p.id === id)
+  const preset = getAllPresets().find(p => p.id === id)
+  return preset ? getMergedPreset(preset) : undefined
 }
 
 // 根据分类获取岗位
 export function getPresetsByCategory(category: string): JobPreset[] {
   if (category === 'custom') {
-    return getCustomJobPresets()
+    return getCustomJobPresets().map(p => getMergedPreset(p))
   }
   const cat = jobCategories.find(c => c.id === category)
-  return cat?.presets || []
+  return (cat?.presets || []).map(p => getMergedPreset(p))
 }

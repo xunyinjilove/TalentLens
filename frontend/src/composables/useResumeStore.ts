@@ -38,6 +38,7 @@ export interface Resume {
   content?: string
   url?: string   // 在线候选人主页 URL（矩阵寻才抓取时填充）
   email?: string // 候选人邮箱
+  source_keyword?: string // 矩阵寻才分流词
   status: 'pending' | 'analyzing' | 'done' | 'error'
   score?: number
   initial_score?: number
@@ -75,6 +76,10 @@ export interface Resume {
       advise_questions?: string[]
     }
     redLineViolations?: string[]
+    redLineChecks?: Array<{ criterion: string; status: 'met' | 'violated' | 'unknown'; evidence: string }>
+    redLineStatus?: 'passed' | 'failed' | 'pending' | 'not_configured'
+    coreMatch?: number
+    bonusMatch?: number
     bonusMatches?: string[]
     interviewSuggestions: string[]
     interviewQA?: Array<{ category: string; question: string; reference_answer: string }>
@@ -230,6 +235,10 @@ export const useResumeStore = defineStore('resume', () => {
               managerPitch,
               water_check: waterCheck,
               redLineViolations: a.red_line_violations || [],
+              redLineChecks: a.red_line_checks || [],
+              redLineStatus: a.red_line_status || 'not_configured',
+              coreMatch: a.core_match,
+              bonusMatch: a.bonus_match,
               bonusMatches: a.bonus_matches || [],
               interviewSuggestions: a.interview_suggestions || [],
               interviewQA: a.interview_qa || [],
@@ -696,6 +705,10 @@ export const useResumeStore = defineStore('resume', () => {
           managerPitch: a.manager_pitch || '',
           water_check: a.water_check || undefined,
           redLineViolations: a.red_line_violations || [],
+          redLineChecks: a.red_line_checks || [],
+          redLineStatus: a.red_line_status || 'not_configured',
+          coreMatch: a.core_match,
+          bonusMatch: a.bonus_match,
           bonusMatches: a.bonus_matches || [],
           interviewSuggestions: a.interview_suggestions || [],
           interviewQA: a.interview_qa || [],
