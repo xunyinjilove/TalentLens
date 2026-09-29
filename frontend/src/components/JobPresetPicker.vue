@@ -81,6 +81,7 @@ import {
   jobCategories,
   getCustomJobPresets,
   deleteCustomJobPreset,
+  getMergedPreset,
   type JobPreset,
   type JobCategory
 } from '../data/jobPresets'
@@ -116,15 +117,18 @@ const displayCategories = computed<JobCategory[]>(() => {
 })
 
 const currentPresets = computed(() => {
+  let list: JobPreset[] = []
   if (activeCategory.value === 'custom') {
-    return customPresets.value
+    list = customPresets.value
+  } else {
+    const category = jobCategories.find(c => c.id === activeCategory.value)
+    list = category?.presets || []
   }
-  const category = jobCategories.find(c => c.id === activeCategory.value)
-  return category?.presets || []
+  return list.map(p => getMergedPreset(p))
 })
 
 function selectPreset(preset: JobPreset) {
-  emit('select', preset)
+  emit('select', getMergedPreset(preset))
 }
 
 function selectCustom() {

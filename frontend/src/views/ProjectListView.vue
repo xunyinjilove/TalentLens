@@ -21,7 +21,14 @@
             <span class="section-subtitle">{{ $t('project.jobPanelDesc') }}</span>
           </div>
           <div class="section-actions">
-            <el-button size="small" :icon="showJobDetails ? ArrowUp : ArrowDown" @click="showJobDetails = !showJobDetails" round>
+            <el-button
+              type="primary"
+              size="small"
+              class="btn-toggle-config"
+              :icon="showJobDetails ? ArrowUp : ArrowDown"
+              @click="showJobDetails = !showJobDetails"
+              round
+            >
               {{ showJobDetails ? '收起配置详情' : '查看/编辑岗位要求' }}
             </el-button>
             <el-button size="small" type="primary" plain @click="router.push('/settings')" round>
@@ -102,8 +109,8 @@
           </div>
         </div>
 
-        <!-- 展开的岗位职责与要求详情抽屉/卡片 -->
-        <el-collapse-transition>
+        <!-- 展开的岗位职责与要求详情抽屉/卡片 (GPU加速极速展开，0卡顿) -->
+        <Transition name="panel-expand">
           <div v-show="showJobDetails" class="job-details-expand">
             <div class="expand-grid">
               <div class="expand-col">
@@ -198,7 +205,7 @@
               </el-button>
             </div>
           </div>
-        </el-collapse-transition>
+        </Transition>
       </section>
 
       <!-- 下方：招聘项目列表区域 -->
@@ -373,7 +380,12 @@ import DevPanel from '../components/DevPanel.vue'
 import JobPresetPicker from '../components/JobPresetPicker.vue'
 import TagInput from '../components/TagInput.vue'
 import { useProjectStore } from '../composables/useProjectStore'
-import { saveCustomJobPreset, type JobPreset } from '../data/jobPresets'
+import {
+  saveCustomJobPreset,
+  getMergedPreset,
+  savePresetCustomization,
+  type JobPreset
+} from '../data/jobPresets'
 
 const router = useRouter()
 const { t } = useI18n()
@@ -477,7 +489,7 @@ function loadJobConfigFromStorage() {
   }
 }
 
-// 保存当前岗位配置到 LocalStorage
+// 保存当前岗位配置到 LocalStorage 及对应模板定制库中
 function saveJobConfigToStorage(showMessage = false) {
   try {
     const saved = localStorage.getItem('goresume_settings')
@@ -495,8 +507,29 @@ function saveJobConfigToStorage(showMessage = false) {
       bonusPoints: [...(currentJobConfig.bonusPoints || [])]
     }
     localStorage.setItem('goresume_settings', JSON.stringify(s))
+
+    // 核心持久化：同时以当前选中的模板 ID 或岗位标题为 Key，持久化保存到模板定制库中，绝不丢失！
+    const currentKey = selectedPresetId.value || currentJobConfig.title
+    if (currentKey && currentKey !== 'custom') {
+      savePresetCustomization(currentKey, {
+        title: currentJobConfig.title,
+        requiredSkills: [...currentJobConfig.requiredSkills],
+        experienceYears: currentJobConfig.experienceYears,
+        educationLevel: currentJobConfig.educationLevel,
+        jobDescription: currentJobConfig.jobDescription,
+        redLines: [...(currentJobConfig.redLines || [])],
+        bonusPoints: [...(currentJobConfig.bonusPoints || [])]
+      })
+      if (currentJobConfig.title && currentJobConfig.title !== currentKey) {
+        savePresetCustomization(currentJobConfig.title, {
+          redLines: [...(currentJobConfig.redLines || [])],
+          bonusPoints: [...(currentJobConfig.bonusPoints || [])]
+        })
+      }
+    }
+
     if (showMessage) {
-      ElMessage.success('岗位配置已保存并在新建项目中生效')
+      ElMessage.success('岗位配置与红线机制已保存并在新建项目中生效')
     }
   } catch (e) {
     if (showMessage) {
@@ -509,15 +542,19 @@ function saveJobConfigToStorage(showMessage = false) {
 function handlePresetSelect(preset: JobPreset | null) {
   if (preset) {
     selectedPresetId.value = preset.id
-    currentJobConfig.title = preset.name
-    currentJobConfig.requiredSkills = [...preset.requiredSkills]
-    currentJobConfig.experienceYears = preset.experienceYears
-    currentJobConfig.educationLevel = preset.educationLevel
-    currentJobConfig.jobDescription = preset.jobDescription || preset.description || ''
-    currentJobConfig.redLines = preset.redLines ? [...preset.redLines] : []
-    currentJobConfig.bonusPoints = preset.bonusPoints ? [...preset.bonusPoints] : []
+    // 自动融入用户已为该模板保存的个性化配置（包含红线与加分项！）
+    const merged = getMergedPreset(preset)
+    currentJobConfig.title = merged.name
+    currentJobConfig.requiredSkills = [...merged.requiredSkills]
+    currentJobConfig.experienceYears = merged.experienceYears
+    currentJobConfig.educationLevel = merged.educationLevel
+    currentJobConfig.jobDescription = merged.jobDescription || merged.description || ''
+    currentJobConfig.redLines = merged.redLines ? [...merged.redLines] : []
+    currentJobConfig.bonusPoints = merged.bonusPoints ? [...merged.bonusPoints] : []
+
+    // 同步到当前的全局设置，但保留各模板已存储的定制数据
     saveJobConfigToStorage(false)
-    ElMessage.success(`已切换为岗位：${preset.name}`)
+    ElMessage.success(`已切换为岗位：${merged.name}`)
   } else {
     selectedPresetId.value = 'custom'
   }
@@ -697,6 +734,22 @@ $text-muted: #86868b;
   .section-actions {
     display: flex;
     gap: 8px;
+
+    .btn-toggle-config {
+      background: #007aff !important;
+      border-color: #007aff !important;
+      color: #ffffff !important;
+      font-weight: 600 !important;
+      box-shadow: 0 2px 8px rgba(0, 122, 255, 0.28) !important;
+      transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+
+      &:hover {
+        background: #0062cc !important;
+        border-color: #0062cc !important;
+        transform: translateY(-1px);
+        box-shadow: 0 4px 12px rgba(0, 122, 255, 0.35) !important;
+      }
+    }
   }
 }
 
@@ -848,6 +901,21 @@ $text-muted: #86868b;
       color: $text-muted;
     }
   }
+}
+
+// GPU 硬件加速的极速展开收起动画，杜绝 JS 计算 scrollHeight 导致的重排重绘卡顿
+.panel-expand-enter-active {
+  transition: opacity 0.2s cubic-bezier(0.16, 1, 0.3, 1), transform 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  will-change: opacity, transform;
+}
+.panel-expand-leave-active {
+  transition: opacity 0.15s ease, transform 0.15s ease;
+  will-change: opacity, transform;
+}
+.panel-expand-enter-from,
+.panel-expand-leave-to {
+  opacity: 0;
+  transform: translateY(-8px);
 }
 
 /* 项目列表区域样式 */
