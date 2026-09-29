@@ -131,6 +131,24 @@ const PLATFORM_CONFIGS = {
   }
 };
 
+function isBrowserStartPage(url) {
+  return !url || url === 'about:blank' || /^(?:edge|chrome):\/\/(?:newtab|new-tab-page)\/?(?:[?#].*)?$/i.test(url);
+}
+
+async function ensurePlatformPage(page, cfg) {
+  if (!isBrowserStartPage(page.url())) return { ok: true };
+  let lastError = '';
+  for (const url of [cfg.homeUrl, cfg.loginUrl]) {
+    try {
+      await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30000 });
+    } catch (error) {
+      lastError = error.message;
+    }
+    if (!isBrowserStartPage(page.url())) return { ok: true };
+  }
+  return { ok: false, reason: lastError || '浏览器仍停留在新标签页' };
+}
+
 // 跨批次与全局排重缓存
 const seenCandidateKeys = new Set();
 let safetyStopped = false;
@@ -1052,16 +1070,14 @@ async function scrapePlatform(platformKey, browserPath, targetCount, keywordPlan
     });
   } catch (e) {}
 
-  // 打开主页 / 登录页
-  try {
-    const currentUrl = page.url() || '';
-    if (!currentUrl || currentUrl === 'about:blank') {
-      await page.goto(cfg.homeUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
-    }
-  } catch (e) {
-    try {
-      await page.goto(cfg.loginUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
-    } catch (e2) {}
+  // Edge/Chrome 首次启动常打开内置新标签页，必须先进入招聘网站再判断登录态。
+  const navigation = await ensurePlatformPage(page, cfg);
+  if (!navigation.ok) {
+    sendMsg('error', {
+      platform: platformKey,
+      message: `【${cfg.name}】招聘网站未能打开，当前仍是浏览器新标签页：${navigation.reason}`
+    });
+    return outcome([], '招聘网站未能打开');
   }
 
   // 导航完成后清理空白页；常规检索保持最小化，避免切换标签时抢占输入焦点。
@@ -1080,7 +1096,7 @@ async function scrapePlatform(platformKey, browserPath, targetCount, keywordPlan
   const checkAuth = async () => {
     try {
       const curUrl = page.url() || '';
-      if (!curUrl || curUrl.includes('about:blank')) {
+      if (isBrowserStartPage(curUrl)) {
         return { logged: false, curUrl, reason: 'blank_url' };
       }
 
@@ -1243,7 +1259,7 @@ async function autoNavigateAndSearch(page, platformKey, cfg, searchKeyword) {
       try {
         const filled = await page.evaluate((targetKw) => {
           const inputs = Array.from(document.querySelectorAll('input'));
-          const target = inputs.find(i => {
+          const target = document.querySelector('.talent_search_keywords_input input, .talent_search_keywords input') || inputs.find(i => {
             const p = (i.placeholder || '').trim();
             return p.includes('搜索职位名') || p.includes('职位名') || p.includes('关键词') || p.includes('搜索');
           });
@@ -1897,4 +1913,4 @@ if (require.main === module) {
   });
 }
 
-module.exports = { allocateQuota, smoothScroll, setBrowserWindowState, detectCaptcha, extractCandidatesAcrossFrames, selectFreshCandidates, advanceSearchResults, main };
+module.exports = { allocateQuota, smoothScroll, setBrowserWindowState, isBrowserStartPage, ensurePlatformPage, detectCaptcha, extractCandidatesAcrossFrames, selectFreshCandidates, advanceSearchResults, main };

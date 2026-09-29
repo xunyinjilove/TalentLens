@@ -39,6 +39,20 @@ test('browser minimization targets a page window and releases its CDP session', 
   assert.equal(detached, true);
 });
 
+test('Edge new tab navigates to the recruiting site before login is checked', async () => {
+  let currentUrl = 'edge://newtab/';
+  const visits = [];
+  const page = {
+    url: () => currentUrl,
+    goto: async url => { visits.push(url); currentUrl = url; }
+  };
+  const cfg = { homeUrl: 'https://ehire.51job.com/Revision/talent/search', loginUrl: 'https://ehire.51job.com/MainLogin.aspx' };
+  assert.equal(agent.isBrowserStartPage(currentUrl), true);
+  assert.deepEqual(await agent.ensurePlatformPage(page, cfg), { ok: true });
+  assert.deepEqual(visits, [cfg.homeUrl]);
+  assert.equal(agent.isBrowserStartPage(page.url()), false);
+});
+
 test('captcha detection error is treated as unsafe', async () => {
   const result = await agent.detectCaptcha({ url: () => 'https://example.test', evaluate: async () => { throw Error('context lost'); }, frames: () => [] });
   assert.equal(result.detected, true);
