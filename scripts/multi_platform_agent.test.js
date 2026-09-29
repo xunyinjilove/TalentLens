@@ -84,6 +84,43 @@ test('Edge MSN start page is not mistaken for a recruiting login page', async ()
   assert.equal(agent.isPlatformPageUrl(page.url(), cfg), true);
 });
 
+test('51job search clicks the real button instead of its same-text parent', async () => {
+  let parentClicks = 0;
+  let buttonClicks = 0;
+  const input = { value: '', placeholder: '搜索职位名', focus() {}, dispatchEvent() {} };
+  const parent = { innerText: '搜索', click() { parentClicks++; } };
+  const button = { innerText: '搜索', disabled: false, click() { buttonClicks++; } };
+  global.document = {
+    querySelector: selector => selector.includes('button.search_button') ? button : input,
+    querySelectorAll: selector => selector === 'input' ? [input] : selector === 'button' ? [button] : [parent, button]
+  };
+  const page = { evaluate: async (fn, ...args) => fn(...args) };
+  try {
+    assert.deepEqual(await agent.submit51jobSearch(page, '软件测试工程师'), { ok: true });
+    assert.equal(input.value, '软件测试工程师');
+    assert.equal(buttonClicks, 1);
+    assert.equal(parentClicks, 0);
+  } finally {
+    delete global.document;
+  }
+});
+
+test('51job search reports failure when the button is missing', async () => {
+  const input = { value: '', focus() {}, dispatchEvent() {} };
+  global.document = {
+    querySelector: selector => selector.includes('button.search_button') ? null : input,
+    querySelectorAll: selector => selector === 'button' ? [] : [input]
+  };
+  try {
+    assert.deepEqual(await agent.submit51jobSearch({ evaluate: async (fn, ...args) => fn(...args) }, '软件测试工程师'), {
+      ok: false,
+      reason: '没有找到可点击的搜索按钮'
+    });
+  } finally {
+    delete global.document;
+  }
+});
+
 test('captcha detection error is treated as unsafe', async () => {
   const result = await agent.detectCaptcha({ url: () => 'https://example.test', evaluate: async () => { throw Error('context lost'); }, frames: () => [] });
   assert.equal(result.detected, true);
