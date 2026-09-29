@@ -269,16 +269,51 @@ async function humanType(page, selectorOrElement, text) {
   }
 }
 
-// 平滑微步滚轮滚动（汲取 GoodHR 安全微步滚动与留白算法）
+// 分段滚动页面内的真实列表容器；最小化窗口时 CDP 鼠标滚轮可能一直等待绘制确认。
 async function smoothScroll(page, distance = 480, step = 80) {
   let scrolled = 0;
   const dir = distance > 0 ? 1 : -1;
   const absDist = Math.abs(distance);
   while (scrolled < absDist) {
     const currentStep = Math.min(step, absDist - scrolled);
-    await page.mouse.wheel({ deltaY: currentStep * dir });
+    const delta = currentStep * dir;
+    const frames = typeof page.frames === 'function' ? page.frames() : [page];
+    let foundList = false;
+    for (const frame of frames) {
+      const result = await frame.evaluate(amount => {
+        const card = document.querySelector('.talent-search-container .card, .eh-talent-search .card, .candidate-card-wrap, .geek-item, .res-list tr, .candidate-box, .resume-item, .talent-item');
+        if (!card) return false;
+        let target = card.parentElement;
+        while (target && target !== document.body && target.scrollHeight <= target.clientHeight + 100) target = target.parentElement;
+        if (!target || target === document.body) target = document.scrollingElement || document.documentElement;
+        target.scrollTop += amount;
+        return true;
+      }, delta).catch(() => false);
+      if (result) {
+        foundList = true;
+        break;
+      }
+    }
+    if (!foundList) {
+      await page.evaluate(amount => {
+        const target = document.scrollingElement || document.documentElement;
+        if (target) target.scrollTop += amount;
+      }, delta).catch(() => {});
+    }
     scrolled += currentStep;
     await new Promise(r => setTimeout(r, 40 + Math.floor(Math.random() * 50)));
+  }
+}
+
+async function keepPageActiveInBackground(page) {
+  let session = null;
+  try {
+    session = await page.target().createCDPSession();
+    await session.send('Emulation.setFocusEmulationEnabled', { enabled: true });
+    return session;
+  } catch (e) {
+    if (session) await session.detach().catch(() => {});
+    return null;
   }
 }
 
@@ -603,29 +638,7 @@ async function searchPageFingerprint(page) {
 }
 
 async function scrollSearchResults(page) {
-  const target = await page.evaluate(() => {
-    const card = document.querySelector('.talent-search-container .card, .candidate-card-wrap, .geek-item, .res-list tr, .candidate-box, .resume-item');
-    for (let el = card?.parentElement; el && el !== document.body; el = el.parentElement) {
-      if (el.scrollHeight > el.clientHeight + 100) {
-        const rect = el.getBoundingClientRect();
-        return { top: el.scrollTop, x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
-      }
-    }
-    return null;
-  }).catch(() => null);
-  if (target) await page.mouse.move(target.x, target.y).catch(() => {});
   await smoothScroll(page, 600, 100).catch(() => {});
-  if (target) {
-    await page.evaluate(startTop => {
-      const card = document.querySelector('.talent-search-container .card, .candidate-card-wrap, .geek-item, .res-list tr, .candidate-box, .resume-item');
-      for (let el = card?.parentElement; el && el !== document.body; el = el.parentElement) {
-        if (el.scrollHeight > el.clientHeight + 100) {
-          if (el.scrollTop <= startTop + 1) el.scrollTop = Math.min(el.scrollHeight - el.clientHeight, startTop + 600);
-          return;
-        }
-      }
-    }, target.top).catch(() => {});
-  }
 }
 
 async function advanceSearchResults(page) {
@@ -986,6 +999,7 @@ async function scrapePlatform(platformKey, browserPath, targetCount, keywordPlan
     return null; // null = 启动失败（区别于 [] 即成功但无结果）
   }
 
+  let backgroundSession = null;
   // 断开自动化连接后，后台浏览器仍保留给 HR 使用，Node 进程才能正常退出。
   try {
   // 等待浏览器进程就绪
@@ -1002,6 +1016,13 @@ async function scrapePlatform(platformKey, browserPath, targetCount, keywordPlan
 
   if (!page) {
     page = pages[0] || (await browser.newPage());
+  }
+
+  if (options.testLoginPlatform !== cfg.code) {
+    backgroundSession = await keepPageActiveInBackground(page);
+    if (!backgroundSession) {
+      sendMsg('status', { platform: platformKey, message: `【${cfg.name}】浏览器不支持后台活动模式，最小化后页面可能暂停，请保持窗口可见。` });
+    }
   }
 
   // 自动清理多余的 about:blank 空白标签页，避免界面上残留空白标签页
@@ -1289,7 +1310,6 @@ async function autoNavigateAndSearch(page, platformKey, cfg, searchKeyword) {
               searchBtn.click();
             }
           });
-          await page.keyboard.press('Enter');
           await new Promise(r => setTimeout(r, 2500));
         }
       } catch (e) {}
@@ -1665,6 +1685,10 @@ ${cleanedRawText}
 
   return outcome(allPlatformSavedList, stopReason);
   } finally {
+    if (backgroundSession) {
+      await backgroundSession.send('Emulation.setFocusEmulationEnabled', { enabled: false }).catch(() => {});
+      await backgroundSession.detach().catch(() => {});
+    }
     try { await browser.disconnect(); } catch (e) {}
   }
 }
@@ -1913,4 +1937,4 @@ if (require.main === module) {
   });
 }
 
-module.exports = { allocateQuota, smoothScroll, setBrowserWindowState, isBrowserStartPage, ensurePlatformPage, detectCaptcha, extractCandidatesAcrossFrames, selectFreshCandidates, advanceSearchResults, main };
+module.exports = { allocateQuota, smoothScroll, keepPageActiveInBackground, setBrowserWindowState, isBrowserStartPage, ensurePlatformPage, detectCaptcha, extractCandidatesAcrossFrames, selectFreshCandidates, advanceSearchResults, main };
