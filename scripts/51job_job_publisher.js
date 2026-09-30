@@ -1,6 +1,6 @@
 /** 51job 企业端职位填写：复用已登录浏览器，不重复启动 Edge。 */
 const puppeteer = require('puppeteer-core');
-const { createBackgroundPage, keepPageActiveInBackground } = require('./multi_platform_agent');
+const { createBackgroundPage, keepPageActiveInBackground, setBrowserWindowState } = require('./multi_platform_agent');
 
 const JOB_URL = 'https://ehire.51job.com/Revision/job?mark=new';
 const pause = ms => new Promise(resolve => setTimeout(resolve, ms));
@@ -158,6 +158,27 @@ async function getFunctionOptions(raw) {
   } finally {
     if (session) await session.detach().catch(() => {});
     if (page) await page.close().catch(() => {});
+    await browser.disconnect().catch(() => {});
+  }
+}
+
+// “查看页面”由用户主动触发：恢复专用浏览器窗口，且不新建后台抓取标签页。
+async function show51JobPage() {
+  let browser;
+  try { browser = await puppeteer.connect({ browserURL: 'http://127.0.0.1:9503', defaultViewport: null, protocolTimeout: 12000 }); }
+  catch { return { status: 'needs_login', message: '51job 专用浏览器已关闭' }; }
+  try {
+    const pages = await browser.pages();
+    const page = pages.find(item => item.url().includes('ehire.51job.com/Revision/job'))
+      || pages.find(item => item.url().includes('ehire.51job.com'));
+    if (!page) return { status: 'needs_login', message: '专用浏览器中没有 51job 页面' };
+    const restored = await setBrowserWindowState(page, 'normal');
+    if (!restored) return { status: 'error', message: '无法还原 51job 浏览器窗口' };
+    await page.bringToFront();
+    return { status: 'ready', message: '已显示 51job 专用浏览器', url: page.url() };
+  } catch (error) {
+    return { status: 'error', message: `无法显示 51job 浏览器：${error.message}` };
+  } finally {
     await browser.disconnect().catch(() => {});
   }
 }
@@ -366,9 +387,12 @@ async function run(raw, { dryRun = false } = {}) {
     }
     return { status: 'uncertain', message: `已点击“${label}”，但未收到 51job 明确回执；请到职位管理核对，暂勿重复提交`, url: result.url };
   } catch (error) {
+    const detail = /detached Frame/i.test(error.message)
+      ? '51job 页面在提交后跳转，自动化连接已失效'
+      : error.message;
     return submitted
-      ? { status: 'uncertain', message: `已尝试向 51job 提交，但后续核验中断：${error.message}；请到职位管理核对，暂勿重复提交`, url: page?.url() || '' }
-      : { status: 'needs_review', message: error.message, url: page?.url() || '' };
+      ? { status: 'uncertain', message: `已尝试向 51job 提交，但后续核验中断：${detail}；请到职位管理核对，暂勿重复提交`, url: page?.url() || '' }
+      : { status: 'needs_review', message: detail, url: page?.url() || '' };
   } finally {
     if (session) await session.detach().catch(() => {});
     if (dryRun && page) await page.close().catch(() => {});
@@ -383,8 +407,10 @@ if (require.main === module) {
   process.stdin.on('end', async () => {
     try {
       const data = JSON.parse(input);
-      const result = process.argv.includes('--function-options')
-        ? await getFunctionOptions(data)
+      const result = process.argv.includes('--show-page')
+        ? await show51JobPage()
+        : process.argv.includes('--function-options')
+          ? await getFunctionOptions(data)
         : process.argv.includes('--suggest-keywords')
           ? await getKeywordSuggestions(data)
           : await run(data, { dryRun: process.argv.includes('--dry-run') });
@@ -394,4 +420,4 @@ if (require.main === module) {
   });
 }
 
-module.exports = { validate, getFunctionOptions, getKeywordSuggestions, run };
+module.exports = { validate, getFunctionOptions, getKeywordSuggestions, show51JobPage, run };

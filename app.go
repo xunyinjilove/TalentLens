@@ -1237,6 +1237,32 @@ func (a *App) Get51JobFunctionOptions(path []string) JobFunctionOptionsResult {
 	return result
 }
 
+// Show51JobPage 显示已有的专用浏览器；关闭后用原登录资料重新打开并确认可见。
+func (a *App) Show51JobPage() JobDraftResult {
+	show := func() JobDraftResult {
+		out, err := run51JobScript([]byte("{}"), 12*time.Second, "--show-page")
+		if err != nil {
+			return JobDraftResult{Status: "error", Message: err.Error()}
+		}
+		var result JobDraftResult
+		if json.Unmarshal(bytes.TrimSpace(out), &result) != nil || result.Status == "" {
+			return JobDraftResult{Status: "error", Message: "无法解析浏览器状态"}
+		}
+		return result
+	}
+	if result := show(); result.Status == "ready" {
+		return result
+	}
+	a.OpenURL("https://ehire.51job.com/Revision/job?mark=new")
+	for attempt := 0; attempt < 12; attempt++ {
+		time.Sleep(time.Second)
+		if result := show(); result.Status == "ready" {
+			return result
+		}
+	}
+	return JobDraftResult{Status: "error", Message: "51job 专用浏览器未能显示，请检查 Edge/Chrome 是否安装，然后重试"}
+}
+
 // Get51JobKeywordSuggestions 从已登录的 51job 职能关键词面板读取实际推荐词，不提交职位。
 func (a *App) Get51JobKeywordSuggestions(functionPath string) JobKeywordSuggestionResult {
 	if len(strings.Split(functionPath, ">")) < 2 {

@@ -58,7 +58,7 @@
     <el-alert v-if="result" :type="['saved', 'published'].includes(result.status) ? 'success' : 'warning'" :closable="false" :title="result.message" show-icon />
     <template #footer>
       <el-button :disabled="saving" @click="opened = false">关闭</el-button>
-      <el-button @click="openLogin">查看 51job 页面</el-button>
+      <el-button :loading="openingPage" @click="openLogin">查看 51job 页面</el-button>
       <el-button :loading="saving" :disabled="saving || !locationConfirmed || completed" @click="submit('draft')">保存到 51job 草稿</el-button>
       <el-button type="primary" :loading="saving" :disabled="saving || !locationConfirmed || completed" @click="submit('publish')">立即发布到 51job</el-button>
     </template>
@@ -74,6 +74,7 @@ const props = defineProps<{ modelValue: boolean, project: Project | null }>()
 const emit = defineEmits<{ 'update:modelValue': [value: boolean] }>()
 const opened = ref(false)
 const saving = ref(false)
+const openingPage = ref(false)
 const result = ref<{ status: string, message: string, url?: string } | null>(null)
 const locationConfirmed = ref(false)
 const loadingKeywords = ref(false)
@@ -246,14 +247,15 @@ async function submit(action: 'draft' | 'publish') {
 }
 
 async function openLogin() {
+  if (openingPage.value) return
+  openingPage.value = true
   try {
     const app: any = await import('../../wailsjs/go/main/App')
-    if (result.value?.url && result.value.status !== 'needs_login') {
-      await app.ActivatePlatformBrowser('51job')
-    } else {
-      await app.OpenURL('https://ehire.51job.com/Revision/job?mark=new')
-    }
+    const response = await app.Show51JobPage()
+    if (response.status === 'ready') ElMessage.success(response.message)
+    else ElMessage.error(response.message || '无法打开 51job 页面')
   } catch (error: any) { ElMessage.error(error.message || String(error)) }
+  finally { openingPage.value = false }
 }
 </script>
 
