@@ -122,15 +122,26 @@ async function getFunctionOptions(raw) {
     await click(page, '.func-dropdown .all_func_tips', '职能入口');
     await page.waitForFunction(() => Array.from(document.querySelectorAll('.el-dialog')).some(el => el.getBoundingClientRect().height > 0 && el.innerText.includes('选择职能') && el.querySelector('.cascader_panel_menu')), { timeout: 5000 });
     for (let level = 0; level < path.length; level++) {
-      const found = await page.evaluate(({ level, value }) => {
+      const selection = await page.evaluate(({ level, value }) => {
         const dialog = Array.from(document.querySelectorAll('.el-dialog')).find(el => el.getBoundingClientRect().height > 0 && el.innerText.includes('选择职能'));
         const menu = dialog?.querySelectorAll('.cascader_panel_menu')[level];
         const item = Array.from(menu?.querySelectorAll('.func-item') || []).find(el => el.title === value && !el.parentElement?.classList.contains('leaf'));
+        if (!item) return { found: false };
+        const nextMenu = dialog?.querySelectorAll('.cascader_panel_menu')[level + 1];
+        const before = Array.from(nextMenu?.querySelectorAll('.func-item') || []).map(el => el.title).join('|');
+        const wasActive = item.parentElement?.classList.contains('active');
         item?.click();
-        return Boolean(item);
+        return { found: true, before, wasActive };
       }, { level, value: path[level] });
-      if (!found) throw new Error(`51job 职能“${path[level]}”已变化，请重新选择`);
-      await pause(180);
+      if (!selection.found) throw new Error(`51job 职能“${path[level]}”已变化，请重新选择`);
+      if (!selection.wasActive) {
+        await page.waitForFunction(({ nextLevel, before }) => {
+          const dialog = Array.from(document.querySelectorAll('.el-dialog')).find(el => el.getBoundingClientRect().height > 0 && el.innerText.includes('选择职能'));
+          const menu = dialog?.querySelectorAll('.cascader_panel_menu')[nextLevel];
+          const current = Array.from(menu?.querySelectorAll('.func-item') || []).map(el => el.title).join('|');
+          return Boolean(current) && current !== before;
+        }, { timeout: 5000 }, { nextLevel: level + 1, before: selection.before });
+      }
     }
     const options = await page.evaluate(level => {
       const dialog = Array.from(document.querySelectorAll('.el-dialog')).find(el => el.getBoundingClientRect().height > 0 && el.innerText.includes('选择职能'));
