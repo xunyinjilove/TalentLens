@@ -30,7 +30,10 @@
         <p>51job 全部职能 · 逐级选择至末级</p>
         <div class="function-status" :class="{ error: functionError }">
           <span>{{ functionMessage }}</span>
-          <el-button v-if="functionError" size="small" @click="retryFunctionOptions">重试加载</el-button>
+          <div v-if="functionError" class="function-actions">
+            <el-button v-if="needsFunctionLogin" size="small" :loading="openingPage" @click="openFunctionLogin">打开并登录 51job</el-button>
+            <el-button size="small" :disabled="openingPage" @click="retryFunctionOptions">重试加载</el-button>
+          </div>
         </div>
         <div class="function-columns">
           <div v-for="level in 3" :key="level" class="function-column">
@@ -82,6 +85,7 @@ const loadingFunctions = ref(false)
 const functionPickerOpen = ref(false)
 const functionMessage = ref('')
 const functionError = ref(false)
+const needsFunctionLogin = ref(false)
 const functionColumns = ref<Array<Array<{ name: string, leaf: boolean }>>>([])
 const functionSelection = ref<string[]>([])
 let functionRequestID = 0
@@ -121,6 +125,7 @@ watch(() => props.project, project => {
   functionSelection.value = []
   functionMessage.value = ''
   functionError.value = false
+  needsFunctionLogin.value = false
 })
 
 watch(() => form.functionPath, () => {
@@ -134,6 +139,7 @@ watch(() => form.functionPath, () => {
 async function fetchFunctionOptions(path: string[], requestID: number) {
   loadingFunctions.value = true
   functionError.value = false
+  needsFunctionLogin.value = false
   functionMessage.value = `正在读取 51job ${path.length + 1} 级职能，请稍候…`
   try {
     const app: any = await import('../../wailsjs/go/main/App')
@@ -141,8 +147,9 @@ async function fetchFunctionOptions(path: string[], requestID: number) {
     if (requestID !== functionRequestID) return
     if (response.status !== 'ready') {
       functionError.value = true
+      needsFunctionLogin.value = response.status === 'needs_login'
       functionMessage.value = response.message || '51job 职能加载失败'
-      ElMessage.error(functionMessage.value)
+      if (!needsFunctionLogin.value) ElMessage.error(functionMessage.value)
       return
     }
     functionColumns.value = [...functionColumns.value.slice(0, path.length), response.options || []]
@@ -161,6 +168,11 @@ async function fetchFunctionOptions(path: string[], requestID: number) {
 async function retryFunctionOptions() {
   const path = [...functionSelection.value]
   await fetchFunctionOptions(path, ++functionRequestID)
+}
+
+async function openFunctionLogin() {
+  const opened = await openLogin()
+  if (opened) await retryFunctionOptions()
 }
 
 async function openFunctionPicker() {
@@ -246,15 +258,16 @@ async function submit(action: 'draft' | 'publish') {
   } finally { saving.value = false }
 }
 
-async function openLogin() {
-  if (openingPage.value) return
+async function openLogin(): Promise<boolean> {
+  if (openingPage.value) return false
   openingPage.value = true
   try {
     const app: any = await import('../../wailsjs/go/main/App')
     const response = await app.Show51JobPage()
-    if (response.status === 'ready') ElMessage.success(response.message)
-    else ElMessage.error(response.message || '无法打开 51job 页面')
-  } catch (error: any) { ElMessage.error(error.message || String(error)) }
+    if (response.status === 'ready') { ElMessage.success(response.message); return true }
+    ElMessage.error(response.message || '无法打开 51job 页面')
+    return false
+  } catch (error: any) { ElMessage.error(error.message || String(error)); return false }
   finally { openingPage.value = false }
 }
 </script>
@@ -274,6 +287,7 @@ async function openLogin() {
 .function-heading { display: block; font-size: 12px; color: #64748b; margin: 4px 6px 8px; }
 .function-status { display: flex; justify-content: space-between; align-items: center; min-height: 30px; margin-bottom: 8px; color: #0369a1; font-size: 13px; }
 .function-status.error { color: #b91c1c; }
+.function-actions { display: flex; gap: 6px; flex-shrink: 0; }
 .function-option { display: flex; justify-content: space-between; width: 100%; border: 0; border-radius: 4px; background: transparent; text-align: left; padding: 7px; cursor: pointer; color: #334155; }
 .function-option:hover, .function-option.selected { background: #e0f2fe; color: #0369a1; }
 .function-option:disabled { cursor: wait; }
