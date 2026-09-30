@@ -15,7 +15,10 @@ function validate(input) {
   const salaryMonths = Number(input.salaryMonths);
   const headcount = Number(input.headcount);
   const experienceYears = Number(input.experienceYears);
-  if (!title || description.length < 50 || functionPath.length < 2 || !keywords.length) throw new Error('请填写职位名称、至少 50 字的描述、51job 职能路径和关键词');
+  if (!title) throw new Error('请填写职位名称');
+  if (description.length < 50) throw new Error(`职位描述还差 ${50 - description.length} 字`);
+  if (functionPath.length < 2) throw new Error('51job 职能路径需填写到末级，例如“互联网技术 > 测试 > 软件测试”');
+  if (!keywords.length) throw new Error('请填写至少一个关键词');
   if (!Number.isInteger(minSalary) || !Number.isInteger(maxSalary) || minSalary <= 0 || maxSalary < minSalary) throw new Error('月薪范围应为正整数，最高月薪不能低于最低月薪');
   if (!Number.isInteger(salaryMonths) || salaryMonths < 12 || salaryMonths > 24) throw new Error('请选择 12 至 24 薪');
   if (keywords.length > 10) throw new Error('51job 关键词最多 10 个，请减少后重试');
