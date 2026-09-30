@@ -1124,6 +1124,8 @@ func hideConsoleWindow(cmd *exec.Cmd) {
 // JobDraftRequest 为 51job 草稿提供项目外仍需由 HR 确认的字段；薪资绝不从旧岗位猜测。
 type JobDraftRequest struct {
 	ProjectID       string   `json:"projectId"`
+	JobType         string   `json:"jobType"`
+	Action          string   `json:"action"`
 	Title           string   `json:"title"`
 	Description     string   `json:"description"`
 	FunctionPath    string   `json:"functionPath"`
@@ -1136,54 +1138,107 @@ type JobDraftRequest struct {
 	Education       string   `json:"education"`
 }
 
+type JobKeywordGroup struct {
+	Name     string   `json:"name"`
+	Keywords []string `json:"keywords"`
+}
+
+type JobKeywordSuggestionResult struct {
+	Status  string            `json:"status"`
+	Message string            `json:"message"`
+	Groups  []JobKeywordGroup `json:"groups"`
+}
+
 type JobDraftResult struct {
 	Status  string `json:"status"`
 	Message string `json:"message"`
 	URL     string `json:"url,omitempty"`
 }
 
-// Save51JobDraft 在已登录的前程无忧浏览器中填写并保存职位草稿。只有平台明确回执才返回 saved。
 func (a *App) Save51JobDraft(req JobDraftRequest) JobDraftResult {
-	if !interviewIDPattern.MatchString(req.ProjectID) || a.GetProject(req.ProjectID) == nil {
-		return JobDraftResult{Status: "error", Message: "招聘项目不存在，请刷新项目列表"}
-	}
-	if strings.TrimSpace(req.Title) == "" || strings.TrimSpace(req.Description) == "" || req.MinSalary <= 0 || req.MaxSalary < req.MinSalary {
-		return JobDraftResult{Status: "error", Message: "请填写职位名称、描述和有效的月薪范围"}
-	}
+	req.Action = "draft"
+	return a.submit51Job(req)
+}
+
+// Publish51Job 由用户明确点击“立即发布”后调用；平台未确认时不得报告发布成功。
+func (a *App) Publish51Job(req JobDraftRequest) JobDraftResult {
+	req.Action = "publish"
+	return a.submit51Job(req)
+}
+
+func find51JobScript() string {
 	scriptCandidates := []string{
 		filepath.Join("scripts", "51job_job_publisher.js"),
 		filepath.Join(filepath.Dir(os.Args[0]), "scripts", "51job_job_publisher.js"),
 		filepath.Join(filepath.Dir(os.Args[0]), "..", "scripts", "51job_job_publisher.js"),
 		filepath.Join(filepath.Dir(os.Args[0]), "..", "..", "scripts", "51job_job_publisher.js"),
 	}
-	scriptPath := ""
 	for _, candidate := range scriptCandidates {
 		if _, err := os.Stat(candidate); err == nil {
-			scriptPath = candidate
-			break
+			return candidate
 		}
 	}
+	return ""
+}
+
+func run51JobScript(payload []byte, timeout time.Duration, flags ...string) ([]byte, error) {
+	scriptPath := find51JobScript()
 	if scriptPath == "" {
-		return JobDraftResult{Status: "error", Message: "缺少 51job 职位脚本，请检查安装目录的 scripts 文件夹"}
+		return nil, fmt.Errorf("缺少 51job 职位脚本，请检查安装目录的 scripts 文件夹")
 	}
-	payload, err := json.Marshal(req)
-	if err != nil {
-		return JobDraftResult{Status: "error", Message: "无法编码职位信息"}
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, "node", scriptPath)
+	cmd := exec.CommandContext(ctx, "node", append([]string{scriptPath}, flags...)...)
 	hideConsoleWindow(cmd)
 	cmd.Stdin = bytes.NewReader(payload)
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 	out, err := cmd.Output()
+	if ctx.Err() != nil {
+		return nil, ctx.Err()
+	}
 	if err != nil {
-		if ctx.Err() != nil {
-			return JobDraftResult{Status: "uncertain", Message: "等待 51job 响应超时，请先在平台职位管理核对是否已保存，暂勿重复提交"}
+		log.Printf("[51job] node failure: %v: %s", err, stderr.String())
+		return nil, fmt.Errorf("职位脚本执行失败，请确认 Node.js 和脚本依赖已安装")
+	}
+	return out, nil
+}
+
+// Get51JobKeywordSuggestions 从已登录的 51job 职能关键词面板读取实际推荐词，不提交职位。
+func (a *App) Get51JobKeywordSuggestions(functionPath string) JobKeywordSuggestionResult {
+	if len(strings.Split(functionPath, ">")) < 2 {
+		return JobKeywordSuggestionResult{Status: "error", Message: "请先填写完整的 51job 职能路径"}
+	}
+	payload, _ := json.Marshal(map[string]string{"functionPath": functionPath})
+	out, err := run51JobScript(payload, 40*time.Second, "--suggest-keywords")
+	if err != nil {
+		return JobKeywordSuggestionResult{Status: "error", Message: err.Error()}
+	}
+	var result JobKeywordSuggestionResult
+	if json.Unmarshal(bytes.TrimSpace(out), &result) != nil || result.Status == "" {
+		return JobKeywordSuggestionResult{Status: "error", Message: "无法解析 51job 推荐关键词"}
+	}
+	return result
+}
+
+// submit51Job 在已登录的 51job 浏览器填写职位并执行草稿保存或正式发布。
+func (a *App) submit51Job(req JobDraftRequest) JobDraftResult {
+	if !interviewIDPattern.MatchString(req.ProjectID) || a.GetProject(req.ProjectID) == nil {
+		return JobDraftResult{Status: "error", Message: "招聘项目不存在，请刷新项目列表"}
+	}
+	if strings.TrimSpace(req.Title) == "" || strings.TrimSpace(req.Description) == "" || req.MinSalary <= 0 || req.MaxSalary < req.MinSalary {
+		return JobDraftResult{Status: "error", Message: "请填写职位名称、描述和有效的月薪范围"}
+	}
+	payload, err := json.Marshal(req)
+	if err != nil {
+		return JobDraftResult{Status: "error", Message: "无法编码职位信息"}
+	}
+	out, err := run51JobScript(payload, 90*time.Second)
+	if err != nil {
+		if err == context.DeadlineExceeded {
+			return JobDraftResult{Status: "uncertain", Message: "等待 51job 响应超时，请先在平台职位管理核对结果，暂勿重复提交"}
 		}
-		log.Printf("[Save51JobDraft] node failure: %v: %s", err, stderr.String())
-		return JobDraftResult{Status: "error", Message: "职位脚本执行失败，请确认 Node.js 和脚本依赖已安装"}
+		return JobDraftResult{Status: "error", Message: err.Error()}
 	}
 	var result JobDraftResult
 	if json.Unmarshal(bytes.TrimSpace(out), &result) != nil || result.Status == "" {
