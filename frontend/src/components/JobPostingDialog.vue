@@ -11,7 +11,7 @@
       <el-form-item label="职位名称（必填）"><el-input v-model="form.title" maxlength="80" /></el-form-item>
       <el-form-item label="职位描述（必填）"><el-input v-model="form.description" type="textarea" :rows="5" maxlength="40000" show-word-limit /></el-form-item>
       <div class="form-grid">
-        <el-form-item label="51job 职能路径（必填）"><el-input v-model="form.functionPath" placeholder="例如：互联网技术 > 测试 > 软件测试" /></el-form-item>
+        <el-form-item label="51job 职能路径（必填，填写到末级）"><el-input v-model="form.functionPath" placeholder="例如：互联网技术 > 测试 > 软件测试" /></el-form-item>
         <el-form-item label="关键词（必填，逗号分隔）"><el-input v-model="form.keywords" placeholder="例如：功能测试,Postman" /></el-form-item>
         <el-form-item label="最低月薪（元）"><el-input-number v-model="form.minSalary" :min="1" :max="99999999" :step="1000" style="width: 100%" /></el-form-item>
         <el-form-item label="最高月薪（元）"><el-input-number v-model="form.maxSalary" :min="1" :max="99999999" :step="1000" style="width: 100%" /></el-form-item>
@@ -52,7 +52,8 @@ watch(() => props.project, project => {
   if (!project) return
   form.title = project.job_config?.title || ''
   form.description = project.job_config?.job_description || (project.job_config?.requirements || []).join('\n')
-  form.functionPath = ''
+  // 仅为已在 51job 页面核验过的岗位预填分类；其他岗位不猜测平台职能。
+  form.functionPath = /软件测试/.test(form.title) ? '互联网技术 > 测试 > 软件测试' : ''
   form.keywords = (project.job_config?.required_skills || []).slice(0, 3).join(',')
   form.minSalary = 0
   form.maxSalary = 0
@@ -67,8 +68,15 @@ watch(() => props.project, project => {
 async function saveDraft() {
   if (!props.project) return
   const keywords = form.keywords.split(/[,，、]/).map(s => s.trim()).filter(Boolean)
-  if (!form.title.trim() || form.description.trim().length < 50 || form.functionPath.split('>').filter(s => s.trim()).length < 2 || !keywords.length || !form.minSalary || !form.maxSalary || form.maxSalary < form.minSalary || !form.salaryMonths) {
-    ElMessage.warning('请填写名称、至少 50 字的描述、职能路径、关键词、月薪范围及发放月数')
+  const errors: string[] = []
+  if (!form.title.trim()) errors.push('请填写职位名称')
+  if (form.description.trim().length < 50) errors.push(`职位描述还差 ${50 - form.description.trim().length} 字`)
+  if (form.functionPath.split('>').filter(s => s.trim()).length < 2) errors.push('51job 职能路径需填写到末级，例如“互联网技术 > 测试 > 软件测试”')
+  if (!keywords.length) errors.push('请填写至少一个关键词')
+  if (!form.minSalary || !form.maxSalary || form.maxSalary < form.minSalary) errors.push('请填写有效的月薪范围')
+  if (!form.salaryMonths) errors.push('请选择年薪发放月数')
+  if (errors.length) {
+    ElMessage.warning(errors.join('；'))
     return
   }
   saving.value = true
