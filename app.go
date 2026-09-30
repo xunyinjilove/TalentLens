@@ -1121,6 +1121,77 @@ func hideConsoleWindow(cmd *exec.Cmd) {
 	}
 }
 
+// JobDraftRequest 为 51job 草稿提供项目外仍需由 HR 确认的字段；薪资绝不从旧岗位猜测。
+type JobDraftRequest struct {
+	ProjectID       string   `json:"projectId"`
+	Title           string   `json:"title"`
+	Description     string   `json:"description"`
+	FunctionPath    string   `json:"functionPath"`
+	Keywords        []string `json:"keywords"`
+	MinSalary       int      `json:"minSalary"`
+	MaxSalary       int      `json:"maxSalary"`
+	SalaryMonths    int      `json:"salaryMonths"`
+	Headcount       int      `json:"headcount"`
+	ExperienceYears int      `json:"experienceYears"`
+	Education       string   `json:"education"`
+}
+
+type JobDraftResult struct {
+	Status  string `json:"status"`
+	Message string `json:"message"`
+	URL     string `json:"url,omitempty"`
+}
+
+// Save51JobDraft 在已登录的前程无忧浏览器中填写并保存职位草稿。只有平台明确回执才返回 saved。
+func (a *App) Save51JobDraft(req JobDraftRequest) JobDraftResult {
+	if !interviewIDPattern.MatchString(req.ProjectID) || a.GetProject(req.ProjectID) == nil {
+		return JobDraftResult{Status: "error", Message: "招聘项目不存在，请刷新项目列表"}
+	}
+	if strings.TrimSpace(req.Title) == "" || strings.TrimSpace(req.Description) == "" || req.MinSalary <= 0 || req.MaxSalary < req.MinSalary {
+		return JobDraftResult{Status: "error", Message: "请填写职位名称、描述和有效的月薪范围"}
+	}
+	scriptCandidates := []string{
+		filepath.Join("scripts", "51job_job_publisher.js"),
+		filepath.Join(filepath.Dir(os.Args[0]), "scripts", "51job_job_publisher.js"),
+		filepath.Join(filepath.Dir(os.Args[0]), "..", "scripts", "51job_job_publisher.js"),
+		filepath.Join(filepath.Dir(os.Args[0]), "..", "..", "scripts", "51job_job_publisher.js"),
+	}
+	scriptPath := ""
+	for _, candidate := range scriptCandidates {
+		if _, err := os.Stat(candidate); err == nil {
+			scriptPath = candidate
+			break
+		}
+	}
+	if scriptPath == "" {
+		return JobDraftResult{Status: "error", Message: "缺少 51job 职位脚本，请检查安装目录的 scripts 文件夹"}
+	}
+	payload, err := json.Marshal(req)
+	if err != nil {
+		return JobDraftResult{Status: "error", Message: "无法编码职位信息"}
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "node", scriptPath)
+	hideConsoleWindow(cmd)
+	cmd.Stdin = bytes.NewReader(payload)
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	out, err := cmd.Output()
+	if err != nil {
+		if ctx.Err() != nil {
+			return JobDraftResult{Status: "uncertain", Message: "等待 51job 响应超时，请先在平台职位管理核对是否已保存，暂勿重复提交"}
+		}
+		log.Printf("[Save51JobDraft] node failure: %v: %s", err, stderr.String())
+		return JobDraftResult{Status: "error", Message: "职位脚本执行失败，请确认 Node.js 和脚本依赖已安装"}
+	}
+	var result JobDraftResult
+	if json.Unmarshal(bytes.TrimSpace(out), &result) != nil || result.Status == "" {
+		return JobDraftResult{Status: "uncertain", Message: "51job 返回了无法识别的结果，请在平台职位管理核对，暂勿重复提交"}
+	}
+	return result
+}
+
 // TestPlatformLogin 独立测试指定平台的企业端账号登录与扫码鉴权
 func (a *App) TestPlatformLogin(platform string) bool {
 	a.bossMutex.Lock()

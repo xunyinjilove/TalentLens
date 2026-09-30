@@ -271,6 +271,7 @@
 
             <!-- 创建时间 -->
             <div class="card-time">📅 {{ formatDate(project.created_at) }}</div>
+            <button class="post-job-btn" @click.stop="openJobPosting(project)">＋ 新增职位（四平台）</button>
           </div>
 
           <!-- 空状态 -->
@@ -356,6 +357,7 @@
       </template>
     </el-dialog>
 
+    <JobPostingDialog v-model="showPostingDialog" :project="postingProject" />
     <DevPanel />
   </div>
 </template>
@@ -379,7 +381,8 @@ import LanguageSwitcher from '../components/LanguageSwitcher.vue'
 import DevPanel from '../components/DevPanel.vue'
 import JobPresetPicker from '../components/JobPresetPicker.vue'
 import TagInput from '../components/TagInput.vue'
-import { useProjectStore } from '../composables/useProjectStore'
+import JobPostingDialog from '../components/JobPostingDialog.vue'
+import { useProjectStore, type Project } from '../composables/useProjectStore'
 import {
   saveCustomJobPreset,
   getMergedPreset,
@@ -392,6 +395,13 @@ const { t } = useI18n()
 const projectStore = useProjectStore()
 
 const showCreateDialog = ref(false)
+const showPostingDialog = ref(false)
+const postingProject = ref<Project | null>(null)
+
+function openJobPosting(project: Project) {
+  postingProject.value = project
+  showPostingDialog.value = true
+}
 const showJobDetails = ref(false)
 const selectedPresetId = ref<string>('')
 const presetPickerRef = ref<InstanceType<typeof JobPresetPicker> | null>(null)
@@ -1126,6 +1136,19 @@ $text-muted: #86868b;
     color: $text-muted;
   }
 }
+
+.post-job-btn {
+  align-self: flex-start;
+  border: 1px solid #93c5fd;
+  border-radius: 8px;
+  background: #eff6ff;
+  color: #1d4ed8;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 7px 10px;
+  cursor: pointer;
+}
+.post-job-btn:hover { background: #dbeafe; }
 
 /* 对话框内样式 */
 .create-form {

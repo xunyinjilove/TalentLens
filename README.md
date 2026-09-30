@@ -35,6 +35,7 @@
 | **综合评分** | 技能匹配度、经验匹配度、学历匹配度 |
 | **推荐结论** | AI 给出推荐/不推荐结论及详细理由 |
 | **岗位模板** | 内置多种岗位模板，一键配置需求 |
+| **新增职位** | 招聘项目卡片提供四平台入口；51job 可在核对薪资、职能和工作地点后保存职位草稿 |
 | **多服务商** | 预设 DeepSeek / OpenAI / 智谱 / Moonshot / SiliconFlow |
 | **国际化** | 支持简体中文 / 繁体中文 / English |
 | **macOS 风格 UI** | 毛玻璃标题栏、交通灯按钮、精致界面 |
@@ -83,11 +84,11 @@
 
 从 [Releases](https://github.com/xunyinjilove/TalentLens/releases) 页面下载最新版本：
 
-- **Windows**: `TalentLens-windows-amd64.exe`
+- **Windows**: 下载对应架构的 ZIP，完整解压后运行 `TalentLens.exe`；自动寻才及 51job 草稿功能需要本机安装 Node.js
 - **macOS (Intel)**: `TalentLens-macos-amd64.zip`
 - **macOS (Apple Silicon)**: `TalentLens-macos-arm64.zip`
 
-下载后双击运行即可，无需安装。
+macOS 解压后即可运行；Windows 请按上方说明保留 ZIP 中的 `scripts` 与 `node_modules` 目录。
 
 ### 首次配置
 
@@ -130,6 +131,9 @@ cd TalentLens
 # 安装前端依赖
 cd frontend && npm install && cd ..
 
+# 安装浏览器自动化依赖（51job 职位草稿和多平台寻才共用）
+npm install
+
 # 开发模式 (热重载)
 wails dev
 
@@ -141,6 +145,8 @@ wails build -platform darwin/arm64   # macOS Apple Silicon
 wails build -platform darwin/amd64   # macOS Intel
 wails build -platform windows/amd64  # Windows
 ```
+
+Windows 本地构建后，请将仓库的 `scripts` 和根目录 `node_modules` 复制到 `build/bin`，与 `TalentLens.exe` 同级；运行前安装 Node.js。正式 Windows ZIP 已包含这两个目录。
 
 ---
 
@@ -190,4 +196,3 @@ TalentLens/
 ## 许可证
 
 本项目采用 **GNU General Public License v3.0** 开源协议，详见 [LICENSE](LICENSE)。
-
