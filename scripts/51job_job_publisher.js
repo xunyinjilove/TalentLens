@@ -87,18 +87,68 @@ async function fill(page, selector, value, label) {
 
 async function chooseFunction(page, path) {
   await click(page, '.func-dropdown .all_func_tips', '职能入口');
-  for (const name of path) {
-    const found = await page.evaluate(value => {
+  for (let level = 0; level < path.length; level++) {
+    const name = path[level];
+    const found = await page.evaluate(({ value, level, last }) => {
       const dialog = Array.from(document.querySelectorAll('.el-dialog')).find(el => el.getBoundingClientRect().height > 0 && el.innerText.includes('选择职能'));
-      const item = Array.from(dialog?.querySelectorAll('.func-item') || []).find(el => el.title === value && el.getBoundingClientRect().height > 0);
+      const menu = dialog?.querySelectorAll('.cascader_panel_menu')[level];
+      const item = Array.from(menu?.querySelectorAll('.func-item') || []).find(el => el.title === value);
+      if (item?.parentElement?.classList.contains('leaf') !== last) return false;
       if (item) item.click();
       return Boolean(item);
-    }, name);
-    if (!found) throw new Error(`51job 职能分类“${name}”不存在，请在平台页面手动选择`);
+    }, { value: name, level, last: level === path.length - 1 });
+    if (!found) throw new Error(`51job 职能路径第 ${level + 1} 级“${name}”不存在或不是末级，请重新选择`);
     await pause(200);
   }
   const selected = await page.evaluate(() => document.querySelector('[data-id="funcTypeInput"] input')?.value || '');
   if (selected !== path[path.length - 1]) throw new Error('51job 职能未选中，请在平台页面检查');
+}
+
+// 按已选上级读取下一列；只返回当前页面实际展示的职能，不缓存猜测分类。
+async function getFunctionOptions(raw) {
+  const path = Array.isArray(raw.path) ? raw.path.map(item => String(item).trim()) : [];
+  if (path.length > 2 || path.some(item => !item)) throw new Error('职能层级无效');
+  let browser;
+  try { browser = await puppeteer.connect({ browserURL: 'http://127.0.0.1:9503', defaultViewport: null, protocolTimeout: 12000 }); }
+  catch { return { status: 'needs_login', message: '请先打开并登录 51job 企业浏览器', options: [] }; }
+  let page;
+  let session;
+  try {
+    const source = (await browser.pages()).find(item => item.url().includes('ehire.51job.com'));
+    if (!source) return { status: 'needs_login', message: '未检测到 51job 企业页面', options: [] };
+    page = await createBackgroundPage(browser, source, JOB_URL);
+    session = await keepPageActiveInBackground(page);
+    await page.waitForSelector('.func-dropdown .all_func_tips', { timeout: 20000 });
+    await click(page, '.func-dropdown .all_func_tips', '职能入口');
+    await page.waitForFunction(() => Array.from(document.querySelectorAll('.el-dialog')).some(el => el.getBoundingClientRect().height > 0 && el.innerText.includes('选择职能') && el.querySelector('.cascader_panel_menu')), { timeout: 5000 });
+    for (let level = 0; level < path.length; level++) {
+      const found = await page.evaluate(({ level, value }) => {
+        const dialog = Array.from(document.querySelectorAll('.el-dialog')).find(el => el.getBoundingClientRect().height > 0 && el.innerText.includes('选择职能'));
+        const menu = dialog?.querySelectorAll('.cascader_panel_menu')[level];
+        const item = Array.from(menu?.querySelectorAll('.func-item') || []).find(el => el.title === value && !el.parentElement?.classList.contains('leaf'));
+        item?.click();
+        return Boolean(item);
+      }, { level, value: path[level] });
+      if (!found) throw new Error(`51job 职能“${path[level]}”已变化，请重新选择`);
+      await pause(180);
+    }
+    const options = await page.evaluate(level => {
+      const dialog = Array.from(document.querySelectorAll('.el-dialog')).find(el => el.getBoundingClientRect().height > 0 && el.innerText.includes('选择职能'));
+      const menu = dialog?.querySelectorAll('.cascader_panel_menu')[level];
+      return Array.from(menu?.querySelectorAll('.func-item') || []).map(item => ({
+        name: item.title,
+        leaf: item.parentElement?.classList.contains('leaf') || false
+      })).filter(item => item.name);
+    }, path.length);
+    if (!options.length) throw new Error('51job 未返回这一层的职能，请在平台页面检查');
+    return { status: 'ready', message: `已读取 51job 第 ${path.length + 1} 级职能`, options };
+  } catch (error) {
+    return { status: 'error', message: error.message, options: [] };
+  } finally {
+    if (session) await session.detach().catch(() => {});
+    if (page) await page.close().catch(() => {});
+    await browser.disconnect().catch(() => {});
+  }
 }
 
 async function chooseKeywords(page, keywords) {
@@ -322,13 +372,15 @@ if (require.main === module) {
   process.stdin.on('end', async () => {
     try {
       const data = JSON.parse(input);
-      const result = process.argv.includes('--suggest-keywords')
-        ? await getKeywordSuggestions(data)
-        : await run(data, { dryRun: process.argv.includes('--dry-run') });
+      const result = process.argv.includes('--function-options')
+        ? await getFunctionOptions(data)
+        : process.argv.includes('--suggest-keywords')
+          ? await getKeywordSuggestions(data)
+          : await run(data, { dryRun: process.argv.includes('--dry-run') });
       process.stdout.write(JSON.stringify(result) + '\n');
     }
     catch (error) { process.stdout.write(JSON.stringify({ status: 'error', message: error.message }) + '\n'); }
   });
 }
 
-module.exports = { validate, getKeywordSuggestions, run };
+module.exports = { validate, getFunctionOptions, getKeywordSuggestions, run };

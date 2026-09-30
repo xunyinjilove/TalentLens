@@ -1149,6 +1149,17 @@ type JobKeywordSuggestionResult struct {
 	Groups  []JobKeywordGroup `json:"groups"`
 }
 
+type JobFunctionOption struct {
+	Name string `json:"name"`
+	Leaf bool   `json:"leaf"`
+}
+
+type JobFunctionOptionsResult struct {
+	Status  string              `json:"status"`
+	Message string              `json:"message"`
+	Options []JobFunctionOption `json:"options"`
+}
+
 type JobDraftResult struct {
 	Status  string `json:"status"`
 	Message string `json:"message"`
@@ -1202,6 +1213,28 @@ func run51JobScript(payload []byte, timeout time.Duration, flags ...string) ([]b
 		return nil, fmt.Errorf("职位脚本执行失败，请确认 Node.js 和脚本依赖已安装")
 	}
 	return out, nil
+}
+
+// Get51JobFunctionOptions 按已选上级读取 51job 职能选择器的下一列，不提交职位。
+func (a *App) Get51JobFunctionOptions(path []string) JobFunctionOptionsResult {
+	if len(path) > 2 {
+		return JobFunctionOptionsResult{Status: "error", Message: "职能层级无效"}
+	}
+	for _, part := range path {
+		if strings.TrimSpace(part) == "" {
+			return JobFunctionOptionsResult{Status: "error", Message: "职能层级不能为空"}
+		}
+	}
+	payload, _ := json.Marshal(map[string][]string{"path": path})
+	out, err := run51JobScript(payload, 40*time.Second, "--function-options")
+	if err != nil {
+		return JobFunctionOptionsResult{Status: "error", Message: err.Error()}
+	}
+	var result JobFunctionOptionsResult
+	if json.Unmarshal(bytes.TrimSpace(out), &result) != nil || result.Status == "" {
+		return JobFunctionOptionsResult{Status: "error", Message: "无法解析 51job 职能列表"}
+	}
+	return result
 }
 
 // Get51JobKeywordSuggestions 从已登录的 51job 职能关键词面板读取实际推荐词，不提交职位。
