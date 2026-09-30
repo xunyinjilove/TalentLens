@@ -104,6 +104,14 @@ async function chooseFunction(page, path) {
   if (selected !== path[path.length - 1]) throw new Error('51job 职能未选中，请在平台页面检查');
 }
 
+async function waitForJobForm(page) {
+  await page.waitForFunction(() =>
+    Boolean(document.querySelector('.func-dropdown .all_func_tips'))
+    || /账号密码登录|扫码登录|企业账号登录/.test(document.body?.innerText || ''),
+  { timeout: 20000 });
+  return Boolean(await page.$('.func-dropdown .all_func_tips'));
+}
+
 // 按已选上级读取下一列；只返回当前页面实际展示的职能，不缓存猜测分类。
 async function getFunctionOptions(raw) {
   const path = Array.isArray(raw.path) ? raw.path.map(item => String(item).trim()) : [];
@@ -118,7 +126,7 @@ async function getFunctionOptions(raw) {
     if (!source) return { status: 'needs_login', message: '未检测到 51job 企业页面', options: [] };
     page = await createBackgroundPage(browser, source, JOB_URL);
     session = await keepPageActiveInBackground(page);
-    await page.waitForSelector('.func-dropdown .all_func_tips', { timeout: 20000 });
+    if (!await waitForJobForm(page)) return { status: 'needs_login', message: '请在打开的 51job 企业浏览器完成登录，再点击重试加载', options: [] };
     await click(page, '.func-dropdown .all_func_tips', '职能入口');
     await page.waitForFunction(() => Array.from(document.querySelectorAll('.el-dialog')).some(el => el.getBoundingClientRect().height > 0 && el.innerText.includes('选择职能') && el.querySelector('.cascader_panel_menu')), { timeout: 5000 });
     for (let level = 0; level < path.length; level++) {
@@ -255,7 +263,7 @@ async function getKeywordSuggestions(raw) {
     if (!source) return { status: 'needs_login', message: '未检测到 51job 企业页面', groups: [] };
     page = await createBackgroundPage(browser, source, JOB_URL);
     session = await keepPageActiveInBackground(page);
-    await page.waitForFunction(() => document.querySelector('.func-dropdown .all_func_tips'), { timeout: 20000 });
+    if (!await waitForJobForm(page)) return { status: 'needs_login', message: '请在打开的 51job 企业浏览器完成登录，再点击重试加载', groups: [] };
     await pause(1200);
     await chooseFunction(page, functionPath);
     await click(page, '#job-keywords input', '关键词入口');
