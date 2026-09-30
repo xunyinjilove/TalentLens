@@ -12,7 +12,10 @@
       <el-form-item label="职位名称（必填）"><el-input v-model="form.title" maxlength="80" /></el-form-item>
       <el-form-item label="职位描述（必填）"><el-input v-model="form.description" type="textarea" :rows="5" maxlength="40000" show-word-limit /></el-form-item>
       <div class="form-grid">
-        <el-form-item label="51job 职能路径（必填，填写到末级）"><el-input v-model="form.functionPath" placeholder="例如：互联网技术 > 测试 > 软件测试" /></el-form-item>
+        <el-form-item label="51job 职能（必选末级）">
+          <el-input v-model="form.functionPath" readonly placeholder="请从 51job 全部职能中选择" />
+          <el-button :loading="loadingFunctions" @click="openFunctionPicker">从 51job 全部职能选择</el-button>
+        </el-form-item>
         <el-form-item label="职能关键词">
           <el-button :loading="loadingKeywords" @click="loadKeywordSuggestions">按职能加载 51job 推荐词</el-button>
         </el-form-item>
@@ -22,6 +25,16 @@
         <el-form-item label="招聘人数"><el-input-number v-model="form.headcount" :min="1" :max="9999" style="width: 100%" /></el-form-item>
         <el-form-item v-if="form.jobType === '社会招聘'" label="最低工作经验（年）"><el-input-number v-model="form.experienceYears" :min="0" :max="10" style="width: 100%" /></el-form-item>
         <el-form-item label="最低学历"><el-select v-model="form.education" style="width: 100%"><el-option v-for="item in educationOptions" :key="item" :label="item" :value="item" /></el-select></el-form-item>
+      </div>
+      <div v-if="functionPickerOpen" class="function-panel">
+        <p>51job 全部职能 · 逐级选择至末级</p>
+        <div class="function-columns">
+          <div v-for="(column, level) in functionColumns" :key="level" class="function-column">
+            <span class="function-heading">{{ ['一级职能', '二级职能', '具体职能'][level] }}</span>
+            <button v-for="option in column" :key="option.name" type="button" class="function-option" :class="{ selected: functionSelection[level] === option.name }" @click="selectFunction(level, option)">{{ option.name }}<span v-if="!option.leaf">›</span></button>
+          </div>
+        </div>
+        <p v-if="functionMessage" class="function-message">{{ functionMessage }}</p>
       </div>
       <p v-if="form.jobType === '校园招聘'" class="location-note">校招按 51job 的应届生条件填写，可能同步到应届生求职网并消耗职位配额；请以平台页面显示的实时规则为准。</p>
       <div v-if="keywordGroups.length" class="keyword-panel">
@@ -59,6 +72,12 @@ const saving = ref(false)
 const result = ref<{ status: string, message: string, url?: string } | null>(null)
 const locationConfirmed = ref(false)
 const loadingKeywords = ref(false)
+const loadingFunctions = ref(false)
+const functionPickerOpen = ref(false)
+const functionMessage = ref('')
+const functionColumns = ref<Array<Array<{ name: string, leaf: boolean }>>>([])
+const functionSelection = ref<string[]>([])
+let functionRequestID = 0
 const keywordMessage = ref('')
 const keywordGroups = ref<Array<{ name: string, keywords: string[] }>>([])
 const selectedKeywords = ref<string[]>([])
@@ -76,8 +95,7 @@ watch(() => props.project, project => {
   form.jobType = '社会招聘'
   form.title = project.job_config?.title || ''
   form.description = project.job_config?.job_description || (project.job_config?.requirements || []).join('\n')
-  // 仅为已在 51job 页面核验过的岗位预填分类；其他岗位不猜测平台职能。
-  form.functionPath = /软件测试/.test(form.title) ? '互联网技术 > 测试 > 软件测试' : ''
+  form.functionPath = ''
   form.keywords = ''
   form.minSalary = 0
   form.maxSalary = 0
@@ -90,14 +108,58 @@ watch(() => props.project, project => {
   keywordGroups.value = []
   selectedKeywords.value = []
   keywordMessage.value = ''
+  functionRequestID++
+  functionPickerOpen.value = false
+  functionColumns.value = []
+  functionSelection.value = []
+  functionMessage.value = ''
 })
 
 watch(() => form.functionPath, () => {
+  form.keywords = ''
   keywordGroups.value = []
   selectedKeywords.value = []
   loadedFunctionPath.value = ''
   keywordMessage.value = ''
 })
+
+async function fetchFunctionOptions(path: string[], requestID: number) {
+  loadingFunctions.value = true
+  functionMessage.value = ''
+  try {
+    const app: any = await import('../../wailsjs/go/main/App')
+    const response = await app.Get51JobFunctionOptions(path)
+    if (requestID !== functionRequestID) return
+    if (response.status !== 'ready') { functionMessage.value = response.message; return }
+    functionColumns.value = [...functionColumns.value.slice(0, path.length), response.options || []]
+  } catch (error: any) {
+    if (requestID === functionRequestID) functionMessage.value = `读取 51job 职能失败：${error.message || error}`
+  } finally {
+    if (requestID === functionRequestID) loadingFunctions.value = false
+  }
+}
+
+async function openFunctionPicker() {
+  functionPickerOpen.value = true
+  functionColumns.value = []
+  functionSelection.value = []
+  await fetchFunctionOptions([], ++functionRequestID)
+}
+
+async function selectFunction(level: number, option: { name: string, leaf: boolean }) {
+  const path = [...functionSelection.value.slice(0, level), option.name]
+  functionSelection.value = path
+  if (option.leaf) {
+    functionRequestID++
+    loadingFunctions.value = false
+    form.functionPath = path.join(' > ')
+    functionPickerOpen.value = false
+    return
+  }
+  form.functionPath = ''
+  functionColumns.value = functionColumns.value.slice(0, level + 1)
+  await fetchFunctionOptions(path, ++functionRequestID)
+}
 
 function toggleKeyword(word: string) {
   if (selectedKeywords.value.includes(word)) {
@@ -111,7 +173,7 @@ function toggleKeyword(word: string) {
 
 async function loadKeywordSuggestions() {
   const path = form.functionPath.trim()
-  if (path.split('>').filter(Boolean).length < 2) { ElMessage.warning('请先填写到末级的 51job 职能路径'); return }
+  if (path.split('>').filter(Boolean).length < 2) { ElMessage.warning('请先从 51job 全部职能中选到末级'); return }
   loadingKeywords.value = true
   keywordMessage.value = ''
   try {
@@ -132,7 +194,7 @@ async function submit(action: 'draft' | 'publish') {
   const errors: string[] = []
   if (!form.title.trim()) errors.push('请填写职位名称')
   if (form.description.trim().length < 50) errors.push(`职位描述还差 ${50 - form.description.trim().length} 字`)
-  if (form.functionPath.split('>').filter(s => s.trim()).length < 2) errors.push('51job 职能路径需填写到末级，例如“互联网技术 > 测试 > 软件测试”')
+  if (form.functionPath.split('>').filter(s => s.trim()).length < 2) errors.push('请先从 51job 全部职能中选到末级')
   if (!keywords.length) errors.push('请填写至少一个关键词')
   if (keywords.length > 10) errors.push('51job 关键词最多 10 个')
   if (!form.minSalary || !form.maxSalary || form.maxSalary < form.minSalary) errors.push('请填写有效的月薪范围')
@@ -179,6 +241,14 @@ async function openLogin() {
 .platform span { font-size: 12px; }
 .posting-form { max-height: 55vh; overflow-y: auto; padding-right: 8px; }
 .form-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 16px; }
+.function-panel { border: 1px solid #cbd5e1; border-radius: 8px; margin: 0 0 14px; padding: 10px; }
+.function-panel p { margin: 0 0 8px; color: #334155; font-weight: 600; }
+.function-columns { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+.function-column { min-height: 180px; max-height: 260px; overflow-y: auto; background: #f8fafc; border-radius: 5px; padding: 6px; }
+.function-heading { display: block; font-size: 12px; color: #64748b; margin: 4px 6px 8px; }
+.function-option { display: flex; justify-content: space-between; width: 100%; border: 0; border-radius: 4px; background: transparent; text-align: left; padding: 7px; cursor: pointer; color: #334155; }
+.function-option:hover, .function-option.selected { background: #e0f2fe; color: #0369a1; }
+.function-message { margin-top: 8px !important; color: #b45309 !important; }
 .keyword-panel { border: 1px solid #bae6fd; background: #f0f9ff; border-radius: 8px; padding: 12px; margin: 0 0 14px; }
 .keyword-panel p { color: #075985; font-weight: 600; margin: 0 0 10px; }
 .keyword-group { margin-top: 10px; }
