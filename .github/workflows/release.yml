@@ -54,6 +54,9 @@ jobs:
         working-directory: frontend
         run: npm ci
 
+      - name: Install browser automation dependency
+        run: npm ci --omit=dev
+
       - name: Build for Windows ${{ matrix.arch }}
         run: wails build -platform windows/${{ matrix.arch }} -ldflags "-s -w"
 
@@ -61,8 +64,13 @@ jobs:
         shell: pwsh
         run: |
           $version = "${{ env.RELEASE_TAG }}" -replace '^v', ''
-          $artifact = "${{ env.APP_NAME }}-$version-windows-${{ matrix.arch }}.exe"
-          Copy-Item "build/bin/${{ env.APP_NAME }}.exe" "build/bin/$artifact"
+          $artifact = "${{ env.APP_NAME }}-$version-windows-${{ matrix.arch }}.zip"
+          $stage = "build/bin/package-${{ matrix.arch }}"
+          New-Item -ItemType Directory -Force "$stage/scripts" | Out-Null
+          Copy-Item "build/bin/${{ env.APP_NAME }}.exe" "$stage/${{ env.APP_NAME }}.exe"
+          Copy-Item "scripts/multi_platform_agent.js", "scripts/51job_job_publisher.js", "scripts/boss_agent.js" "$stage/scripts/"
+          Copy-Item "node_modules" "$stage/node_modules" -Recurse
+          Compress-Archive -Path "$stage/*" -DestinationPath "build/bin/$artifact"
           echo "ARTIFACT=$artifact" >> $env:GITHUB_ENV
 
       - name: Upload artifact
@@ -221,8 +229,8 @@ jobs:
 
           | 平台 | 架构 | 文件 |
           |------|------|------|
-          | Windows | x64 | \`TalentLens-${version}-windows-amd64.exe\` |
-          | Windows | ARM64 | \`TalentLens-${version}-windows-arm64.exe\` |
+          | Windows | x64 | \`TalentLens-${version}-windows-amd64.zip\` |
+          | Windows | ARM64 | \`TalentLens-${version}-windows-arm64.zip\` |
           | macOS | Intel | \`TalentLens-${version}-macos-amd64.zip\` |
           | macOS | Apple Silicon | \`TalentLens-${version}-macos-arm64.zip\` |
           | Linux | x64 | \`TalentLens-${version}-linux-amd64.tar.gz\` |
@@ -230,7 +238,7 @@ jobs:
 
           ### 使用说明
 
-          - **Windows**: 下载 \`.exe\` 文件，双击运行
+          - **Windows**: 下载 \`.zip\` 并完整解压；先安装 Node.js，再双击其中的 \`TalentLens.exe\`
           - **macOS**: 下载 \`.zip\` 解压后拖入 Applications
           - **Linux**: 下载 \`.tar.gz\` 解压后运行
 
