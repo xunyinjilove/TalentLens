@@ -28,13 +28,18 @@
       </div>
       <div v-if="functionPickerOpen" class="function-panel">
         <p>51job 全部职能 · 逐级选择至末级</p>
+        <div class="function-status" :class="{ error: functionError }">
+          <span>{{ functionMessage }}</span>
+          <el-button v-if="functionError" size="small" @click="retryFunctionOptions">重试加载</el-button>
+        </div>
         <div class="function-columns">
-          <div v-for="(column, level) in functionColumns" :key="level" class="function-column">
-            <span class="function-heading">{{ ['一级职能', '二级职能', '具体职能'][level] }}</span>
-            <button v-for="option in column" :key="option.name" type="button" class="function-option" :class="{ selected: functionSelection[level] === option.name }" @click="selectFunction(level, option)">{{ option.name }}<span v-if="!option.leaf">›</span></button>
+          <div v-for="level in 3" :key="level" class="function-column">
+            <span class="function-heading">{{ ['一级职能', '二级职能', '具体职能'][level - 1] }}</span>
+            <span v-if="loadingFunctions && functionSelection.length === level - 1 && !functionColumns[level - 1]" class="function-placeholder">正在读取 51job 职能…</span>
+            <span v-else-if="!functionColumns[level - 1]" class="function-placeholder">{{ functionError && functionSelection.length === level - 1 ? '加载失败，请点击上方重试' : '请先选择上一级' }}</span>
+            <button v-for="option in functionColumns[level - 1] || []" :key="option.name" type="button" class="function-option" :class="{ selected: functionSelection[level - 1] === option.name }" :disabled="loadingFunctions" @click="selectFunction(level - 1, option)">{{ option.name }}<span v-if="!option.leaf">›</span></button>
           </div>
         </div>
-        <p v-if="functionMessage" class="function-message">{{ functionMessage }}</p>
       </div>
       <p v-if="form.jobType === '校园招聘'" class="location-note">校招按 51job 的应届生条件填写，可能同步到应届生求职网并消耗职位配额；请以平台页面显示的实时规则为准。</p>
       <div v-if="keywordGroups.length" class="keyword-panel">
@@ -75,6 +80,7 @@ const loadingKeywords = ref(false)
 const loadingFunctions = ref(false)
 const functionPickerOpen = ref(false)
 const functionMessage = ref('')
+const functionError = ref(false)
 const functionColumns = ref<Array<Array<{ name: string, leaf: boolean }>>>([])
 const functionSelection = ref<string[]>([])
 let functionRequestID = 0
@@ -113,6 +119,7 @@ watch(() => props.project, project => {
   functionColumns.value = []
   functionSelection.value = []
   functionMessage.value = ''
+  functionError.value = false
 })
 
 watch(() => form.functionPath, () => {
@@ -125,18 +132,34 @@ watch(() => form.functionPath, () => {
 
 async function fetchFunctionOptions(path: string[], requestID: number) {
   loadingFunctions.value = true
-  functionMessage.value = ''
+  functionError.value = false
+  functionMessage.value = `正在读取 51job ${path.length + 1} 级职能，请稍候…`
   try {
     const app: any = await import('../../wailsjs/go/main/App')
     const response = await app.Get51JobFunctionOptions(path)
     if (requestID !== functionRequestID) return
-    if (response.status !== 'ready') { functionMessage.value = response.message; return }
+    if (response.status !== 'ready') {
+      functionError.value = true
+      functionMessage.value = response.message || '51job 职能加载失败'
+      ElMessage.error(functionMessage.value)
+      return
+    }
     functionColumns.value = [...functionColumns.value.slice(0, path.length), response.options || []]
+    functionMessage.value = `已加载 ${response.options?.length || 0} 项，请继续选择${path.length === 2 ? '具体职能' : '下一级职能'}`
   } catch (error: any) {
-    if (requestID === functionRequestID) functionMessage.value = `读取 51job 职能失败：${error.message || error}`
+    if (requestID === functionRequestID) {
+      functionError.value = true
+      functionMessage.value = `读取 51job 职能失败：${error.message || error}`
+      ElMessage.error(functionMessage.value)
+    }
   } finally {
     if (requestID === functionRequestID) loadingFunctions.value = false
   }
+}
+
+async function retryFunctionOptions() {
+  const path = [...functionSelection.value]
+  await fetchFunctionOptions(path, ++functionRequestID)
 }
 
 async function openFunctionPicker() {
@@ -147,6 +170,7 @@ async function openFunctionPicker() {
 }
 
 async function selectFunction(level: number, option: { name: string, leaf: boolean }) {
+  if (loadingFunctions.value) return
   const path = [...functionSelection.value.slice(0, level), option.name]
   functionSelection.value = path
   if (option.leaf) {
@@ -246,9 +270,12 @@ async function openLogin() {
 .function-columns { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
 .function-column { min-height: 180px; max-height: 260px; overflow-y: auto; background: #f8fafc; border-radius: 5px; padding: 6px; }
 .function-heading { display: block; font-size: 12px; color: #64748b; margin: 4px 6px 8px; }
+.function-status { display: flex; justify-content: space-between; align-items: center; min-height: 30px; margin-bottom: 8px; color: #0369a1; font-size: 13px; }
+.function-status.error { color: #b91c1c; }
 .function-option { display: flex; justify-content: space-between; width: 100%; border: 0; border-radius: 4px; background: transparent; text-align: left; padding: 7px; cursor: pointer; color: #334155; }
 .function-option:hover, .function-option.selected { background: #e0f2fe; color: #0369a1; }
-.function-message { margin-top: 8px !important; color: #b45309 !important; }
+.function-option:disabled { cursor: wait; }
+.function-placeholder { display: block; color: #94a3b8; font-size: 12px; padding: 7px; }
 .keyword-panel { border: 1px solid #bae6fd; background: #f0f9ff; border-radius: 8px; padding: 12px; margin: 0 0 14px; }
 .keyword-panel p { color: #075985; font-weight: 600; margin: 0 0 10px; }
 .keyword-group { margin-top: 10px; }
