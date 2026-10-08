@@ -109,9 +109,8 @@
           </div>
         </div>
 
-        <!-- 展开的岗位职责与要求详情抽屉/卡片 (GPU加速极速展开，0卡顿) -->
-        <Transition name="panel-expand">
-          <div v-show="showJobDetails" class="job-details-expand">
+        <!-- 编辑面板常驻挂载，仅切换可见性；避免每次点击重新创建表单控件。 -->
+        <div v-show="showJobDetails" class="job-details-expand">
             <div class="expand-grid">
               <div class="expand-col">
                 <label class="expand-label">岗位名称</label>
@@ -204,8 +203,7 @@
                 保存当前岗位配置
               </el-button>
             </div>
-          </div>
-        </Transition>
+        </div>
       </section>
 
       <!-- 下方：招聘项目列表区域 -->
@@ -828,6 +826,8 @@ $text-muted: #86868b;
 }
 
 .job-details-expand {
+  // 隔离面板内部的布局计算；展开时不再执行整块面板的过渡动画。
+  contain: layout;
   margin-top: 14px;
   padding: 16px;
   background: #ffffff;
@@ -911,21 +911,6 @@ $text-muted: #86868b;
       color: $text-muted;
     }
   }
-}
-
-// GPU 硬件加速的极速展开收起动画，杜绝 JS 计算 scrollHeight 导致的重排重绘卡顿
-.panel-expand-enter-active {
-  transition: opacity 0.2s cubic-bezier(0.16, 1, 0.3, 1), transform 0.2s cubic-bezier(0.16, 1, 0.3, 1);
-  will-change: opacity, transform;
-}
-.panel-expand-leave-active {
-  transition: opacity 0.15s ease, transform 0.15s ease;
-  will-change: opacity, transform;
-}
-.panel-expand-enter-from,
-.panel-expand-leave-to {
-  opacity: 0;
-  transform: translateY(-8px);
 }
 
 /* 项目列表区域样式 */
