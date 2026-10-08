@@ -55,8 +55,23 @@
       <el-form-item label="补充自定义关键词（可选，逗号分隔）"><el-input v-model="form.keywords" placeholder="例如：接口测试,Postman；与上方勾选词合计不超过 10 个" /></el-form-item>
       <p v-if="project?.job_config?.required_skills?.length" class="skill-hint">项目技能参考：{{ project.job_config.required_skills.slice(0, 5).join('、') }}</p>
       <el-alert v-if="keywordMessage" :closable="false" :title="keywordMessage" type="info" />
-      <p class="location-note">工作地址和发布城市沿用已登录 51job 企业账号当前选定的地址与城市。请先在 51job 页面核对；软件不会猜测或改写这两项。</p>
-      <el-checkbox v-model="locationConfirmed">我已在 51job 页面核对工作地址、发布城市及公司账号</el-checkbox>
+      <div class="posting-extra">
+        <el-form-item label="上班地址（从 51job 企业账号已有地址中更换）">
+          <div class="posting-inline"><el-input v-model="addressQuery" placeholder="输入城市或详细地址搜索" @keyup.enter="loadPostingOptions('address')" /><el-button :loading="loadingPostingOptions.address" @click="loadPostingOptions('address')">搜索已有地址</el-button></div>
+          <el-select v-model="form.address" clearable filterable placeholder="沿用 51job 当前地址" style="width: 100%; margin-top: 8px" @change="locationConfirmed = false"><el-option v-for="item in addressOptions" :key="item" :label="item" :value="item" /></el-select>
+          <span v-if="currentAddress" class="field-hint">平台当前地址：{{ currentAddress }}；发布城市：{{ currentCity || '请在平台核对' }}</span>
+        </el-form-item>
+        <el-form-item label="语言及熟练程度（可选）">
+          <div class="posting-inline"><el-select v-model="form.language" clearable placeholder="选择语言" style="width: 100%" @change="changeLanguage"><el-option v-for="item in languageOptions" :key="item" :label="item" :value="item" /></el-select><el-select v-model="form.languageLevel" clearable :disabled="!form.language || loadingPostingOptions.language" placeholder="熟练程度" style="width: 100%"><el-option v-for="item in languageLevels" :key="item" :label="item" :value="item" /></el-select><el-button :loading="loadingPostingOptions.language" @click="loadPostingOptions('language')">加载语言</el-button></div>
+        </el-form-item>
+        <el-form-item label="证书（可选，最多 10 项）">
+          <div class="posting-inline"><el-select v-model="certificateCategory" placeholder="证书分类" style="width: 100%" @change="changeCertificateCategory"><el-option v-for="item in certificateCategories" :key="item" :label="item" :value="item" /></el-select><el-select v-model="certificateName" :disabled="!certificateCategory" placeholder="选择证书" style="width: 100%"><el-option v-for="item in certificateOptions" :key="item" :label="item" :value="item" /></el-select><el-button :loading="loadingPostingOptions.certificate" @click="loadPostingOptions('certificate')">加载证书</el-button><el-button :disabled="!certificateName || form.certificates.length >= 10" @click="addCertificate">添加</el-button></div>
+          <div v-if="form.certificates.length" class="selected-certificates"><el-tag v-for="item in form.certificates" :key="item.name" closable @close="removeCertificate(item.name)">{{ item.name }}</el-tag></div>
+        </el-form-item>
+        <el-alert v-if="postingOptionsMessage" :closable="false" :type="postingOptionsError ? 'warning' : 'info'" :title="postingOptionsMessage" />
+      </div>
+      <p class="location-note">发布城市由 51job 根据所选地址处理；提交前会回读所选地址。请核对公司账号及发布城市。</p>
+      <el-checkbox v-model="locationConfirmed">我已核对上班地址、发布城市及公司账号</el-checkbox>
     </el-form>
     <el-alert v-if="result" :type="['saved', 'published'].includes(result.status) ? 'success' : 'warning'" :closable="false" :title="result.message" show-icon />
     <div v-if="result?.status === 'uncertain'" class="submission-review">
@@ -102,11 +117,24 @@ const keywordMessage = ref('')
 const keywordGroups = ref<Array<{ name: string, keywords: string[] }>>([])
 const selectedKeywords = ref<string[]>([])
 const loadedFunctionPath = ref('')
+const addressQuery = ref('')
+const addressOptions = ref<string[]>([])
+const currentAddress = ref('')
+const currentCity = ref('')
+const languageOptions = ref<string[]>([])
+const languageLevels = ref<string[]>([])
+const certificateCategories = ref<string[]>([])
+const certificateOptions = ref<string[]>([])
+const certificateCategory = ref('')
+const certificateName = ref('')
+const loadingPostingOptions = reactive({ address: false, language: false, certificate: false })
+const postingOptionsMessage = ref('')
+const postingOptionsError = ref(false)
 const completed = computed(() => ['saved', 'published', 'uncertain'].includes(result.value?.status || ''))
 const currentKeywords = () => [...new Set([...selectedKeywords.value, ...form.keywords.split(/[,，、]/).map(s => s.trim()).filter(Boolean)])]
 const keywordCount = computed(() => currentKeywords().length)
 const educationOptions = ['本科', '大专', '硕士', '博士', '中技/中专', '高中', '初中及以下', '无学历要求']
-const form = reactive({ jobType: '社会招聘', title: '', description: '', functionPath: '', keywords: '', minSalary: 0, maxSalary: 0, salaryMonths: 0, headcount: 1, experienceYears: 0, education: '本科' })
+const form = reactive({ jobType: '社会招聘', title: '', description: '', functionPath: '', keywords: '', minSalary: 0, maxSalary: 0, salaryMonths: 0, headcount: 1, experienceYears: 0, education: '本科', address: '', language: '', languageLevel: '', certificates: [] as Array<{ category: string, name: string }> })
 
 watch(() => props.modelValue, value => { opened.value = value })
 watch(opened, value => {
@@ -126,6 +154,22 @@ watch(() => props.project, project => {
   form.headcount = project.headcount || 1
   form.experienceYears = Math.min(10, Math.max(0, project.job_config?.experience_years || 0))
   form.education = educationOptions.includes(project.job_config?.education_level) ? project.job_config.education_level : '本科'
+  form.address = ''
+  form.language = ''
+  form.languageLevel = ''
+  form.certificates = []
+  addressQuery.value = ''
+  addressOptions.value = []
+  currentAddress.value = ''
+  currentCity.value = ''
+  languageOptions.value = []
+  languageLevels.value = []
+  certificateCategories.value = []
+  certificateOptions.value = []
+  certificateCategory.value = ''
+  certificateName.value = ''
+  postingOptionsMessage.value = ''
+  postingOptionsError.value = false
   result.value = null
   locationConfirmed.value = false
   absenceConfirmed.value = false
@@ -149,6 +193,59 @@ watch(() => form.functionPath, () => {
   loadedFunctionPath.value = ''
   keywordMessage.value = ''
 })
+
+async function loadPostingOptions(kind: 'address' | 'language' | 'certificate', category = certificateCategory.value) {
+  if (loadingPostingOptions[kind]) return
+  loadingPostingOptions[kind] = true
+  postingOptionsMessage.value = ''
+  postingOptionsError.value = false
+  try {
+    const app: any = await import('../../wailsjs/go/main/App')
+    const response = await app.Get51JobPostingOptions(kind, kind === 'address' ? addressQuery.value.trim() : '', kind === 'certificate' ? category : kind === 'language' ? form.language : '')
+    if (response.status !== 'ready') {
+      postingOptionsError.value = true
+      postingOptionsMessage.value = response.message || '51job 选项加载失败'
+      return
+    }
+    currentAddress.value = response.currentAddress || ''
+    currentCity.value = response.currentCity || ''
+    if (kind === 'address') {
+      addressOptions.value = [...new Set([...(response.options || []), form.address, currentAddress.value].filter(Boolean))]
+    } else if (kind === 'language') {
+      languageOptions.value = response.options || []
+      languageLevels.value = response.levels || []
+    } else {
+      certificateCategories.value = response.categories || []
+      certificateOptions.value = response.options || []
+    }
+    postingOptionsMessage.value = response.message || '选项已加载'
+  } catch (error: any) {
+    postingOptionsError.value = true
+    postingOptionsMessage.value = `无法读取 51job 选项：${error.message || error}`
+  } finally { loadingPostingOptions[kind] = false }
+}
+
+async function changeCertificateCategory() {
+  certificateName.value = ''
+  certificateOptions.value = []
+  if (certificateCategory.value) await loadPostingOptions('certificate', certificateCategory.value)
+}
+
+function addCertificate() {
+  if (!certificateCategory.value || !certificateName.value) return
+  if (form.certificates.some(item => item.name === certificateName.value)) { ElMessage.warning('该证书已添加'); return }
+  if (form.certificates.length >= 10) { ElMessage.warning('最多选择 10 项证书'); return }
+  form.certificates.push({ category: certificateCategory.value, name: certificateName.value })
+  certificateName.value = ''
+}
+
+async function changeLanguage() {
+  form.languageLevel = ''
+  languageLevels.value = []
+  if (form.language) await loadPostingOptions('language')
+}
+
+function removeCertificate(name: string) { form.certificates = form.certificates.filter(item => item.name !== name) }
 
 async function fetchFunctionOptions(path: string[], requestID: number, recoverOnLogin = true) {
   loadingFunctions.value = true
@@ -312,6 +409,7 @@ async function submit(action: 'draft' | 'publish') {
   if (keywords.length > 10) errors.push('51job 关键词最多 10 个')
   if (!form.minSalary || !form.maxSalary || form.maxSalary < form.minSalary) errors.push('请填写有效的月薪范围')
   if (!form.salaryMonths) errors.push('请选择年薪发放月数')
+  if (Boolean(form.language) !== Boolean(form.languageLevel)) errors.push('请选择语言及熟练程度')
   if (errors.length) {
     ElMessage.warning(errors.join('；'))
     return
@@ -326,7 +424,8 @@ async function submit(action: 'draft' | 'publish') {
       jobType: form.jobType,
       title: form.title.trim(), description: form.description.trim(), functionPath: form.functionPath.trim(),
       keywords, minSalary: form.minSalary, maxSalary: form.maxSalary, salaryMonths: form.salaryMonths,
-      headcount: form.headcount, experienceYears: form.jobType === '校园招聘' ? 0 : form.experienceYears, education: form.education
+      headcount: form.headcount, experienceYears: form.jobType === '校园招聘' ? 0 : form.experienceYears, education: form.education,
+      address: form.address, language: form.language, languageLevel: form.languageLevel, certificates: form.certificates
     }
     result.value = action === 'publish' ? await app.Publish51Job(request) : await app.Save51JobDraft(request)
     if (['saved', 'published'].includes(result.value?.status || '')) ElMessage.success(result.value!.message)
@@ -387,5 +486,11 @@ async function openLogin(): Promise<boolean> {
 .keyword-option.selected { background: #dbeafe; border-color: #3b82f6; color: #1d4ed8; }
 .skill-hint { color: #64748b; font-size: 12px; margin: -8px 0 14px; }
 .location-note { color: #92400e; background: #fffbeb; border-radius: 8px; padding: 10px; margin: 0 0 15px; }
+.posting-extra { border: 1px solid #cbd5e1; border-radius: 8px; padding: 12px; margin: 12px 0; }
+.posting-inline { display: flex; gap: 8px; width: 100%; align-items: center; }
+.posting-inline .el-input, .posting-inline .el-select { min-width: 0; flex: 1 1 0; }
+.posting-inline .el-button { flex: 0 0 auto; }
+.field-hint { color: #64748b; font-size: 12px; line-height: 1.5; }
+.selected-certificates { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
 @media (max-width: 620px) { .platforms, .form-grid { grid-template-columns: repeat(2, 1fr); } }
 </style>

@@ -1123,19 +1123,38 @@ func hideConsoleWindow(cmd *exec.Cmd) {
 
 // JobDraftRequest 为 51job 草稿提供项目外仍需由 HR 确认的字段；薪资绝不从旧岗位猜测。
 type JobDraftRequest struct {
-	ProjectID       string   `json:"projectId"`
-	JobType         string   `json:"jobType"`
-	Action          string   `json:"action"`
-	Title           string   `json:"title"`
-	Description     string   `json:"description"`
-	FunctionPath    string   `json:"functionPath"`
-	Keywords        []string `json:"keywords"`
-	MinSalary       int      `json:"minSalary"`
-	MaxSalary       int      `json:"maxSalary"`
-	SalaryMonths    int      `json:"salaryMonths"`
-	Headcount       int      `json:"headcount"`
-	ExperienceYears int      `json:"experienceYears"`
-	Education       string   `json:"education"`
+	ProjectID       string           `json:"projectId"`
+	JobType         string           `json:"jobType"`
+	Action          string           `json:"action"`
+	Title           string           `json:"title"`
+	Description     string           `json:"description"`
+	FunctionPath    string           `json:"functionPath"`
+	Keywords        []string         `json:"keywords"`
+	MinSalary       int              `json:"minSalary"`
+	MaxSalary       int              `json:"maxSalary"`
+	SalaryMonths    int              `json:"salaryMonths"`
+	Headcount       int              `json:"headcount"`
+	ExperienceYears int              `json:"experienceYears"`
+	Education       string           `json:"education"`
+	Address         string           `json:"address"`
+	Language        string           `json:"language"`
+	LanguageLevel   string           `json:"languageLevel"`
+	Certificates    []JobCertificate `json:"certificates"`
+}
+
+type JobCertificate struct {
+	Category string `json:"category"`
+	Name     string `json:"name"`
+}
+
+type JobPostingOptionsResult struct {
+	Status         string   `json:"status"`
+	Message        string   `json:"message"`
+	Options        []string `json:"options"`
+	Levels         []string `json:"levels"`
+	Categories     []string `json:"categories"`
+	CurrentAddress string   `json:"currentAddress"`
+	CurrentCity    string   `json:"currentCity"`
 }
 
 type JobKeywordGroup struct {
@@ -1307,6 +1326,23 @@ func (a *App) Get51JobKeywordSuggestions(functionPath string) JobKeywordSuggesti
 	var result JobKeywordSuggestionResult
 	if json.Unmarshal(bytes.TrimSpace(out), &result) != nil || result.Status == "" {
 		return JobKeywordSuggestionResult{Status: "error", Message: "无法解析 51job 推荐关键词"}
+	}
+	return result
+}
+
+// Get51JobPostingOptions 从已登录的职位表单读取已有地址、语言或证书，不提交职位。
+func (a *App) Get51JobPostingOptions(kind, query, category string) JobPostingOptionsResult {
+	if kind != "address" && kind != "language" && kind != "certificate" {
+		return JobPostingOptionsResult{Status: "error", Message: "职位选项类型无效"}
+	}
+	payload, _ := json.Marshal(map[string]string{"kind": kind, "query": query, "category": category})
+	out, err := run51JobScript(payload, 40*time.Second, "--posting-options")
+	if err != nil {
+		return JobPostingOptionsResult{Status: "error", Message: err.Error()}
+	}
+	var result JobPostingOptionsResult
+	if json.Unmarshal(bytes.TrimSpace(out), &result) != nil || result.Status == "" {
+		return JobPostingOptionsResult{Status: "error", Message: "无法解析 51job 职位选项"}
 	}
 	return result
 }
