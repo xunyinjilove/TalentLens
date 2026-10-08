@@ -68,7 +68,7 @@ jobs:
           $stage = "build/bin/package-${{ matrix.arch }}"
           New-Item -ItemType Directory -Force "$stage/scripts" | Out-Null
           Copy-Item "build/bin/${{ env.APP_NAME }}.exe" "$stage/${{ env.APP_NAME }}.exe"
-          Copy-Item "scripts/multi_platform_agent.js", "scripts/51job_job_publisher.js", "scripts/everyday_edge.js", "scripts/boss_agent.js" "$stage/scripts/"
+          Copy-Item "scripts/multi_platform_agent.js", "scripts/51job_job_publisher.js", "scripts/boss_agent.js" "$stage/scripts/"
           Copy-Item "node_modules" "$stage/node_modules" -Recurse
           Compress-Archive -Path "$stage/*" -DestinationPath "build/bin/$artifact"
           echo "ARTIFACT=$artifact" >> $env:GITHUB_ENV

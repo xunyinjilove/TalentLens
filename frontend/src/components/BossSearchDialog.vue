@@ -262,7 +262,7 @@
           />
           <div class="silent-sandbox-badge" v-if="searching">
             <span class="silent-dot"></span>
-            <span>🛡️ 常用 Edge 后台检索中 · 详情页读取后会再次最小化窗口；需要登录或验证时会显示浏览器</span>
+            <span>🛡️ 专用浏览器后台检索中 · 详情页读取后会再次最小化；需要登录或验证时会显示浏览器</span>
           </div>
         </div>
 

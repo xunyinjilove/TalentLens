@@ -150,6 +150,22 @@ test('Edge MSN start page is not mistaken for a recruiting login page', async ()
   assert.equal(agent.isPlatformPageUrl(page.url(), cfg), true);
 });
 
+test('Edge starts once on the recruiting URL in a minimized window', () => {
+  const cfg = { debugPort: 9503, homeUrl: 'https://ehire.51job.com/Revision/talent/search' };
+  assert.deepEqual(agent.browserLaunchArgs(cfg, 'C:\\TalentLens\\51job_profile', false), [
+    '--remote-debugging-port=9503', '--user-data-dir=C:\\TalentLens\\51job_profile',
+    '--no-first-run', '--no-default-browser-check', '--start-minimized', cfg.homeUrl
+  ]);
+});
+
+test('unused Edge new-tab window is closed without closing the recruiting tab', async () => {
+  let closed = 0;
+  const selected = { url: () => 'https://ehire.51job.com/Revision/talent/search', close: async () => { throw Error('search tab must stay open'); } };
+  const startPage = { url: () => 'edge://newtab/', close: async () => { closed++; } };
+  await agent.closeUnusedStartPages({ pages: async () => [selected, startPage] }, selected);
+  assert.equal(closed, 1);
+});
+
 test('51job search clicks the real button instead of its same-text parent', async () => {
   let parentClicks = 0;
   let buttonClicks = 0;
