@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"crypto/tls"
 	"embed"
 	"encoding/base64"
@@ -179,6 +180,8 @@ type AnalysisResult struct {
 	RedLineStatus     string         `json:"red_line_status,omitempty"` // passed | failed | pending | not_configured
 	CoreMatch         float64        `json:"core_match,omitempty"`
 	BonusMatch        float64        `json:"bonus_match,omitempty"`
+	AbilityScore      int            `json:"ability_score,omitempty"` // 核心能力原始分，不受红线状态影响
+	BonusScore        int            `json:"bonus_score,omitempty"`   // 核心达标后最多加 10 分
 	BonusMatches      []string       `json:"bonus_matches,omitempty"` // 命中的核心加分项列表
 
 	// 面试建议
@@ -191,9 +194,20 @@ type AnalysisResult struct {
 }
 
 type RedLineCheck struct {
-	Criterion string `json:"criterion"`
-	Status    string `json:"status"` // met | violated | unknown
-	Evidence  string `json:"evidence"`
+	RuleID          string               `json:"rule_id,omitempty"`
+	Criterion       string               `json:"criterion"`
+	Status          string               `json:"status"`                     // met | violated | unknown；AI 只能产出 unknown
+	SuggestedStatus string               `json:"suggested_status,omitempty"` // AI 初步判断，不是录用结论
+	Evidence        string               `json:"evidence"`
+	ReviewedAt      string               `json:"reviewed_at,omitempty"`
+	ReviewHistory   []RedLineReviewEvent `json:"review_history,omitempty"`
+}
+
+type RedLineReviewEvent struct {
+	Status     string `json:"status"`
+	Evidence   string `json:"evidence"`
+	Source     string `json:"source"` // hr_manual；当前本地软件没有个人身份认证
+	ReviewedAt string `json:"reviewed_at"`
 }
 
 // InterviewQuestion 结构化面试问题及基于简历的参考回答
@@ -2542,12 +2556,9 @@ func (a *App) buildAnalysisPrompt(resume *Resume, jobCfg *JobConfig) string {
 			"- 70-89: 学历满足要求，专业相关\n"+
 			"- 50-69: 学历勉强满足，专业有一定偏差\n"+
 			"- 0-49: 学历不满足要求\n\n"+
-			"**综合评分 (overall_score)** = core_match * 0.60 + bonus_match * 0.40；core_match 是直接相关项目和核心业务能力，bonus_match 是岗位加分项与综合素质。\n\n"+
-			"### 推荐等级（根据综合评分）\n"+
-			"- \"strong_recommend\": 综合分 >= 85，各单项均 >= 70\n"+
-			"- \"recommend\": 综合分 70-84\n"+
-			"- \"consider\": 综合分 55-69\n"+
-			"- \"not_recommend\": 综合分 < 55\n\n"+
+			"**核心能力 (core_match)** 为直接相关项目和核心业务能力的 0-100 分；bonus_match 仅反映有证据的额外优势。最终总分、加分上限和推荐等级由系统计算，不能用加分弥补核心能力不足。\n\n"+
+			"### 推荐等级\n"+
+			"模型只提供参考建议；岗位红线必须由 HR 核实后才可判定通过或不满足。\n\n"+
 			"### 输出要求\n\n"+
 			"请严格按以下JSON格式输出，不要输出任何其他内容：\n\n"+
 			"```json\n"+
@@ -2645,9 +2656,9 @@ func (a *App) buildAnalysisPrompt(resume *Resume, jobCfg *JobConfig) string {
 			"5. 确保返回合法的JSON格式\n"+
 			"6. 必须生成 manager_pitch（极简推介卡），文字精炼利落，适合直接转发微信/钉钉给业务主管，突出3条核心亮点与1条把关建议\n"+
 			"7. 必须生成 water_check（防伪注水雷达）：细致核查工作经历起止时间是否有未填写的断层空窗期，识别假大空缺乏量化的表述，并提供一针见血的初试防伪反问话术\n"+
-			"8. 严格执行用人部门红线裁决准则（最高优先级）：\n"+
+			"8. 对用人部门红线只提出待核实的事实线索，不直接作淘汰决定：\n"+
 			"   - 对每条红线返回一条 red_line_checks：criterion 必须逐字复制，status 仅能是 met/violated/unknown；evidence 必须是简历中可核对的原文短句。简历未写明时填 unknown，不能猜测满足或违反。\n"+
-			"   - 逐项对照「优先加分项」，如属实满足则填入 bonus_matches，并在综合评分与亮点中给予充分加分肯定。",
+			"   - 逐项对照「优先加分项」，仅在有具体事实依据时填入 bonus_matches；最终加分由系统封顶计算。",
 		jobCfg.Title,
 		jobCfg.ExperienceYears,
 		jobCfg.EducationLevel,
@@ -2859,75 +2870,111 @@ func (a *App) parseAnalysisResult(content string) (*AnalysisResult, error) {
 	return &result, nil
 }
 
-// applyJobDecision 以岗位配置为准逐条核对，不让模型遗漏红线时默认通过。
+// redLineRuleID 为旧版自由文本规则生成稳定标识；修改规则文本会产生新的标识。
+func redLineRuleID(criterion string) string {
+	digest := sha256.Sum256([]byte(strings.TrimSpace(criterion)))
+	return fmt.Sprintf("%x", digest[:8])
+}
+
+func scoreCandidate(result *AnalysisResult, hasBonusRules bool) {
+	if result.CoreMatch == 0 && result.BonusMatch == 0 {
+		result.CoreMatch = result.SkillMatch*0.55 + result.ExperienceMatch*0.45
+	}
+	result.CoreMatch = clampFloat(result.CoreMatch, 0, 100)
+	result.BonusMatch = clampFloat(result.BonusMatch, 0, 100)
+	result.AbilityScore = int(math.Round(result.CoreMatch))
+	result.BonusScore = 0
+	if hasBonusRules && len(result.BonusMatches) > 0 && result.AbilityScore >= 70 {
+		result.BonusScore = int(math.Round(result.BonusMatch / 10))
+	}
+	refreshCandidateRecommendation(result)
+}
+
+func refreshCandidateRecommendation(result *AnalysisResult) {
+	result.OverallScore = math.Min(100, float64(result.AbilityScore+result.BonusScore))
+	switch {
+	case result.AbilityScore < 55:
+		result.Recommendation = "not_recommend"
+	case result.AbilityScore < 70:
+		result.Recommendation = "consider"
+	case result.OverallScore >= 85:
+		result.Recommendation = "strong_recommend"
+	default:
+		result.Recommendation = "recommend"
+	}
+}
+
+func applyRedLineVerdict(result *AnalysisResult) {
+	result.RedLineViolations = nil
+	if len(result.RedLineChecks) == 0 {
+		result.RedLineStatus = "not_configured"
+		return
+	}
+	unknown, violated := false, false
+	for _, check := range result.RedLineChecks {
+		switch check.Status {
+		case "violated":
+			violated = true
+			result.RedLineViolations = append(result.RedLineViolations, check.Criterion+"："+check.Evidence)
+		case "met":
+		default:
+			unknown = true
+		}
+	}
+	if violated {
+		result.RedLineStatus, result.Recommendation = "failed", "not_recommend"
+	} else if unknown {
+		result.RedLineStatus = "pending"
+		if result.Recommendation == "recommend" || result.Recommendation == "strong_recommend" {
+			result.Recommendation = "consider"
+		}
+	} else {
+		result.RedLineStatus = "passed"
+	}
+}
+
+// applyJobDecision 只保存 AI 提议和原文证据；自由文本红线必须经 HR 核实后才会通过或拒绝。
 func (a *App) applyJobDecision(result *AnalysisResult, job *JobConfig, resume *Resume) {
 	if result == nil || job == nil {
 		return
 	}
-	if result.CoreMatch == 0 && result.BonusMatch == 0 {
-		result.CoreMatch = result.SkillMatch*0.55 + result.ExperienceMatch*0.45
-		result.BonusMatch = result.EducationMatch
-	}
-	result.CoreMatch = clampFloat(result.CoreMatch, 0, 100)
-	result.BonusMatch = clampFloat(result.BonusMatch, 0, 100)
-	result.OverallScore = math.Round(result.CoreMatch*0.6 + result.BonusMatch*0.4)
-	switch {
-	case result.OverallScore >= 85:
-		result.Recommendation = "strong_recommend"
-	case result.OverallScore >= 70:
-		result.Recommendation = "recommend"
-	case result.OverallScore >= 55:
-		result.Recommendation = "consider"
-	default:
-		result.Recommendation = "not_recommend"
-	}
-	result.RedLineViolations = nil
-	result.RedLineStatus = "not_configured"
-	if len(job.RedLines) == 0 {
-		return
-	}
+	scoreCandidate(result, len(job.BonusPoints) > 0)
 
 	checks := make([]RedLineCheck, 0, len(job.RedLines))
-	hasUnknown, hasViolation := false, false
 	for _, criterion := range job.RedLines {
 		criterion = strings.TrimSpace(criterion)
 		if criterion == "" {
 			continue
 		}
-		check := RedLineCheck{Criterion: criterion, Status: "unknown"}
+		check := RedLineCheck{RuleID: redLineRuleID(criterion), Criterion: criterion, Status: "unknown"}
+		if resume != nil && resume.Analysis != nil {
+			for _, previous := range resume.Analysis.RedLineChecks {
+				if previous.Criterion == criterion && previous.ReviewedAt != "" {
+					check = previous
+					check.RuleID = redLineRuleID(criterion)
+					break
+				}
+			}
+		}
+		if check.ReviewedAt != "" {
+			checks = append(checks, check)
+			continue
+		}
 		for _, proposed := range result.RedLineChecks {
 			if strings.TrimSpace(proposed.Criterion) != criterion {
 				continue
 			}
 			evidence := strings.Trim(proposed.Evidence, " \t\r\n\"“”")
-			if (proposed.Status == "met" || proposed.Status == "violated") && evidence != "" &&
+			if resume != nil && (proposed.Status == "met" || proposed.Status == "violated") && evidence != "" &&
 				(strings.Contains(resume.Content, evidence) || strings.Contains(resume.AttachmentContent, evidence)) {
-				check.Status, check.Evidence = proposed.Status, evidence
+				check.SuggestedStatus, check.Evidence = proposed.Status, evidence
 			}
 			break
 		}
 		checks = append(checks, check)
-		if check.Status == "violated" {
-			hasViolation = true
-			result.RedLineViolations = append(result.RedLineViolations, criterion+"："+check.Evidence)
-		} else if check.Status == "unknown" {
-			hasUnknown = true
-		}
 	}
 	result.RedLineChecks = checks
-	if hasViolation {
-		result.RedLineStatus = "failed"
-		result.Recommendation = "not_recommend"
-		result.OverallScore = math.Min(result.OverallScore, 49)
-	} else if hasUnknown {
-		result.RedLineStatus = "pending"
-		if result.Recommendation == "recommend" || result.Recommendation == "strong_recommend" {
-			result.Recommendation = "consider"
-		}
-		result.OverallScore = math.Min(result.OverallScore, 69)
-	} else {
-		result.RedLineStatus = "passed"
-	}
+	applyRedLineVerdict(result)
 }
 
 // generateFallbackManagerPitch 当大模型未返回推介卡时的容错生成器
@@ -3471,16 +3518,16 @@ func compareVersions(a, b string) int {
 }
 
 // logError 记录详细错误日志到本地磁盘文件
-func (a *App) logError(fileName, errMsg, prompt, rawResp string) {
+func (a *App) logError(_ string, _ string, _ string, _ string) {
 	logDir := filepath.Join(a.getDataDir(), "logs")
-	os.MkdirAll(logDir, 0755)
+	os.MkdirAll(logDir, 0700)
 	logFile := filepath.Join(logDir, fmt.Sprintf("error_%s.log", time.Now().Format("20060102")))
-	f, err := os.OpenFile(logFile, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	f, err := os.OpenFile(logFile, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0600)
 	if err == nil {
 		defer f.Close()
-		divider := strings.Repeat("=", 60)
-		logEntry := fmt.Sprintf("\n%s\n【时间】%s\n【文件】%s\n【错误详情】%s\n【AI原始返回】\n%s\n%s\n",
-			divider, time.Now().Format("2006-01-02 15:04:05"), fileName, errMsg, rawResp, divider)
+		_ = os.Chmod(logFile, 0600)
+		logEntry := fmt.Sprintf("【时间】%s 【AI处理】失败；候选人资料与模型原文未写入日志\n",
+			time.Now().Format("2006-01-02 15:04:05"))
 		f.WriteString(logEntry)
 		log.Printf("[logError] 已记录错误诊断日志: %s", logFile)
 	}

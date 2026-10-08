@@ -7,12 +7,38 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
 // SetReviewedRedLine 允许 HR 在核对简历原文或初面回答后留下明确结论和依据。
 func (a *App) SetReviewedRedLine(resumeID string, criterion string, status string, evidence string) (*Resume, error) {
+	return a.setReviewedRedLine(resumeID, criterion, status, evidence, "hr_manual")
+}
+
+// GetResumeRedLineChecks 仅读取指定候选人的红线核实状态，供初面窗口恢复 HR 已保存的结论。
+func (a *App) GetResumeRedLineChecks(resumeID string) ([]RedLineCheck, error) {
+	if !interviewIDPattern.MatchString(resumeID) {
+		return nil, fmt.Errorf("简历 ID 无效")
+	}
+	a.interviewMutex.Lock()
+	defer a.interviewMutex.Unlock()
+	data, err := os.ReadFile(filepath.Join(a.getDataDir(), "resumes", resumeID+".json"))
+	if err != nil {
+		return nil, err
+	}
+	var resume Resume
+	if err := json.Unmarshal(data, &resume); err != nil {
+		return nil, err
+	}
+	if resume.Analysis == nil {
+		return nil, fmt.Errorf("简历尚未分析")
+	}
+	return resume.Analysis.RedLineChecks, nil
+}
+
+func (a *App) setReviewedRedLine(resumeID string, criterion string, status string, evidence string, source string) (*Resume, error) {
 	if !interviewIDPattern.MatchString(resumeID) {
 		return nil, fmt.Errorf("简历 ID 无效")
 	}
@@ -45,6 +71,11 @@ func (a *App) SetReviewedRedLine(resumeID string, criterion string, status strin
 	for i := range checks {
 		if checks[i].Criterion == criterion {
 			checks[i].Status, checks[i].Evidence = status, evidence
+			checks[i].RuleID = redLineRuleID(criterion)
+			checks[i].ReviewedAt = time.Now().Format(time.RFC3339)
+			checks[i].ReviewHistory = append(checks[i].ReviewHistory, RedLineReviewEvent{
+				Status: status, Evidence: evidence, Source: source, ReviewedAt: checks[i].ReviewedAt,
+			})
 			found = true
 			break
 		}
@@ -54,39 +85,11 @@ func (a *App) SetReviewedRedLine(resumeID string, criterion string, status strin
 	}
 
 	analysis := resume.Analysis
-	analysis.RedLineViolations = nil
-	analysis.OverallScore = math.Round(analysis.CoreMatch*0.6 + analysis.BonusMatch*0.4)
-	switch {
-	case analysis.OverallScore >= 85:
-		analysis.Recommendation = "strong_recommend"
-	case analysis.OverallScore >= 70:
-		analysis.Recommendation = "recommend"
-	case analysis.OverallScore >= 55:
-		analysis.Recommendation = "consider"
-	default:
-		analysis.Recommendation = "not_recommend"
+	if analysis.AbilityScore == 0 && analysis.CoreMatch > 0 {
+		analysis.AbilityScore = int(math.Round(analysis.CoreMatch))
 	}
-	missing, violated := false, false
-	for _, check := range checks {
-		if check.Status == "violated" {
-			violated = true
-			analysis.RedLineViolations = append(analysis.RedLineViolations, check.Criterion+"："+check.Evidence)
-		} else if check.Status != "met" {
-			missing = true
-		}
-	}
-	if violated {
-		analysis.RedLineStatus, analysis.Recommendation = "failed", "not_recommend"
-		analysis.OverallScore = math.Min(analysis.OverallScore, 49)
-	} else if missing {
-		analysis.RedLineStatus = "pending"
-		analysis.OverallScore = math.Min(analysis.OverallScore, 69)
-		if analysis.Recommendation == "recommend" || analysis.Recommendation == "strong_recommend" {
-			analysis.Recommendation = "consider"
-		}
-	} else {
-		analysis.RedLineStatus = "passed"
-	}
+	refreshCandidateRecommendation(analysis)
+	applyRedLineVerdict(analysis)
 	analysis.ManagerPitch = a.generateFallbackManagerPitch(analysis, &resume)
 	if analysis.RedLineStatus == "failed" {
 		analysis.ManagerPitch = "【触碰岗位红线，需人工核验】\n" + analysis.ManagerPitch

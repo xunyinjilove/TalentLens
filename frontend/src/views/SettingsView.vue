@@ -175,17 +175,18 @@
             <!-- 🚫 一票否决红线 -->
             <div class="form-item" style="margin-top: 14px;">
               <label class="text-danger" style="font-weight: 600; margin-bottom: 8px; display: block;">
-                🚫 用人部门一票否决红线 (Deal Breakers / 触碰直接淘汰降级)
+                🚫 岗位必备条件（HR 核实后确认准入）
               </label>
               <TagInput
                 v-model="jobForm.redLines"
                 tag-type="danger"
-                placeholder="输入红线要求，回车即可添加一条（如：必须全日制统招、非外包出身、严禁频繁跳槽）"
+                placeholder="输入与岗位职责直接相关、可核验的必备条件"
                 quick-title="快捷填入:"
                 :preset-list="commonRedLines"
                 storage-key="talentlens_custom_redlines"
                 add-prompt-title="新增一票否决红线快捷项"
               />
+              <p>建议仅保留 1–3 条，并与用人经理确认业务理由和等价经历；AI 只给核实线索，不自动淘汰。</p>
             </div>
 
             <!-- ⭐ 核心优先加分项 -->
@@ -196,7 +197,7 @@
               <TagInput
                 v-model="jobForm.bonusPoints"
                 tag-type="warning"
-                placeholder="输入加分要求，回车即可添加一条（如：知名大厂背书、高并发实战经验、带过团队）"
+                placeholder="输入有事实依据的额外项目经验、成果或认证"
                 quick-title="快捷填入:"
                 :preset-list="commonBonusPoints"
                 storage-key="talentlens_custom_bonuses"
@@ -396,13 +397,16 @@ const commonSkills = [
 ]
 
 const commonRedLines = [
-  '全日制统招本科及以上硬卡', '杜绝频繁跳槽（近3年换工作>3次）', '严禁纯外包派遣/人力驻场经历', '核心必备技术必须具备实操经验',
-  '统招本科以下不考虑', '非对口医药/生物专业硬卡', '无独立负责大型项目经验'
+  '能说明岗位核心项目中本人负责的具体工作',
+  '具备岗位要求的有效执业或上岗资格（如适用）',
+  '能提供核心必备技能的实际应用案例'
 ]
 
 const commonBonusPoints = [
-  '知名大厂/独角兽/头部上市企业背书', '主导过日活千万级系统高并发微服务实战', '具备5人以上团队技术管理与带教经验', '开源项目主要贡献者或具备核心发明专利',
-  '头部IVD/药企大厂背景', '持有PCR上岗证/检验师资格', '硕士及以上学历优选'
+  '有与岗位相关、可量化的项目改善成果',
+  '具备跨团队协作与带教的具体案例',
+  '持有与岗位直接相关的专业认证',
+  '有可核验的开源贡献或技术成果'
 ]
 
 function addQuickRedLine(tag: string) {

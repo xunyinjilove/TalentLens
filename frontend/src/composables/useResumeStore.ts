@@ -76,10 +76,12 @@ export interface Resume {
       advise_questions?: string[]
     }
     redLineViolations?: string[]
-    redLineChecks?: Array<{ criterion: string; status: 'met' | 'violated' | 'unknown'; evidence: string }>
+    redLineChecks?: Array<{ rule_id?: string; criterion: string; status: 'met' | 'violated' | 'unknown'; suggested_status?: 'met' | 'violated'; evidence: string; reviewed_at?: string }>
     redLineStatus?: 'passed' | 'failed' | 'pending' | 'not_configured'
     coreMatch?: number
     bonusMatch?: number
+    abilityScore?: number
+    bonusScore?: number
     bonusMatches?: string[]
     interviewSuggestions: string[]
     interviewQA?: Array<{ category: string; question: string; reference_answer: string }>
@@ -239,6 +241,8 @@ export const useResumeStore = defineStore('resume', () => {
               redLineStatus: a.red_line_status || 'not_configured',
               coreMatch: a.core_match,
               bonusMatch: a.bonus_match,
+              abilityScore: a.ability_score,
+              bonusScore: a.bonus_score,
               bonusMatches: a.bonus_matches || [],
               interviewSuggestions: a.interview_suggestions || [],
               interviewQA: a.interview_qa || [],
@@ -709,6 +713,8 @@ export const useResumeStore = defineStore('resume', () => {
           redLineStatus: a.red_line_status || 'not_configured',
           coreMatch: a.core_match,
           bonusMatch: a.bonus_match,
+          abilityScore: a.ability_score,
+          bonusScore: a.bonus_score,
           bonusMatches: a.bonus_matches || [],
           interviewSuggestions: a.interview_suggestions || [],
           interviewQA: a.interview_qa || [],

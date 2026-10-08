@@ -172,18 +172,19 @@
             <!-- 🚫 一票否决红线 -->
             <div class="expand-full" style="margin-top: 14px;">
               <label class="expand-label text-danger" style="margin-bottom: 8px; display: block;">
-                🚫 用人部门一票否决红线 (Deal Breakers / 触碰直接淘汰降级)
+                🚫 岗位必备条件（HR 核实后确认准入）
               </label>
               <TagInput
                 v-model="currentJobConfig.redLines"
                 tag-type="danger"
-                placeholder="输入红线要求，回车即可添加一条（如：非全日制硬卡、频繁跳槽等）"
+                placeholder="输入与岗位职责直接相关、可核验的必备条件"
                 quick-title="快捷填入:"
                 :preset-list="commonRedLines"
                 storage-key="talentlens_custom_redlines"
                 add-prompt-title="新增一票否决红线快捷项"
                 @change="saveJobConfigToStorage"
               />
+              <p class="save-hint">建议仅保留 1–3 条，并与用人经理确认业务理由和等价经历；AI 只给核实线索，不自动淘汰。</p>
             </div>
 
             <!-- ⭐ 核心优先加分项 -->
@@ -194,7 +195,7 @@
               <TagInput
                 v-model="currentJobConfig.bonusPoints"
                 tag-type="warning"
-                placeholder="输入加分要求，回车即可添加一条（如：知名大厂背景、有海外项目等）"
+                placeholder="输入有事实依据的额外项目经验、成果或认证"
                 quick-title="快捷填入:"
                 :preset-list="commonBonusPoints"
                 storage-key="talentlens_custom_bonuses"
@@ -426,8 +427,8 @@ const currentJobConfig = reactive({
   experienceYears: 3,
   educationLevel: '本科',
   jobDescription: '岗位职责：\n1. 制定项目管理计划，按计划完成所负责的项目启动、开展及结束工作，确保通过药监部门核查；\n2. 根据项目研发资料、指导原则、行业标准等要求，设计临床试验方案；\n3. 对所负责的临床试验项目进行全面的质量控制与管理，确保所有试验严格按照临床试验方案、标准操作程序和相关法规进行；\n4. 根据临床试验相关规范要求，完成临床研究的各阶段报批文件包括但不限于临床报告；\n5. 作为公司对外代表，建立并保持与机构的良好关系。\n\n任职要求：\n1. 生物学、检验学、医学或药学等相关专业背景，本科及以上学历；\n2. 高度责任心和抗压能力，可适应出差；\n3. 优秀的沟通表达能力、发现和解决问题的能力。',
-  redLines: ['拒绝频繁跳槽（近3年换工作>3次）', '学历硬卡统招全日制本科及以上', '严禁无临床试验项目落地经验'] as string[],
-  bonusPoints: ['有知名三甲医院或上市药企背书', '主导过国家级I/II/III期临床试验', '具备PMP项目管理认证'] as string[]
+  redLines: ['具备临床试验项目落地经验，并能说明本人负责的关键环节'] as string[],
+  bonusPoints: ['有可核验的多中心临床试验统筹成果', '具备与岗位相关的项目管理认证'] as string[]
 })
 
 const departmentOptions = [
@@ -449,20 +450,16 @@ const commonSkillsList = [
 ]
 
 const commonRedLines = [
-  '全日制统招本科及以上硬卡',
-  '杜绝频繁跳槽（近3年换工作>3次）',
-  '严禁纯外包派遣/人力驻场经历',
-  '硬卡专业对口（必须相关专业）',
-  '工作年限硬性达标（严禁年限造假）',
-  '核心必备技术栈必须具备生产实操经验'
+  '能说明岗位核心项目中本人负责的具体工作',
+  '具备岗位要求的有效执业或上岗资格（如适用）',
+  '能提供核心必备技能的实际应用案例'
 ]
 
 const commonBonusPoints = [
-  '知名大厂/独角兽/头部上市企业背书',
-  '主导过日活千万级系统高并发微服务实战',
-  '具备5人以上团队技术管理与带教经验',
-  '开源项目主要贡献者或具备核心发明专利',
-  '具备行业权威专家资格或国际专业认证'
+  '有与岗位相关、可量化的项目改善成果',
+  '具备跨团队协作与带教的具体案例',
+  '持有与岗位直接相关的专业认证',
+  '有可核验的开源贡献或技术成果'
 ]
 
 function addQuickRedLine(line: string) {
