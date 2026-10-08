@@ -110,9 +110,9 @@
           </div>
         </div>
 
-        <!-- 固定侧栏常驻排版；仅切换可见性，避免点击时重新计算整张表单。 -->
+        <!-- 居中弹窗常驻排版；仅切换可见性，避免点击时重新计算整张表单。 -->
         <Teleport to="body">
-          <div v-show="showJobDetails" class="job-details-backdrop" aria-hidden="true" @click="showJobDetails = false" />
+          <div class="job-details-backdrop" :class="{ 'is-open': showJobDetails }" aria-hidden="true" @click="showJobDetails = false" />
           <div ref="jobDetailsPanel" class="job-details-expand" :class="{ 'is-open': showJobDetails }" :aria-hidden="!showJobDetails" :aria-modal="showJobDetails ? 'true' : undefined" :inert="!showJobDetails" role="dialog" aria-label="岗位要求" tabindex="-1" @keydown.esc.stop.prevent="showJobDetails = false">
             <div class="expand-panel-header">
               <strong>岗位要求</strong>
@@ -844,16 +844,24 @@ $text-muted: #86868b;
   inset: 0;
   z-index: 1500;
   background: rgba(15, 23, 42, 0.28);
+  visibility: hidden;
+  pointer-events: none;
+
+  &.is-open {
+    visibility: visible;
+    pointer-events: auto;
+  }
 }
 
 .job-details-expand {
   position: fixed;
-  top: 52px;
-  right: 0;
-  bottom: 0;
+  top: 50%;
+  left: 50%;
   z-index: 1501;
   box-sizing: border-box;
-  width: min(780px, 100vw);
+  width: min(700px, calc(100vw - 32px));
+  height: min(560px, calc(100vh - 64px));
+  transform: translate(-50%, -50%);
   visibility: hidden;
   pointer-events: none;
   overflow-y: auto;
@@ -862,8 +870,9 @@ $text-muted: #86868b;
   padding: 0 20px 24px;
   background: #ffffff;
   border: 1px solid $separator;
-  border-radius: $radius-md 0 0 0;
-  box-shadow: -12px 0 32px rgba(15, 23, 42, 0.16);
+  border-radius: $radius-md;
+  box-shadow: 0 18px 48px rgba(15, 23, 42, 0.22);
+  outline: none;
 
   &.is-open {
     visibility: visible;
@@ -964,8 +973,8 @@ $text-muted: #86868b;
 
 @media (max-width: 720px) {
   .job-details-expand {
-    top: 46px;
-    border-radius: 0;
+    width: calc(100vw - 20px);
+    height: calc(100vh - 40px);
     .expand-grid { grid-template-columns: 1fr; }
     .expand-footer { flex-wrap: wrap; gap: 8px; }
   }
