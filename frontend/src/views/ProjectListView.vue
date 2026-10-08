@@ -24,6 +24,7 @@
             <el-button
               type="primary"
               size="small"
+              id="job-details-toggle"
               class="btn-toggle-config"
               :icon="showJobDetails ? ArrowUp : ArrowDown"
               @click="showJobDetails = !showJobDetails"
@@ -109,8 +110,14 @@
           </div>
         </div>
 
-        <!-- 编辑面板常驻挂载，仅切换可见性；避免每次点击重新创建表单控件。 -->
-        <div v-show="showJobDetails" class="job-details-expand">
+        <!-- 固定侧栏常驻排版；仅切换可见性，避免点击时重新计算整张表单。 -->
+        <Teleport to="body">
+          <div v-show="showJobDetails" class="job-details-backdrop" aria-hidden="true" @click="showJobDetails = false" />
+          <div ref="jobDetailsPanel" class="job-details-expand" :class="{ 'is-open': showJobDetails }" :aria-hidden="!showJobDetails" :aria-modal="showJobDetails ? 'true' : undefined" :inert="!showJobDetails" role="dialog" aria-label="岗位要求" tabindex="-1" @keydown.esc.stop.prevent="showJobDetails = false">
+            <div class="expand-panel-header">
+              <strong>岗位要求</strong>
+              <el-button text aria-label="关闭岗位要求" @click="showJobDetails = false">关闭</el-button>
+            </div>
             <div class="expand-grid">
               <div class="expand-col">
                 <label class="expand-label">岗位名称</label>
@@ -203,7 +210,8 @@
                 保存当前岗位配置
               </el-button>
             </div>
-        </div>
+          </div>
+        </Teleport>
       </section>
 
       <!-- 下方：招聘项目列表区域 -->
@@ -361,7 +369,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, onMounted } from 'vue'
+import { ref, reactive, onMounted, nextTick, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { ElMessage, ElMessageBox } from 'element-plus'
@@ -401,6 +409,12 @@ function openJobPosting(project: Project) {
   showPostingDialog.value = true
 }
 const showJobDetails = ref(false)
+const jobDetailsPanel = ref<HTMLElement | null>(null)
+watch(showJobDetails, async open => {
+  await nextTick()
+  if (open) jobDetailsPanel.value?.focus()
+  else document.getElementById('job-details-toggle')?.focus()
+})
 const selectedPresetId = ref<string>('')
 const presetPickerRef = ref<InstanceType<typeof JobPresetPicker> | null>(null)
 const projectStats = ref<Record<string, any>>({})
@@ -825,14 +839,49 @@ $text-muted: #86868b;
   }
 }
 
+.job-details-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 1500;
+  background: rgba(15, 23, 42, 0.28);
+}
+
 .job-details-expand {
-  // 隔离面板内部的布局计算；展开时不再执行整块面板的过渡动画。
-  contain: layout;
-  margin-top: 14px;
-  padding: 16px;
+  position: fixed;
+  top: 52px;
+  right: 0;
+  bottom: 0;
+  z-index: 1501;
+  box-sizing: border-box;
+  width: min(780px, 100vw);
+  visibility: hidden;
+  pointer-events: none;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  contain: layout paint;
+  padding: 0 20px 24px;
   background: #ffffff;
   border: 1px solid $separator;
-  border-radius: $radius-md;
+  border-radius: $radius-md 0 0 0;
+  box-shadow: -12px 0 32px rgba(15, 23, 42, 0.16);
+
+  &.is-open {
+    visibility: visible;
+    pointer-events: auto;
+  }
+
+  .expand-panel-header {
+    position: sticky;
+    top: 0;
+    z-index: 1;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    min-height: 52px;
+    margin-bottom: 14px;
+    background: #ffffff;
+    border-bottom: 1px solid $separator;
+  }
 
   .expand-grid {
     display: grid;
@@ -910,6 +959,15 @@ $text-muted: #86868b;
       font-size: 11.5px;
       color: $text-muted;
     }
+  }
+}
+
+@media (max-width: 720px) {
+  .job-details-expand {
+    top: 46px;
+    border-radius: 0;
+    .expand-grid { grid-template-columns: 1fr; }
+    .expand-footer { flex-wrap: wrap; gap: 8px; }
   }
 }
 
