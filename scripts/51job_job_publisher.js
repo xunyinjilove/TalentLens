@@ -445,14 +445,20 @@ async function run(raw, { dryRun = false } = {}) {
       Array.from(document.querySelectorAll('button, .el-button')).find(el => el.textContent.trim() === value && el.getBoundingClientRect().height > 0)?.click();
     }, label);
     const successPattern = job.action === 'publish' ? /发布(?:职位)?成功(?!后)|职位已发布/ : /保存成功|草稿.*成功|职位已保存/;
-    let result;
+    let result = { url: page.url(), errors: [], notifications: [] };
     for (let attempt = 0; attempt < 40; attempt++) {
       await pause(350);
-      result = await page.evaluate(() => ({
-        url: location.href,
-        errors: Array.from(document.querySelectorAll('.el-form-item__error')).map(el => el.textContent.trim()).filter(Boolean),
-        notifications: Array.from(document.querySelectorAll('.el-message, .el-notification, .el-dialog')).filter(el => el.getBoundingClientRect().height > 0).map(el => el.innerText.trim()).filter(Boolean)
-      }));
+      try {
+        result = await page.evaluate(() => ({
+          url: location.href,
+          errors: Array.from(document.querySelectorAll('.el-form-item__error')).map(el => el.textContent.trim()).filter(Boolean),
+          notifications: Array.from(document.querySelectorAll('.el-message, .el-notification, .el-dialog')).filter(el => el.getBoundingClientRect().height > 0).map(el => el.innerText.trim()).filter(Boolean)
+        }));
+      } catch (error) {
+        // 提交后页面跳转会暂时销毁旧 Frame；继续读取新页面，但绝不再次点击提交。
+        if (/detached Frame|Execution context was destroyed|Cannot find context/i.test(error.message)) continue;
+        throw error;
+      }
       if (result.errors.length || result.notifications.some(text => successPattern.test(text))) break;
     }
     if (result.errors.length) return { status: 'needs_review', message: `51job 未接受表单：${result.errors.join('；')}`, url: result.url };

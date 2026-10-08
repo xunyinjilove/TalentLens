@@ -271,7 +271,7 @@
 
             <!-- 创建时间 -->
             <div class="card-time">📅 {{ formatDate(project.created_at) }}</div>
-            <button class="post-job-btn" @click.stop="openJobPosting(project)">＋ 新增职位（四平台）</button>
+            <button class="post-job-btn" @click.stop="openJobPosting(project)">＋ 发布招聘（四平台）</button>
           </div>
 
           <!-- 空状态 -->

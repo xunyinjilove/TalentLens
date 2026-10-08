@@ -1,5 +1,5 @@
 <template>
-  <el-dialog v-model="opened" title="新增职位 · 四平台" width="760px" :close-on-click-modal="false" :close-on-press-escape="!saving" :show-close="!saving">
+  <el-dialog v-model="opened" title="发布招聘 · 四平台" width="760px" :close-on-click-modal="false" :close-on-press-escape="!saving" :show-close="!saving">
     <p class="intro">招聘项目：<strong>{{ project?.name }}</strong>。前程无忧可保存草稿或立即发布，其他平台的职位发布入口尚未接入。</p>
     <div class="platforms">
       <div class="platform active"><strong>前程无忧 51job</strong><span>草稿 / 立即发布</span></div>
@@ -59,6 +59,13 @@
       <el-checkbox v-model="locationConfirmed">我已在 51job 页面核对工作地址、发布城市及公司账号</el-checkbox>
     </el-form>
     <el-alert v-if="result" :type="['saved', 'published'].includes(result.status) ? 'success' : 'warning'" :closable="false" :title="result.message" show-icon />
+    <div v-if="result?.status === 'uncertain'" class="submission-review">
+      <p>提交结果尚未确认，所以暂时锁住两个提交按钮。请先打开 51job，在“职位管理”中检查该职位是否已发布或保存为草稿。</p>
+      <el-button :loading="openingPage" @click="openLogin">打开 51job 核对</el-button>
+      <el-checkbox v-model="absenceConfirmed">我已核对：没有同名职位，也没有该职位草稿</el-checkbox>
+      <el-button type="warning" plain :disabled="!absenceConfirmed || saving" @click="unlockAfterVerification">已核对，解锁重新提交</el-button>
+    </div>
+    <p v-if="!locationConfirmed" class="submit-hint">提交按钮暂不可用：请先勾选上方的工作地址、发布城市及公司账号确认项。</p>
     <template #footer>
       <el-button :disabled="saving" @click="opened = false">关闭</el-button>
       <el-button :loading="openingPage" @click="openLogin">查看 51job 页面</el-button>
@@ -80,6 +87,7 @@ const saving = ref(false)
 const openingPage = ref(false)
 const result = ref<{ status: string, message: string, url?: string } | null>(null)
 const locationConfirmed = ref(false)
+const absenceConfirmed = ref(false)
 const loadingKeywords = ref(false)
 const loadingFunctions = ref(false)
 const functionPickerOpen = ref(false)
@@ -120,6 +128,7 @@ watch(() => props.project, project => {
   form.education = educationOptions.includes(project.job_config?.education_level) ? project.job_config.education_level : '本科'
   result.value = null
   locationConfirmed.value = false
+  absenceConfirmed.value = false
   keywordGroups.value = []
   selectedKeywords.value = []
   keywordMessage.value = ''
@@ -291,6 +300,8 @@ async function loadKeywordSuggestions() {
 }
 
 async function submit(action: 'draft' | 'publish') {
+  if (saving.value || completed.value) return
+  if (!locationConfirmed.value) { ElMessage.warning('请先核对并确认 51job 的工作地址、发布城市及公司账号'); return }
   if (!props.project) return
   const keywords = currentKeywords()
   const errors: string[] = []
@@ -307,6 +318,7 @@ async function submit(action: 'draft' | 'publish') {
   }
   saving.value = true
   result.value = null
+  absenceConfirmed.value = false
   try {
     const app: any = await import('../../wailsjs/go/main/App')
     const request = {
@@ -321,6 +333,12 @@ async function submit(action: 'draft' | 'publish') {
   } catch (error: any) {
     result.value = { status: 'error', message: `无法调用职位发布引擎：${error.message || error}` }
   } finally { saving.value = false }
+}
+
+function unlockAfterVerification() {
+  if (result.value?.status !== 'uncertain' || !absenceConfirmed.value || saving.value) return
+  result.value = { status: 'needs_review', message: '已按你的核对结果解锁本次重试。再次提交前请确认 51job 职位管理中确实没有同名职位或草稿。' }
+  absenceConfirmed.value = false
 }
 
 async function openLogin(): Promise<boolean> {
@@ -339,6 +357,9 @@ async function openLogin(): Promise<boolean> {
 
 <style scoped>
 .intro { margin: 0 0 16px; color: #475569; }
+.submission-review { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; padding: 12px; margin-top: 10px; border: 1px solid #facc15; border-radius: 8px; background: #fffbeb; color: #92400e; }
+.submission-review p, .submit-hint { margin: 0; font-size: 13px; line-height: 1.5; }
+.submit-hint { margin-top: 10px; color: #b45309; }
 .platforms { display: grid; grid-template-columns: repeat(4, 1fr); gap: 9px; margin-bottom: 18px; }
 .platform { display: flex; flex-direction: column; gap: 4px; border: 1px solid #e2e8f0; border-radius: 9px; padding: 10px; color: #64748b; }
 .platform.active { color: #155e75; border-color: #67e8f9; background: #ecfeff; }
