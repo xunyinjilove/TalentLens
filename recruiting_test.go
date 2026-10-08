@@ -20,28 +20,55 @@ func TestJobRedLineDecision(t *testing.T) {
 		name       string
 		checks     []RedLineCheck
 		wantStatus string
-		wantMax    float64
 	}{
-		{"model omitted check", nil, "pending", 69},
-		{"unsupported claim", []RedLineCheck{{Criterion: job.RedLines[0], Status: "met", Evidence: "主导十年大分子临床"}}, "pending", 69},
-		{"supported match", []RedLineCheck{{Criterion: job.RedLines[0], Status: "met", Evidence: "负责大分子临床I期项目三年"}}, "passed", 100},
-		{"supported violation", []RedLineCheck{{Criterion: job.RedLines[0], Status: "violated", Evidence: "本科毕业"}}, "failed", 49},
+		{"model omitted check", nil, "pending"},
+		{"unsupported claim", []RedLineCheck{{Criterion: job.RedLines[0], Status: "met", Evidence: "主导十年大分子临床"}}, "pending"},
+		{"relevant text still needs review", []RedLineCheck{{Criterion: job.RedLines[0], Status: "met", Evidence: "负责大分子临床I期项目三年"}}, "pending"},
+		{"unrelated text must not reject", []RedLineCheck{{Criterion: job.RedLines[0], Status: "violated", Evidence: "本科毕业"}}, "pending"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			result := &AnalysisResult{CoreMatch: 90, BonusMatch: 80, RedLineChecks: tc.checks, RedLineViolations: []string{"unverified model text"}}
 			a.applyJobDecision(result, job, resume)
-			if result.RedLineStatus != tc.wantStatus || result.OverallScore > tc.wantMax {
-				t.Fatalf("status=%s score=%v, wanted %s <=%v", result.RedLineStatus, result.OverallScore, tc.wantStatus, tc.wantMax)
+			if result.RedLineStatus != tc.wantStatus || result.OverallScore != 90 {
+				t.Fatalf("status=%s score=%v, wanted %s and unchanged ability score 90", result.RedLineStatus, result.OverallScore, tc.wantStatus)
 			}
-			if tc.wantStatus == "failed" && result.Recommendation != "not_recommend" {
-				t.Fatal("violation must reject")
-			}
-			if tc.wantStatus == "pending" && result.Recommendation == "recommend" {
+			if result.Recommendation == "recommend" || result.Recommendation == "strong_recommend" {
 				t.Fatal("unknown red line must not recommend")
 			}
-			if tc.wantStatus != "failed" && len(result.RedLineViolations) != 0 {
+			if len(result.RedLineViolations) != 0 {
 				t.Fatal("unverified violation leaked into decision")
+			}
+		})
+	}
+}
+
+func TestJobBonusDoesNotOverrideCoreAbility(t *testing.T) {
+	a := NewApp()
+	for _, tc := range []struct {
+		name        string
+		core, bonus float64
+		bonusRules  []string
+		wantScore   float64
+		wantRec     string
+	}{
+		{"no bonus configured", 90, 0, nil, 90, "strong_recommend"},
+		{"weak core cannot be rescued", 50, 100, []string{"项目加分"}, 50, "not_recommend"},
+		{"strong core with bonus", 80, 100, []string{"项目加分"}, 90, "strong_recommend"},
+		{"no bonus evidence", 80, 100, nil, 80, "recommend"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			result := &AnalysisResult{CoreMatch: tc.core, BonusMatch: tc.bonus}
+			if tc.name != "no bonus evidence" && len(tc.bonusRules) > 0 {
+				result.BonusMatches = []string{"项目成果有佐证"}
+			}
+			job := &JobConfig{BonusPoints: tc.bonusRules}
+			if tc.name == "no bonus evidence" {
+				job.BonusPoints = []string{"项目加分"}
+			}
+			a.applyJobDecision(result, job, &Resume{})
+			if result.OverallScore != tc.wantScore || result.Recommendation != tc.wantRec {
+				t.Fatalf("score=%v recommendation=%s, want %v %s", result.OverallScore, result.Recommendation, tc.wantScore, tc.wantRec)
 			}
 		})
 	}
@@ -117,12 +144,74 @@ func TestHRCanResolvePendingRedLine(t *testing.T) {
 		RedLineChecks: []RedLineCheck{{Criterion: "必须有大分子临床经验", Status: "unknown"}},
 	}})
 	resume, err := a.SetReviewedRedLine("reviewed_resume", "必须有大分子临床经验", "met", "初面说明完成一期大分子试验")
-	if err != nil || resume.Analysis.RedLineStatus != "passed" || resume.Score != 86 {
+	if err != nil || resume.Analysis.RedLineStatus != "passed" || resume.Score != 90 {
 		t.Fatalf("review pass: %+v %v", resume, err)
 	}
 	resume, err = a.SetReviewedRedLine("reviewed_resume", "必须有大分子临床经验", "violated", "经核实仅有小分子经验")
-	if err != nil || resume.Analysis.RedLineStatus != "failed" || resume.Score > 49 {
+	if err != nil || resume.Analysis.RedLineStatus != "failed" || resume.Score != 90 || resume.Analysis.Recommendation != "not_recommend" {
 		t.Fatalf("review fail: %+v %v", resume, err)
+	}
+	if len(resume.Analysis.RedLineChecks[0].ReviewHistory) != 2 || resume.Analysis.RedLineChecks[0].ReviewedAt == "" {
+		t.Fatal("manual review history and timestamp must be retained")
+	}
+	checks, err := a.GetResumeRedLineChecks("reviewed_resume")
+	if err != nil || len(checks) != 1 || checks[0].Status != "violated" {
+		t.Fatalf("saved HR verdict was not restored: %+v %v", checks, err)
+	}
+	freshResult := &AnalysisResult{CoreMatch: 90, RedLineChecks: []RedLineCheck{{Criterion: "必须有大分子临床经验", Status: "met"}}}
+	a.applyJobDecision(freshResult, &JobConfig{RedLines: []string{"必须有大分子临床经验"}}, resume)
+	if freshResult.RedLineStatus != "failed" || len(freshResult.RedLineChecks[0].ReviewHistory) != 2 {
+		t.Fatalf("reanalysis must preserve HR decision and audit history: %+v", freshResult.RedLineChecks)
+	}
+}
+
+func TestInterviewRedLineMustBeReviewedBeforeAdvance(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		content := `{"score":80,"assessment":"已回答","evidence":"参与项目","follow_up_question":""}`
+		if !strings.Contains(string(body), "follow_up_question") {
+			content = `{"summary":"红线仍需人工核实","recommendation":"advance"}`
+		}
+		payload, _ := json.Marshal(map[string]interface{}{"choices": []interface{}{map[string]interface{}{"message": map[string]string{"content": content}}}})
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, string(payload))
+	}))
+	defer server.Close()
+	a := NewApp()
+	a.dataDirOverride = t.TempDir()
+	a.config.AI = AIConfig{BaseURL: server.URL, APIKey: "test", Model: "test", MaxRetries: 1}
+	criterion := "必须有大分子临床经验"
+	a.saveResume(&Resume{ID: "interview_redline", Analysis: &AnalysisResult{
+		CoreMatch: 80, AbilityScore: 80, OverallScore: 80, RedLineStatus: "pending",
+		RedLineChecks: []RedLineCheck{{RuleID: redLineRuleID(criterion), Criterion: criterion, Status: "unknown"}},
+		InterviewQA:   []InterviewQuestion{{Category: "项目", Question: "介绍项目经历"}},
+	}})
+	session, err := a.StartInterview("interview_redline")
+	if err != nil || len(session.Turns) != 2 || session.Turns[1].RuleID != redLineRuleID(criterion) {
+		t.Fatalf("redline question not linked: %+v %v", session, err)
+	}
+	if _, err = a.SubmitInterviewAnswer("interview_redline", 0, "参与项目"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = a.SubmitInterviewAnswer("interview_redline", 1, "负责大分子临床一期试验"); err != nil {
+		t.Fatal(err)
+	}
+	session, err = a.CompleteInterview("interview_redline")
+	if err != nil || session.AIRecommendation != "review" {
+		t.Fatalf("AI must not advance pending redline: %+v %v", session, err)
+	}
+	if _, err = a.ReviewInterview("interview_redline", "advance", ""); err == nil {
+		t.Fatal("HR advance must wait for redline review")
+	}
+	if _, err = a.ReviewInterviewRedLine("interview_redline", redLineRuleID(criterion), "met", "无关内容"); err == nil {
+		t.Fatal("evidence not in candidate answer must be rejected")
+	}
+	resume, err := a.ReviewInterviewRedLine("interview_redline", redLineRuleID(criterion), "met", "负责大分子临床一期试验")
+	if err != nil || resume.Analysis.RedLineStatus != "passed" || resume.Analysis.RedLineChecks[0].ReviewHistory[0].Source != "interview_hr_review" {
+		t.Fatalf("review not persisted: %+v %v", resume, err)
+	}
+	if _, err = a.ReviewInterview("interview_redline", "advance", "已核实原话"); err != nil {
+		t.Fatal(err)
 	}
 }
 
@@ -145,5 +234,24 @@ func TestPersistSearchCandidateReportsWriteFailure(t *testing.T) {
 	}
 	if stored := a.GetProject("proj_test"); stored == nil || len(stored.ResumeIDs) != 1 || stored.ResumeIDs[0] != resume.ID {
 		t.Fatalf("candidate missing from project: %+v", stored)
+	}
+}
+
+func TestErrorLogDoesNotPersistCandidateMaterial(t *testing.T) {
+	a := NewApp()
+	a.dataDirOverride = t.TempDir()
+	a.logError("张三的简历.pdf", "电话 13800138000", "候选人原文", "模型返回中的个人资料")
+	files, err := filepath.Glob(filepath.Join(a.getDataDir(), "logs", "error_*.log"))
+	if err != nil || len(files) != 1 {
+		t.Fatalf("missing diagnostic log: %v %v", files, err)
+	}
+	data, err := os.ReadFile(files[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, sensitive := range []string{"张三", "13800138000", "候选人原文", "模型返回中的个人资料"} {
+		if strings.Contains(string(data), sensitive) {
+			t.Fatalf("diagnostic log contains candidate material: %s", sensitive)
+		}
 	}
 }

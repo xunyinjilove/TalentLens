@@ -28,6 +28,8 @@ type InterviewSession struct {
 
 type InterviewTurn struct {
 	Category       string `json:"category"`
+	RuleID         string `json:"rule_id,omitempty"`
+	Criterion      string `json:"criterion,omitempty"`
 	Question       string `json:"question"`
 	Answer         string `json:"answer"`
 	FollowUp       string `json:"follow_up,omitempty"`
@@ -119,7 +121,11 @@ func (a *App) StartInterview(resumeID string) (*InterviewSession, error) {
 	}
 	for _, check := range resume.Analysis.RedLineChecks {
 		if check.Status == "unknown" {
-			turns = append(turns, InterviewTurn{Category: "红线核实", Question: "请说明并举例证明：" + check.Criterion})
+			ruleID := check.RuleID
+			if ruleID == "" {
+				ruleID = redLineRuleID(check.Criterion)
+			}
+			turns = append(turns, InterviewTurn{Category: "红线核实", RuleID: ruleID, Criterion: check.Criterion, Question: "请说明并举例证明：" + check.Criterion})
 		}
 	}
 	name := resume.FileName
@@ -288,7 +294,36 @@ func (a *App) CompleteInterview(resumeID string) (*InterviewSession, error) {
 		return nil, fmt.Errorf("AI 未返回初面总结")
 	}
 	session.AISummary, session.AIRecommendation, session.Status = result.Summary, result.Recommendation, "completed"
+	for _, turn := range session.Turns {
+		if turn.RuleID != "" && session.AIRecommendation == "advance" {
+			session.AIRecommendation = "review"
+			break
+		}
+	}
 	return session, a.saveInterview(session)
+}
+
+// ReviewInterviewRedLine 将 HR 确认的初面原话关联到具体红线；AI 单题分不参与裁决。
+func (a *App) ReviewInterviewRedLine(resumeID string, ruleID string, status string, evidence string) (*Resume, error) {
+	session, err := a.GetInterview(resumeID)
+	if err != nil {
+		return nil, err
+	}
+	if session.Status != "completed" && session.Status != "reviewed" {
+		return nil, fmt.Errorf("请先完成初面")
+	}
+	evidence = strings.TrimSpace(evidence)
+	for _, turn := range session.Turns {
+		if turn.RuleID != ruleID || !turn.Evaluated {
+			continue
+		}
+		if status != "unknown" && (evidence == "" ||
+			(!strings.Contains(turn.Answer, evidence) && !strings.Contains(turn.FollowUpAnswer, evidence))) {
+			return nil, fmt.Errorf("核实依据必须引用该题候选人的原话")
+		}
+		return a.setReviewedRedLine(resumeID, turn.Criterion, status, evidence, "interview_hr_review")
+	}
+	return nil, fmt.Errorf("初面中没有对应的红线问题")
 }
 
 func (a *App) ReviewInterview(resumeID string, decision string, note string) (*InterviewSession, error) {
@@ -303,6 +338,19 @@ func (a *App) ReviewInterview(resumeID string, decision string, note string) (*I
 	}
 	if session.Status != "completed" && session.Status != "reviewed" {
 		return nil, fmt.Errorf("请先完成 AI 初面")
+	}
+	if decision == "advance" {
+		data, err := os.ReadFile(filepath.Join(a.getDataDir(), "resumes", resumeID+".json"))
+		if err != nil {
+			return nil, err
+		}
+		var resume Resume
+		if err := json.Unmarshal(data, &resume); err != nil {
+			return nil, err
+		}
+		if resume.Analysis != nil && (resume.Analysis.RedLineStatus == "pending" || resume.Analysis.RedLineStatus == "failed") {
+			return nil, fmt.Errorf("请先逐项核实岗位红线，再决定是否进入下一轮")
+		}
 	}
 	session.HRDecision, session.HRNote, session.Status = decision, strings.TrimSpace(note), "reviewed"
 	return session, a.saveInterview(session)

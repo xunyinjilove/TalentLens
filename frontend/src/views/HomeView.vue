@@ -201,14 +201,14 @@
                       </div>
                       <div class="redline-title-text">
                          <span class="redline-title">岗位红线逐项核验：{{ resumeStore.selectedResume.analysis.redLineStatus === 'failed' ? '不满足' : resumeStore.selectedResume.analysis.redLineStatus === 'pending' ? '待核实' : '满足' }}</span>
-                         <span class="redline-sub">待核实项目须人工确认；明确不满足时不推荐且分数低于50。</span>
+                         <span class="redline-sub">AI 线索不能直接淘汰；HR 确认不满足时不推荐，能力原始分仍保留。</span>
                       </div>
                     </div>
                   </div>
                   <ul class="redline-violations-list">
                      <li v-for="(check, vIdx) in resumeStore.selectedResume.analysis.redLineChecks" :key="vIdx" class="redline-violation-item">
                       <el-icon><Warning /></el-icon>
-                      <span>{{ check.status === 'met' ? '满足' : check.status === 'violated' ? '不满足' : '待核实' }} · {{ check.criterion }}{{ check.evidence ? `（依据：${check.evidence}）` : '（简历未给出可核对依据）' }}</span>
+                      <span>{{ check.status === 'met' ? 'HR确认满足' : check.status === 'violated' ? 'HR确认不满足' : '待HR核实' }} · {{ check.criterion }}{{ check.suggested_status && check.status === 'unknown' ? `（AI提示：${check.suggested_status === 'met' ? '可能满足' : '可能不满足'}）` : '' }}{{ check.evidence ? `（原文线索：${check.evidence}）` : '（暂无可核对原文）' }}</span>
                       <el-button size="small" text type="success" @click="handleReviewRedLine(check.criterion, 'met')">确认满足</el-button>
                       <el-button size="small" text type="danger" @click="handleReviewRedLine(check.criterion, 'violated')">确认不满足</el-button>
                       <el-button size="small" text @click="handleReviewRedLine(check.criterion, 'unknown')">待核实</el-button>
@@ -416,6 +416,11 @@
                     <span class="score-label">{{ $t('analysis.totalScore') }}</span>
                   </div>
                   <div class="score-breakdown">
+                    <p v-if="resumeStore.selectedResume.analysis.abilityScore !== undefined" class="score-explanation">
+                      核心能力 {{ resumeStore.selectedResume.analysis.abilityScore }} 分
+                      <span v-if="resumeStore.selectedResume.analysis.bonusScore"> · 附加优势 +{{ resumeStore.selectedResume.analysis.bonusScore }} 分</span>
+                      · 红线结论单独显示
+                    </p>
                     <div class="score-item">
                       <span class="label">{{ $t('analysis.skillMatch') }}</span>
                       <el-progress :percentage="resumeStore.selectedResume.analysis.skillMatch" :color="getProgressColor(resumeStore.selectedResume.analysis.skillMatch)" />
