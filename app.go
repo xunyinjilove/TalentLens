@@ -2388,7 +2388,7 @@ func (a *App) AnalyzeResume(resumeID string, cfg *AIConfig, jobCfg *JobConfig) (
 		analysis.ManagerPitch += fmt.Sprintf("\n🔗 在线主页：%s", resume.URL)
 	}
 	if analysis.RedLineStatus == "failed" {
-		analysis.ManagerPitch = "【触碰岗位红线，需人工核验】\n" + analysis.ManagerPitch
+		analysis.ManagerPitch = "【HR 已核实未满足岗位必备条件】\n" + analysis.ManagerPitch
 	} else if analysis.RedLineStatus == "pending" {
 		analysis.ManagerPitch = "【岗位红线待核实，暂勿作为通过人选推介】\n" + analysis.ManagerPitch
 	}
@@ -2492,7 +2492,7 @@ func (a *App) buildAnalysisPrompt(resume *Resume, jobCfg *JobConfig) string {
 	}
 	redLinesBlock := ""
 	if len(jobCfg.RedLines) > 0 {
-		redLinesBlock = fmt.Sprintf("- 🚫 用人部门一票否决红线 (Deal Breakers / 违规一律不予录用):\n  * %s\n", strings.Join(jobCfg.RedLines, "\n  * "))
+		redLinesBlock = fmt.Sprintf("- 🚫 岗位必备条件（仅提供证据线索，由 HR 核实准入结论）:\n  * %s\n", strings.Join(jobCfg.RedLines, "\n  * "))
 	}
 	bonusBlock := ""
 	if len(jobCfg.BonusPoints) > 0 {
@@ -2583,9 +2583,7 @@ func (a *App) buildAnalysisPrompt(resume *Resume, jobCfg *JobConfig) string {
 			"  \"experience_detail\": \"详细分析工作经历与岗位的匹配程度，包括行业相关度、项目复杂度、职责范围等\",\n"+
 			"  \"education_detail\": \"分析学历背景、专业对口程度、是否有相关认证或培训\",\n"+
 			"  \"recommendation\": \"recommend\",\n"+
-			"  \"red_line_violations\": [\n"+
-			"    \"触碰的一票否决红线及事实依据（例如：统招本科红线违规，简历为成人自考大专；若未触碰任何红线则必须返回空数组 []）\"\n"+
-			"  ],\n"+
+			"  \"red_line_violations\": [],\n"+
 			"  \"red_line_checks\": [{\"criterion\": \"逐字复制岗位红线\", \"status\": \"met/violated/unknown\", \"evidence\": \"简历中的原文短句；无证据时留空\"}],\n"+
 			"  \"bonus_matches\": [\n"+
 			"    \"符合的优先加分项及具体成果依据（例如：具备日活千万高并发经验，主导过大型系统重构；若未匹配则必须返回空数组 []）\"\n"+

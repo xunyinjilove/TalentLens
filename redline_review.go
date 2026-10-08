@@ -92,7 +92,7 @@ func (a *App) setReviewedRedLine(resumeID string, criterion string, status strin
 	applyRedLineVerdict(analysis)
 	analysis.ManagerPitch = a.generateFallbackManagerPitch(analysis, &resume)
 	if analysis.RedLineStatus == "failed" {
-		analysis.ManagerPitch = "【触碰岗位红线，需人工核验】\n" + analysis.ManagerPitch
+		analysis.ManagerPitch = "【HR 已核实未满足岗位必备条件】\n" + analysis.ManagerPitch
 	} else if analysis.RedLineStatus == "pending" {
 		analysis.ManagerPitch = "【岗位红线待核实，暂勿作为通过人选推介】\n" + analysis.ManagerPitch
 	}
