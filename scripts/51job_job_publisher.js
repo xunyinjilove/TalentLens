@@ -178,7 +178,11 @@ async function show51JobPage() {
   try {
     const pages = await browser.pages();
     const page = pages.find(item => item.url().includes('ehire.51job.com/Revision/job'))
-      || pages.find(item => item.url().includes('ehire.51job.com'));
+      || pages.find(item => item.url().includes('ehire.51job.com'))
+      || pages.find(item => {
+        try { return new URL(item.url()).hostname.endsWith('.51job.com'); }
+        catch { return false; }
+      });
     if (!page) return { status: 'needs_login', message: '专用浏览器中没有 51job 页面' };
     const restored = await setBrowserWindowState(page, 'normal');
     if (!restored) return { status: 'error', message: '无法还原 51job 浏览器窗口' };
@@ -186,6 +190,70 @@ async function show51JobPage() {
     return { status: 'ready', message: '已显示 51job 专用浏览器', url: page.url() };
   } catch (error) {
     return { status: 'error', message: `无法显示 51job 浏览器：${error.message}` };
+  } finally {
+    await browser.disconnect().catch(() => {});
+  }
+}
+
+// 重新加载职位表单验证服务端会话；此步骤只读，不改变窗口状态。
+async function check51JobLogin() {
+  let browser;
+  try { browser = await puppeteer.connect({ browserURL: 'http://127.0.0.1:9503', defaultViewport: null, protocolTimeout: 12000 }); }
+  catch { return { status: 'waiting', message: '等待 51job 专用浏览器启动' }; }
+  try {
+    const pages = await browser.pages();
+    let page = pages.filter(item => item.url().includes('ehire.51job.com/Revision/job')).at(-1);
+    if (!page) {
+      const source = pages.filter(item => item.url().includes('ehire.51job.com/Revision/')).at(-1);
+      if (source) {
+        const loggedInShell = await source.evaluate(() =>
+          !/账号密码登录|扫码登录|企业账号登录/.test(document.body?.innerText || '')
+          && /职位管理|我的工作台|人才管理/.test(document.body?.innerText || '')).catch(() => false);
+        if (loggedInShell) {
+          await source.goto(JOB_URL, { waitUntil: 'domcontentloaded', timeout: 12000 });
+          page = source;
+        }
+      }
+    }
+    if (!page) return { status: 'waiting', message: '请在 51job 浏览器完成登录' };
+    const visible = await page.evaluate(() => {
+      const el = document.querySelector('.func-dropdown .all_func_tips');
+      return Boolean(el && el.getBoundingClientRect().height > 0)
+        && !/账号密码登录|扫码登录|企业账号登录/.test(document.body?.innerText || '');
+    }).catch(() => false);
+    if (!visible) return { status: 'waiting', message: '请在 51job 浏览器完成登录' };
+    // 重新加载验证服务端会话，避免把登录前残留的表单 DOM 误判为已登录。
+    await page.reload({ waitUntil: 'domcontentloaded', timeout: 12000 });
+    await page.waitForFunction(() => {
+      const el = document.querySelector('.func-dropdown .all_func_tips');
+      return Boolean(el && el.getBoundingClientRect().height > 0)
+        && !/账号密码登录|扫码登录|企业账号登录/.test(document.body?.innerText || '');
+    }, { timeout: 8000 });
+    return { status: 'ready', message: '51job 登录已确认' };
+  } catch (error) {
+    return { status: 'waiting', message: `等待 51job 登录完成：${error.message}` };
+  } finally {
+    await browser.disconnect().catch(() => {});
+  }
+}
+
+async function minimize51JobBrowser() {
+  let browser;
+  try { browser = await puppeteer.connect({ browserURL: 'http://127.0.0.1:9503', defaultViewport: null, protocolTimeout: 12000 }); }
+  catch { return { status: 'error', message: '51job 专用浏览器已关闭，无法最小化' }; }
+  try {
+    const pages = await browser.pages();
+    const page = pages.filter(item => item.url().includes('ehire.51job.com/Revision/job')).at(-1);
+    if (!page) return { status: 'error', message: '未找到已登录的 51job 职位页面' };
+    const ready = await page.evaluate(() => Boolean(document.querySelector('.func-dropdown .all_func_tips'))
+      && !/账号密码登录|扫码登录|企业账号登录/.test(document.body?.innerText || ''));
+    if (!ready) return { status: 'error', message: '51job 职位页面尚未就绪，未最小化浏览器' };
+    const minimized = await setBrowserWindowState(page, 'minimized');
+    return minimized
+      ? { status: 'ready', message: '51job 已登录，专用浏览器已最小化' }
+      : { status: 'error', message: '51job 已登录，但无法自动最小化浏览器窗口' };
+  } catch (error) {
+    return { status: 'error', message: `无法最小化 51job 浏览器：${error.message}` };
   } finally {
     await browser.disconnect().catch(() => {});
   }
@@ -415,8 +483,12 @@ if (require.main === module) {
   process.stdin.on('end', async () => {
     try {
       const data = JSON.parse(input);
-      const result = process.argv.includes('--show-page')
-        ? await show51JobPage()
+      const result = process.argv.includes('--login-status')
+        ? await check51JobLogin()
+        : process.argv.includes('--minimize-page')
+          ? await minimize51JobBrowser()
+        : process.argv.includes('--show-page')
+          ? await show51JobPage()
         : process.argv.includes('--function-options')
           ? await getFunctionOptions(data)
         : process.argv.includes('--suggest-keywords')
@@ -428,4 +500,4 @@ if (require.main === module) {
   });
 }
 
-module.exports = { validate, getFunctionOptions, getKeywordSuggestions, show51JobPage, run };
+module.exports = { validate, getFunctionOptions, getKeywordSuggestions, show51JobPage, check51JobLogin, minimize51JobBrowser, run };

@@ -1160,6 +1160,11 @@ type JobFunctionOptionsResult struct {
 	Options []JobFunctionOption `json:"options"`
 }
 
+type JobBrowserLoginResult struct {
+	Status  string `json:"status"`
+	Message string `json:"message"`
+}
+
 type JobDraftResult struct {
 	Status  string `json:"status"`
 	Message string `json:"message"`
@@ -1261,6 +1266,32 @@ func (a *App) Show51JobPage() JobDraftResult {
 		}
 	}
 	return JobDraftResult{Status: "error", Message: "51job 专用浏览器未能显示，请检查 Edge/Chrome 是否安装，然后重试"}
+}
+
+// Check51JobLogin 核实职位表单可用，但不改变窗口状态；供前端登录期间轮询。
+func (a *App) Check51JobLogin() JobBrowserLoginResult {
+	out, err := run51JobScript([]byte("{}"), 25*time.Second, "--login-status")
+	if err != nil {
+		return JobBrowserLoginResult{Status: "error", Message: err.Error()}
+	}
+	var result JobBrowserLoginResult
+	if json.Unmarshal(bytes.TrimSpace(out), &result) != nil || result.Status == "" {
+		return JobBrowserLoginResult{Status: "error", Message: "无法解析 51job 登录状态"}
+	}
+	return result
+}
+
+// Minimize51JobBrowser 在前端确认登录监测仍有效后，最小化专用浏览器。
+func (a *App) Minimize51JobBrowser() JobBrowserLoginResult {
+	out, err := run51JobScript([]byte("{}"), 12*time.Second, "--minimize-page")
+	if err != nil {
+		return JobBrowserLoginResult{Status: "error", Message: err.Error()}
+	}
+	var result JobBrowserLoginResult
+	if json.Unmarshal(bytes.TrimSpace(out), &result) != nil || result.Status == "" {
+		return JobBrowserLoginResult{Status: "error", Message: "无法解析 51job 窗口状态"}
+	}
+	return result
 }
 
 // Get51JobKeywordSuggestions 从已登录的 51job 职能关键词面板读取实际推荐词，不提交职位。
