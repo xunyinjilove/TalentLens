@@ -39,7 +39,7 @@
           <div v-for="level in 3" :key="level" class="function-column">
             <span class="function-heading">{{ ['一级职能', '二级职能', '具体职能'][level - 1] }}</span>
             <span v-if="loadingFunctions && functionSelection.length === level - 1 && !functionColumns[level - 1]" class="function-placeholder">正在读取 51job 职能…</span>
-            <span v-else-if="!functionColumns[level - 1]" class="function-placeholder">{{ functionError && functionSelection.length === level - 1 ? '加载失败，请点击上方重试' : '请先选择上一级' }}</span>
+            <span v-else-if="!functionColumns[level - 1]" class="function-placeholder">{{ loginRecovering && functionSelection.length === level - 1 ? '等待登录后自动加载…' : functionError && functionSelection.length === level - 1 ? '加载失败，请点击上方重试' : '请先选择上一级' }}</span>
             <button v-for="option in functionColumns[level - 1] || []" :key="option.name" type="button" class="function-option" :class="{ selected: functionSelection[level - 1] === option.name }" :disabled="loadingFunctions" @click="selectFunction(level - 1, option)">{{ option.name }}<span v-if="!option.leaf">›</span></button>
           </div>
         </div>
@@ -86,6 +86,7 @@ const functionPickerOpen = ref(false)
 const functionMessage = ref('')
 const functionError = ref(false)
 const needsFunctionLogin = ref(false)
+const loginRecovering = ref(false)
 const functionColumns = ref<Array<Array<{ name: string, leaf: boolean }>>>([])
 const functionSelection = ref<string[]>([])
 let functionRequestID = 0
@@ -100,7 +101,10 @@ const educationOptions = ['本科', '大专', '硕士', '博士', '中技/中专
 const form = reactive({ jobType: '社会招聘', title: '', description: '', functionPath: '', keywords: '', minSalary: 0, maxSalary: 0, salaryMonths: 0, headcount: 1, experienceYears: 0, education: '本科' })
 
 watch(() => props.modelValue, value => { opened.value = value })
-watch(opened, value => emit('update:modelValue', value))
+watch(opened, value => {
+  emit('update:modelValue', value)
+  if (!value) { functionRequestID++; loginRecovering.value = false }
+})
 watch(() => props.project, project => {
   if (!project) return
   form.jobType = '社会招聘'
@@ -126,6 +130,7 @@ watch(() => props.project, project => {
   functionMessage.value = ''
   functionError.value = false
   needsFunctionLogin.value = false
+  loginRecovering.value = false
 })
 
 watch(() => form.functionPath, () => {
@@ -136,7 +141,7 @@ watch(() => form.functionPath, () => {
   keywordMessage.value = ''
 })
 
-async function fetchFunctionOptions(path: string[], requestID: number) {
+async function fetchFunctionOptions(path: string[], requestID: number, recoverOnLogin = true) {
   loadingFunctions.value = true
   functionError.value = false
   needsFunctionLogin.value = false
@@ -146,9 +151,13 @@ async function fetchFunctionOptions(path: string[], requestID: number) {
     const response = await app.Get51JobFunctionOptions(path)
     if (requestID !== functionRequestID) return
     if (response.status !== 'ready') {
-      functionError.value = true
       needsFunctionLogin.value = response.status === 'needs_login'
       functionMessage.value = response.message || '51job 职能加载失败'
+      if (needsFunctionLogin.value && recoverOnLogin) {
+        void recoverFunctionLogin(path, requestID)
+        return
+      }
+      functionError.value = true
       if (!needsFunctionLogin.value) ElMessage.error(functionMessage.value)
       return
     }
@@ -166,16 +175,72 @@ async function fetchFunctionOptions(path: string[], requestID: number) {
 }
 
 async function retryFunctionOptions() {
+  loginRecovering.value = false
   const path = [...functionSelection.value]
   await fetchFunctionOptions(path, ++functionRequestID)
 }
 
 async function openFunctionLogin() {
-  const opened = await openLogin()
-  if (opened) await retryFunctionOptions()
+  loginRecovering.value = false
+  await recoverFunctionLogin([...functionSelection.value], ++functionRequestID)
+}
+
+async function recoverFunctionLogin(path: string[], requestID: number) {
+  if (loginRecovering.value) return
+  loginRecovering.value = true
+  functionError.value = false
+  needsFunctionLogin.value = true
+  functionMessage.value = '正在显示 51job 浏览器，请在浏览器中完成登录…'
+  try {
+    const shown = await openLogin()
+    if (requestID !== functionRequestID || !opened.value) return
+    if (!shown) {
+      functionError.value = true
+      functionMessage.value = '无法打开 51job 企业浏览器，请点击“打开并登录 51job”重试'
+      return
+    }
+    const app: any = await import('../../wailsjs/go/main/App')
+    const deadline = Date.now() + 180_000
+    while (Date.now() < deadline) {
+      if (requestID !== functionRequestID || !opened.value) return
+      const state = await app.Check51JobLogin()
+      if (requestID !== functionRequestID || !opened.value) return
+      if (state.status === 'ready') {
+        const minimized = await app.Minimize51JobBrowser()
+        if (requestID !== functionRequestID || !opened.value) return
+        if (minimized.status !== 'ready') {
+          functionError.value = true
+          functionMessage.value = minimized.message || '51job 已登录，但浏览器未能自动最小化'
+          return
+        }
+        loginRecovering.value = false
+        needsFunctionLogin.value = false
+        functionMessage.value = '登录成功，浏览器已最小化；正在加载职能…'
+        await fetchFunctionOptions(path, ++functionRequestID, false)
+        return
+      }
+      if (state.status === 'error') {
+        functionError.value = true
+        functionMessage.value = state.message || '无法确认 51job 登录状态'
+        return
+      }
+      functionMessage.value = '请在 51job 浏览器中完成登录；检测成功后将自动最小化并加载职能…'
+      await new Promise(resolve => setTimeout(resolve, 3000))
+    }
+    functionError.value = true
+    functionMessage.value = '等待登录超时；完成登录后点击重试加载'
+  } catch (error: any) {
+    if (requestID === functionRequestID) {
+      functionError.value = true
+      functionMessage.value = `等待 51job 登录失败：${error.message || error}`
+    }
+  } finally {
+    if (requestID === functionRequestID) loginRecovering.value = false
+  }
 }
 
 async function openFunctionPicker() {
+  loginRecovering.value = false
   functionPickerOpen.value = true
   functionColumns.value = []
   functionSelection.value = []
