@@ -19,6 +19,12 @@ function validate(input) {
   const salaryMonths = Number(input.salaryMonths);
   const headcount = Number(input.headcount);
   const experienceYears = Number(input.experienceYears);
+  const address = String(input.address || '').trim();
+  const language = String(input.language || '').trim();
+  const languageLevel = String(input.languageLevel || '').trim();
+  const certificates = (Array.isArray(input.certificates) ? input.certificates : []).map(item => ({
+    category: String(item.category || '').trim(), name: String(item.name || '').trim()
+  }));
   if (!title) throw new Error('请填写职位名称');
   if (description.length < 50) throw new Error(`职位描述还差 ${50 - description.length} 字`);
   if (functionPath.length < 2) throw new Error('51job 职能路径需填写到末级，例如“互联网技术 > 测试 > 软件测试”');
@@ -29,7 +35,10 @@ function validate(input) {
   if (!Number.isInteger(headcount) || headcount < 1 || headcount > 9999) throw new Error('招聘人数须在 1 至 9999 之间');
   if (!Number.isInteger(experienceYears) || experienceYears < 0 || experienceYears > 10) throw new Error('经验年限须在 0 至 10 年之间');
   if (!String(input.education || '').trim()) throw new Error('请选择学历要求');
-  return { action, jobType, title, description, functionPath, keywords, minSalary, maxSalary, salaryMonths, headcount, experienceYears, education: String(input.education).trim() };
+  if (Boolean(language) !== Boolean(languageLevel)) throw new Error('选择语言时还需选择熟练程度');
+  if (certificates.length > 10 || certificates.some(item => !item.category || !item.name)) throw new Error('证书最多选择 10 项，且须从 51job 证书分类中选择');
+  if (new Set(certificates.map(item => item.name)).size !== certificates.length) throw new Error('证书不能重复选择');
+  return { action, jobType, title, description, functionPath, keywords, minSalary, maxSalary, salaryMonths, headcount, experienceYears, education: String(input.education).trim(), address, language, languageLevel, certificates };
 }
 
 function parseFunctionPath(value) {
@@ -361,6 +370,177 @@ async function getKeywordSuggestions(raw) {
   }
 }
 
+// 选项始终从当前已登录的企业表单读取；地址搜索由 51job 自己过滤，避免内置过时的地址表。
+async function getPostingOptions(raw) {
+  const kind = String(raw.kind || '');
+  if (!['address', 'language', 'certificate'].includes(kind)) throw new Error('职位选项类型无效');
+  let browser, page, session;
+  try { browser = await puppeteer.connect({ browserURL: 'http://127.0.0.1:9503', defaultViewport: null, protocolTimeout: 12000 }); }
+  catch { return { status: 'needs_login', message: '请先打开并登录 51job 企业浏览器', options: [] }; }
+  try {
+    const source = (await browser.pages()).find(item => item.url().includes('ehire.51job.com'));
+    if (!source) return { status: 'needs_login', message: '未检测到 51job 企业页面', options: [] };
+    page = await createBackgroundPage(browser, source, JOB_URL);
+    session = await keepPageActiveInBackground(page);
+    if (!await waitForJobForm(page)) return { status: 'needs_login', message: '请先登录 51job 企业浏览器', options: [] };
+    await pause(1600);
+    const base = await page.evaluate(() => ({
+      currentAddress: document.querySelector('#job_work_location .address_label.is-checked .address_name')?.textContent.trim() || '',
+      currentCity: document.querySelector('[for="formattedCitys"]')?.parentElement?.textContent.trim() || ''
+    }));
+    if (kind === 'language') {
+      const language = String(raw.category || '').trim();
+      const options = await page.evaluate(() => Array.from(document.querySelectorAll('.language_form .el-select:first-child .el-select-dropdown__item')).map(item => item.textContent.trim()).filter(text => text && !text.startsWith('请选择')));
+      if (!options.length) throw new Error('51job 语言选项尚未加载，请重试');
+      if (language) {
+        if (!options.includes(language)) throw new Error('51job 语言选项已变化，请重新加载');
+        await click(page, '.language_form .el-select:first-child input', '语言');
+        const selected = await page.evaluate(value => {
+          const item = Array.from(document.querySelectorAll('.el-select-dropdown__item')).find(el => el.textContent.trim() === value && !el.classList.contains('is-disabled'));
+          if (item) item.click();
+          return Boolean(item);
+        }, language);
+        if (!selected) throw new Error('51job 语言选择器未就绪，请重试');
+        await pause(200);
+      }
+      const levels = await page.evaluate(() => Array.from(document.querySelectorAll('.language_form .el-select[prop="flevel1"] .el-select-dropdown__item'))
+        .filter(el => !el.classList.contains('is-disabled')).map(el => el.textContent.trim()).filter(text => text && !text.startsWith('请选择')));
+      return { status: 'ready', message: language ? `已读取“${language}”可选的熟练程度` : '已读取 51job 语言，请选择语种', options, levels, ...base };
+    }
+    if (kind === 'address') {
+      await click(page, '#sensor_new_addressreplace', '更换地址入口');
+      const query = String(raw.query || '').trim().slice(0, 80);
+      if (query) {
+        await fill(page, '.address_filter_popover input[placeholder="请输入所在地区"]', query, '地址搜索');
+        await pause(450);
+      }
+      const options = await page.evaluate(() => {
+        const pop = Array.from(document.querySelectorAll('.address_filter_popover')).find(el => el.getBoundingClientRect().height > 0);
+        return Array.from(pop?.querySelectorAll('.user_info .name') || []).map(el => el.getAttribute('title') || el.textContent.trim()).filter(Boolean);
+      });
+      return { status: 'ready', message: query ? `已读取与“${query}”匹配的 51job 已有地址` : '已读取 51job 当前可见的已有地址；可输入城市或地址搜索更多', options: [...new Set(options)], ...base };
+    }
+    await click(page, '[data-id="certificateInput"] input', '证书入口');
+    await page.waitForFunction(() => {
+      const dialog = Array.from(document.querySelectorAll('.el-dialog')).find(el => el.getBoundingClientRect().height > 0 && el.querySelector('.jbs_cascader_dialog_title')?.textContent.trim() === '选择证书');
+      return Boolean(dialog?.querySelector('.cascader_panel_menu .func-item'));
+    }, { timeout: 5000 });
+    const category = String(raw.category || '').trim();
+    const choices = await page.evaluate(value => {
+      const dialog = Array.from(document.querySelectorAll('.el-dialog')).find(el => el.getBoundingClientRect().height > 0 && el.querySelector('.jbs_cascader_dialog_title')?.textContent.trim() === '选择证书');
+      const menus = dialog?.querySelectorAll('.cascader_panel_menu') || [];
+      const categories = Array.from(menus[0]?.querySelectorAll('.func-item') || []).map(el => el.title || el.textContent.trim());
+      if (value) {
+        const item = Array.from(menus[0]?.querySelectorAll('.func-item') || []).find(el => (el.title || el.textContent.trim()) === value);
+        if (!item) return { categories, missing: true };
+        item.click();
+      }
+      return { categories, missing: false };
+    }, category);
+    if (choices.missing) throw new Error('51job 证书分类已变化，请重新加载');
+    await pause(200);
+    const options = await page.evaluate(() => {
+      const dialog = Array.from(document.querySelectorAll('.el-dialog')).find(el => el.getBoundingClientRect().height > 0 && el.querySelector('.jbs_cascader_dialog_title')?.textContent.trim() === '选择证书');
+      return Array.from(dialog?.querySelectorAll('.cascader_panel_menu:nth-child(2) .func-item') || []).map(el => el.title || el.textContent.trim());
+    });
+    return { status: 'ready', message: '已读取 51job 证书目录', categories: choices.categories, options, ...base };
+  } catch (error) { return { status: 'error', message: error.message, options: [] }; }
+  finally {
+    if (session) await session.detach().catch(() => {});
+    if (page) await page.close().catch(() => {});
+    await browser.disconnect().catch(() => {});
+  }
+}
+
+async function chooseAddress(page, address) {
+  if (!address) return;
+  await click(page, '#sensor_new_addressreplace', '更换地址入口');
+  await fill(page, '.address_filter_popover input[placeholder="请输入所在地区"]', address, '地址搜索');
+  await pause(450);
+  const selected = await page.evaluate(value => {
+    const pop = Array.from(document.querySelectorAll('.address_filter_popover')).find(el => el.getBoundingClientRect().height > 0);
+    const matches = Array.from(pop?.querySelectorAll('.user_info') || []).filter(el => (el.querySelector('.name')?.getAttribute('title') || el.querySelector('.name')?.textContent.trim()) === value);
+    if (matches.length !== 1) return matches.length;
+    matches[0].click();
+    return 1;
+  }, address);
+  if (selected !== 1) throw new Error(`51job 已有地址匹配到 ${selected} 条，请重新选择唯一的上班地址`);
+  await pause(250);
+  const actual = await page.evaluate(() => document.querySelector('#job_work_location .address_label.is-checked .address_name')?.textContent.trim() || '');
+  if (actual !== address) throw new Error('51job 上班地址回读不一致，职位未提交');
+}
+
+async function chooseLanguage(page, language, level) {
+  if (!language) return;
+  const chooseVisible = async (value, label) => {
+    let done = false;
+    for (let attempt = 0; attempt < 10 && !done; attempt++) {
+      done = await page.evaluate(target => {
+        const items = Array.from(document.querySelectorAll('.el-select-dropdown')).filter(el => el.style.display !== 'none')
+          .flatMap(el => Array.from(el.querySelectorAll('.el-select-dropdown__item')));
+        const matches = items.filter(el => el.textContent.trim() === target && !el.classList.contains('is-disabled'));
+        if (matches.length !== 1) return false;
+        matches[0].click();
+        return true;
+      }, value);
+      if (!done) await pause(100);
+    }
+    if (!done) throw new Error(`51job 没有“${value}”${label}选项`);
+    await pause(150);
+  };
+  await click(page, '.language_form .el-select:first-child input', '语言');
+  await chooseVisible(language, '语言');
+  await click(page, '.language_form .el-select[prop="flevel1"] input', '语言程度');
+  await chooseVisible(level, '语言程度');
+  await pause(450);
+  const actual = await page.evaluate(() => Array.from(document.querySelectorAll('.language_form .el-select')).slice(0, 2).map(el => el.querySelector('input')?.value || ''));
+  if (actual[0] !== language || actual[1] !== level) throw new Error('51job 语言选择回读不一致，职位未提交');
+}
+
+async function chooseCertificates(page, certificates) {
+  if (!certificates.length) return;
+  await click(page, '[data-id="certificateInput"] input', '证书入口');
+  await page.waitForFunction(() => Array.from(document.querySelectorAll('.el-dialog')).some(el => el.getBoundingClientRect().height > 0 && el.querySelector('.jbs_cascader_dialog_title')?.textContent.trim() === '选择证书' && el.querySelector('.cascader_panel_menu .func-item')), { timeout: 5000 });
+  for (const certificate of certificates) {
+    const found = await page.evaluate(({ category, name }) => {
+      const dialog = Array.from(document.querySelectorAll('.el-dialog')).find(el => el.getBoundingClientRect().height > 0 && el.querySelector('.jbs_cascader_dialog_title')?.textContent.trim() === '选择证书');
+      const categoryItem = Array.from(dialog?.querySelectorAll('.cascader_panel_menu')[0]?.querySelectorAll('.func-item') || []).find(el => (el.title || el.textContent.trim()) === category);
+      if (!categoryItem) return false;
+      categoryItem.click();
+      return true;
+    }, certificate);
+    if (!found) throw new Error(`51job 证书分类“${certificate.category}”不存在`);
+    await page.waitForFunction(name => {
+      const dialog = Array.from(document.querySelectorAll('.el-dialog')).find(el => el.getBoundingClientRect().height > 0 && el.querySelector('.jbs_cascader_dialog_title')?.textContent.trim() === '选择证书');
+      return Array.from(dialog?.querySelectorAll('.cascader_panel_menu:nth-child(2) .func-item') || []).some(el => (el.title || el.textContent.trim()) === name);
+    }, { timeout: 3000 }, certificate.name).catch(() => { throw new Error(`51job 证书“${certificate.name}”已不在该分类中`); });
+    const selected = await page.evaluate(name => {
+      const dialog = Array.from(document.querySelectorAll('.el-dialog')).find(el => el.getBoundingClientRect().height > 0 && el.querySelector('.jbs_cascader_dialog_title')?.textContent.trim() === '选择证书');
+      const item = Array.from(dialog?.querySelectorAll('.cascader_panel_menu:nth-child(2) .func-item') || []).find(el => (el.title || el.textContent.trim()) === name);
+      if (!item) return false;
+      item.click();
+      return true;
+    }, certificate.name);
+    if (!selected) throw new Error(`51job 证书“${certificate.name}”已不在该分类中`);
+    await pause(120);
+  }
+  const selected = await page.evaluate(() => {
+    const dialog = Array.from(document.querySelectorAll('.el-dialog')).find(el => el.getBoundingClientRect().height > 0 && el.querySelector('.jbs_cascader_dialog_title')?.textContent.trim() === '选择证书');
+    return Array.from(dialog?.querySelectorAll('#_selectedFunctypeListRef .el-tag') || []).map(el => el.textContent.trim());
+  });
+  if (selected.length !== certificates.length || certificates.some(item => !selected.includes(item.name))) throw new Error('51job 证书选择回读不一致，职位未提交');
+  const confirmed = await page.evaluate(() => {
+    const dialog = Array.from(document.querySelectorAll('.el-dialog')).find(el => el.getBoundingClientRect().height > 0 && el.querySelector('.jbs_cascader_dialog_title')?.textContent.trim() === '选择证书');
+    const button = dialog?.querySelector('.confirm_button');
+    if (button) button.click();
+    return Boolean(button);
+  });
+  if (!confirmed) throw new Error('51job 证书确认按钮不可用');
+  await pause(150);
+  const actual = await page.evaluate(() => Array.from(document.querySelectorAll('[data-id="certificate"] .el-tag')).map(el => el.textContent.trim()));
+  if (actual.length !== certificates.length || certificates.some(item => !actual.includes(item.name))) throw new Error('51job 证书表单回读不一致，职位未提交');
+}
+
 async function chooseExperience(page, years) {
   const value = years === 0 ? '无需经验' : `${years}年`;
   const selectYear = () => page.evaluate(text => {
@@ -383,7 +563,8 @@ async function fillForm(page, job) {
   await pause(1600);
   const state = await page.evaluate(() => ({ loggedIn: !document.body.innerText.includes('账号密码登录'), address: Boolean(document.querySelector('#job_work_location .address_label.is-checked')) }));
   if (!state.loggedIn) throw new Error('请先在 51job 浏览器中登录企业账号');
-  if (!state.address) throw new Error('51job 账号尚未选定上班地址，请在平台页面设置后重试');
+  if (!state.address && !job.address) throw new Error('51job 账号尚未选定上班地址，请先选择企业账号已有地址');
+  await chooseAddress(page, job.address);
   await choose(page, '.job_type_select', job.jobType, '职位类型');
   await fill(page, '[data-id="jobName"] input', job.title, '职位名称');
   await fill(page, '[data-id="jobInfo"] textarea', job.description, '职位描述');
@@ -396,6 +577,8 @@ async function fillForm(page, job) {
   await fill(page, '[data-id="jobnum"] input', job.headcount, '招聘人数');
   await choose(page, '.salay_factor', `${job.salaryMonths}薪`, '薪资月数');
   await choose(page, 'input[placeholder="选择最低学历"]', job.education, '学历');
+  await chooseLanguage(page, job.language, job.languageLevel);
+  await chooseCertificates(page, job.certificates);
   return page.evaluate(() => ({
     jobType: document.querySelector('.job_type_select input')?.value,
     title: document.querySelector('[data-id="jobName"] input')?.value,
@@ -407,7 +590,10 @@ async function fillForm(page, job) {
     headcount: document.querySelector('[data-id="jobnum"] input')?.value,
     education: document.querySelector('input[placeholder="选择最低学历"]')?.value,
     address: document.querySelector('#job_work_location .address_label.is-checked .address_name')?.innerText || '',
-    city: document.querySelector('[for="formattedCitys"]')?.parentElement?.innerText || ''
+    city: document.querySelector('[for="formattedCitys"]')?.parentElement?.innerText || '',
+    language: (document.querySelector('.language_form .el-select:first-child input')?.value || '').replace(/^请选择$/, ''),
+    languageLevel: (document.querySelector('.language_form .el-select[prop="flevel1"] input')?.value || '').replace(/^请选择程度$/, ''),
+    certificates: Array.from(document.querySelectorAll('[data-id="certificate"] .el-tag')).map(el => el.textContent.trim())
   }));
 }
 
@@ -426,7 +612,7 @@ async function run(raw, { dryRun = false } = {}) {
     page = await createBackgroundPage(browser, source, JOB_URL);
     session = await keepPageActiveInBackground(page);
     const fields = await fillForm(page, job);
-    if (fields.jobType !== job.jobType || fields.title !== job.title || fields.description !== job.description || fields.functionName !== job.functionPath.at(-1) || fields.minSalary !== String(job.minSalary) || fields.maxSalary !== String(job.maxSalary) || fields.headcount !== String(job.headcount) || fields.education !== job.education) {
+    if (fields.jobType !== job.jobType || fields.title !== job.title || fields.description !== job.description || fields.functionName !== job.functionPath.at(-1) || fields.minSalary !== String(job.minSalary) || fields.maxSalary !== String(job.maxSalary) || fields.headcount !== String(job.headcount) || fields.education !== job.education || (job.address && fields.address.trim() !== job.address) || fields.language !== job.language || fields.languageLevel !== job.languageLevel || fields.certificates.length !== job.certificates.length || job.certificates.some(item => !fields.certificates.includes(item.name))) {
       throw new Error('51job 表单回读与输入不一致，请在浏览器中核对');
     }
     if (dryRun) {
@@ -499,6 +685,8 @@ if (require.main === module) {
           ? await getFunctionOptions(data)
         : process.argv.includes('--suggest-keywords')
           ? await getKeywordSuggestions(data)
+        : process.argv.includes('--posting-options')
+          ? await getPostingOptions(data)
           : await run(data, { dryRun: process.argv.includes('--dry-run') });
       process.stdout.write(JSON.stringify(result) + '\n');
     }
@@ -506,4 +694,4 @@ if (require.main === module) {
   });
 }
 
-module.exports = { validate, getFunctionOptions, getKeywordSuggestions, show51JobPage, check51JobLogin, minimize51JobBrowser, run };
+module.exports = { validate, getFunctionOptions, getKeywordSuggestions, getPostingOptions, show51JobPage, check51JobLogin, minimize51JobBrowser, run };
