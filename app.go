@@ -20,6 +20,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -1242,8 +1243,12 @@ func (a *App) Get51JobFunctionOptions(path []string) JobFunctionOptionsResult {
 	return result
 }
 
-// Show51JobPage 显示已有的专用浏览器；关闭后用原登录资料重新打开并确认可见。
+// Show51JobPage 在常用 Edge 中显示 51job 页面。
 func (a *App) Show51JobPage() JobDraftResult {
+	if _, err := everydayEdgePort(); err != nil {
+		a.openEdgeInspect()
+		return JobDraftResult{Status: "needs_login", Message: err.Error()}
+	}
 	show := func() JobDraftResult {
 		out, err := run51JobScript([]byte("{}"), 12*time.Second, "--show-page")
 		if err != nil {
@@ -1265,7 +1270,7 @@ func (a *App) Show51JobPage() JobDraftResult {
 			return result
 		}
 	}
-	return JobDraftResult{Status: "error", Message: "51job 专用浏览器未能显示，请检查 Edge/Chrome 是否安装，然后重试"}
+	return JobDraftResult{Status: "error", Message: "常用 Edge 的 51job 页面未能显示，请确认已在该浏览器登录 51job"}
 }
 
 // Check51JobLogin 核实职位表单可用，但不改变窗口状态；供前端登录期间轮询。
@@ -1339,6 +1344,11 @@ func (a *App) submit51Job(req JobDraftRequest) JobDraftResult {
 
 // TestPlatformLogin 独立测试指定平台的企业端账号登录与扫码鉴权
 func (a *App) TestPlatformLogin(platform string) bool {
+	if _, err := everydayEdgePort(); err != nil {
+		a.openEdgeInspect()
+		runtime.EventsEmit(a.ctx, "boss:error", map[string]interface{}{"type": "error", "message": err.Error()})
+		return false
+	}
 	a.bossMutex.Lock()
 	if a.bossCmd != nil && a.bossCmd.Process != nil {
 		_ = a.bossCmd.Process.Kill()
@@ -1737,6 +1747,11 @@ func (a *App) StartSearchWithOptions(projectID string, keyword string, city stri
 }
 
 func (a *App) startQuotaMatrixSearch(projectID string, keyword string, city string, expYears int, eduLevel string, count int, platforms []string, quotaMatrixJSON string, autoAnalyze bool) bool {
+	if _, err := everydayEdgePort(); err != nil {
+		a.openEdgeInspect()
+		runtime.EventsEmit(a.ctx, "boss:error", map[string]interface{}{"type": "error", "message": err.Error()})
+		return false
+	}
 	if !interviewIDPattern.MatchString(projectID) || a.GetProject(projectID) == nil {
 		runtime.EventsEmit(a.ctx, "platform:error", map[string]interface{}{
 			"type": "error", "message": "招聘项目不存在，请重新选择项目后搜索",
@@ -3211,86 +3226,114 @@ func (a *App) findBrowserExecutable() string {
 	return ""
 }
 
-// OpenURL 智能打开链接：优先在已登录该平台的专用浏览器实例（图二）中新开 Tab 并激活窗口，避免外部浏览器要求重新扫码
+// openEdgePage 在现有日常 Edge 中打开标签页，不指定新的用户资料目录。
+func (a *App) openEdgePage(rawURL string) bool {
+	path := a.findBrowserExecutable()
+	if !strings.EqualFold(filepath.Base(path), "msedge.exe") {
+		return false
+	}
+	cmd := exec.Command(path, rawURL)
+	hideConsoleWindow(cmd)
+	if err := cmd.Start(); err != nil {
+		return false
+	}
+	_ = cmd.Process.Release()
+	return true
+}
+
+// openEdgeInspect 仅打开日常 Edge 的设置标签页，调试开关仍由用户操作。
+func (a *App) openEdgeInspect() {
+	_ = a.openEdgePage("edge://inspect")
+}
+
+// everydayEdgePort 只连接用户在 edge://inspect 手动允许调试的日常 Edge。
+func everydayEdgePort() (int, error) {
+	setup := "请在常用 Edge 打开 edge://inspect，进入 Remote debugging 并勾选 Allow remote debugging for this browser instance，然后重试"
+	base := os.Getenv("LOCALAPPDATA")
+	if base == "" {
+		return 0, fmt.Errorf("找不到 Edge 用户目录。%s", setup)
+	}
+	content, err := os.ReadFile(filepath.Join(base, "Microsoft", "Edge", "User Data", "DevToolsActivePort"))
+	if err != nil {
+		return 0, fmt.Errorf("常用 Edge 尚未允许调试。%s", setup)
+	}
+	lines := strings.SplitN(strings.TrimSpace(string(content)), "\n", 2)
+	if len(lines) != 2 || !strings.HasPrefix(strings.TrimSpace(lines[1]), "/devtools/browser/") {
+		return 0, fmt.Errorf("Edge 调试标识无效。%s", setup)
+	}
+	port, err := strconv.Atoi(strings.TrimSpace(lines[0]))
+	if err != nil || port < 1 || port > 65535 {
+		return 0, fmt.Errorf("Edge 调试端口无效。%s", setup)
+	}
+	client := &http.Client{Timeout: 2 * time.Second}
+	resp, err := client.Get(fmt.Sprintf("http://127.0.0.1:%d/json/version", port))
+	if err != nil {
+		return 0, fmt.Errorf("常用 Edge 调试连接不可用。%s", setup)
+	}
+	defer resp.Body.Close()
+	var info struct {
+		Browser              string `json:"Browser"`
+		WebSocketDebuggerURL string `json:"webSocketDebuggerUrl"`
+	}
+	if resp.StatusCode != http.StatusOK || json.NewDecoder(resp.Body).Decode(&info) != nil ||
+		(!strings.Contains(strings.ToLower(info.Browser), "edge") && !strings.Contains(strings.ToLower(info.Browser), "edg")) ||
+		!strings.HasSuffix(info.WebSocketDebuggerURL, strings.TrimSpace(lines[1])) {
+		return 0, fmt.Errorf("调试端口不是常用 Edge。%s", setup)
+	}
+	return port, nil
+}
+
+// OpenURL 在已登录的日常 Edge 打开招聘平台链接。
 func (a *App) OpenURL(rawURL string) {
 	if strings.TrimSpace(rawURL) == "" {
 		return
 	}
 
-	// 1. 根据 URL 域名精准映射到各平台调试端口与数据目录
-	port := 0
-	profileDirName := ""
+	// 只对招聘平台复用 Edge；其他外链仍交给系统默认浏览器。
 	low := strings.ToLower(rawURL)
-	if strings.Contains(low, "51job.com") || strings.Contains(low, "ehire") {
-		port = 9503
-		profileDirName = "51job_isolated_profile"
-	} else if strings.Contains(low, "zhipin.com") {
-		port = 9501
-		profileDirName = "boss_isolated_profile"
-	} else if strings.Contains(low, "zhaopin.com") {
-		port = 9502
-		profileDirName = "zhaopin_isolated_profile"
-	} else if strings.Contains(low, "liepin.com") {
-		port = 9504
-		profileDirName = "liepin_isolated_profile"
-	}
-
-	// 2. 若属于招聘平台，优先尝试通过 CDP 协议在已有已登录的专用浏览器（图二）中新开 Tab
-	if port > 0 {
-		client := &http.Client{Timeout: 2 * time.Second}
-		newTabURL := fmt.Sprintf("http://127.0.0.1:%d/json/new?%s", port, url.QueryEscape(rawURL))
-		req, err := http.NewRequest(http.MethodPut, newTabURL, nil)
+	if strings.Contains(low, "51job.com") || strings.Contains(low, "zhipin.com") || strings.Contains(low, "zhaopin.com") || strings.Contains(low, "liepin.com") {
+		port, err := everydayEdgePort()
 		if err == nil {
-			resp, err := client.Do(req)
-			if err == nil && (resp.StatusCode == http.StatusOK || resp.StatusCode == http.StatusCreated) {
-				defer resp.Body.Close()
-				var tabInfo struct {
-					ID string `json:"id"`
-				}
-				if err := json.NewDecoder(resp.Body).Decode(&tabInfo); err == nil && tabInfo.ID != "" {
-					// 激活此 Tab 并唤起浏览器窗口到前台
-					activateURL := fmt.Sprintf("http://127.0.0.1:%d/json/activate/%s", port, tabInfo.ID)
-					_, _ = client.Get(activateURL)
-					log.Printf("[OpenURL] 成功在【%s / 端口 %d】已登录专用窗口中直接展示候选人: %s", profileDirName, port, rawURL)
-					return
+			client := &http.Client{Timeout: 2 * time.Second}
+			newTabURL := fmt.Sprintf("http://127.0.0.1:%d/json/new?%s", port, url.QueryEscape(rawURL))
+			req, err := http.NewRequest(http.MethodPut, newTabURL, nil)
+			if err == nil {
+				resp, err := client.Do(req)
+				if err == nil && (resp.StatusCode == http.StatusOK || resp.StatusCode == http.StatusCreated) {
+					defer resp.Body.Close()
+					var tabInfo struct {
+						ID string `json:"id"`
+					}
+					if err := json.NewDecoder(resp.Body).Decode(&tabInfo); err == nil && tabInfo.ID != "" {
+						// 激活此 Tab 并唤起浏览器窗口到前台
+						activateURL := fmt.Sprintf("http://127.0.0.1:%d/json/activate/%s", port, tabInfo.ID)
+						_, _ = client.Get(activateURL)
+						log.Printf("[OpenURL] 已在常用 Edge 打开招聘平台链接: %s", rawURL)
+						return
+					}
 				}
 			}
-		}
 
-		// 3. 若当前未在运行（端口未连通），使用该平台的专属 profile 目录拉起专用 Edge/Chrome 浏览器（保留已登录 Cookie）
-		profileDir := filepath.Join(a.getDataDir(), "candidates_multi", profileDirName)
-		browserPath := a.findBrowserExecutable()
-		if browserPath != "" && profileDirName != "" {
-			_ = os.MkdirAll(profileDir, 0755)
-			cmd := exec.Command(browserPath,
-				fmt.Sprintf("--user-data-dir=%s", profileDir),
-				fmt.Sprintf("--remote-debugging-port=%d", port),
-				"--no-first-run",
-				"--no-default-browser-check",
-				rawURL,
-			)
-			hideConsoleWindow(cmd)
-			if err := cmd.Start(); err == nil {
-				log.Printf("[OpenURL] 成功拉起带登录凭据的专用浏览器实例打开候选人: %s", rawURL)
-				return
-			}
+		}
+		if a.openEdgePage(rawURL) {
+			return
 		}
 	}
-
-	// 4. 普通链接（如更新检测、外链）或保底兜底：调用系统默认浏览器打开
+	// 未启用调试时也在日常默认浏览器打开，绝不拉起隔离资料目录。
 	runtime.BrowserOpenURL(a.ctx, rawURL)
 }
 
 // ActivatePlatformBrowser 唤醒指定平台的 Edge 浏览器窗口至前台（处理验证码或查看页面）
 func (a *App) ActivatePlatformBrowser(platform string) bool {
-	portMap := map[string]int{
-		"boss":    9501,
-		"zhaopin": 9502,
-		"51job":   9503,
-		"liepin":  9504,
+	domainMap := map[string]string{
+		"boss": "zhipin.com", "zhaopin": "zhaopin.com", "51job": "51job.com", "liepin": "liepin.com",
 	}
-	port, ok := portMap[platform]
+	domain, ok := domainMap[platform]
 	if !ok {
+		return false
+	}
+	port, err := everydayEdgePort()
+	if err != nil {
 		return false
 	}
 	client := &http.Client{Timeout: 2 * time.Second}
@@ -3303,10 +3346,11 @@ func (a *App) ActivatePlatformBrowser(platform string) bool {
 	var tabs []struct {
 		ID   string `json:"id"`
 		Type string `json:"type"`
+		URL  string `json:"url"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&tabs); err == nil {
 		for _, tab := range tabs {
-			if (tab.Type == "page" || tab.Type == "") && tab.ID != "" {
+			if (tab.Type == "page" || tab.Type == "") && tab.ID != "" && strings.Contains(strings.ToLower(tab.URL), domain) {
 				activateURL := fmt.Sprintf("http://127.0.0.1:%d/json/activate/%s", port, tab.ID)
 				_, _ = client.Get(activateURL)
 				return true

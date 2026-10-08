@@ -262,7 +262,7 @@
           />
           <div class="silent-sandbox-badge" v-if="searching">
             <span class="silent-dot"></span>
-            <span>🛡️ 静默后台沙盒运行中 · 浏览器已自动最小化缩入任务栏 · 绝不抢占打字焦点</span>
+            <span>🛡️ 常用 Edge 后台检索中 · 详情页读取后会再次最小化窗口；需要登录或验证时会显示浏览器</span>
           </div>
         </div>
 

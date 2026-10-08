@@ -1,6 +1,6 @@
 /** 51job 企业端职位填写：复用已登录浏览器，不重复启动 Edge。 */
-const puppeteer = require('puppeteer-core');
 const { createBackgroundPage, keepPageActiveInBackground, setBrowserWindowState } = require('./multi_platform_agent');
+const { connectEverydayEdge, SETUP } = require('./everyday_edge');
 
 const JOB_URL = 'https://ehire.51job.com/Revision/job?mark=new';
 const pause = ms => new Promise(resolve => setTimeout(resolve, ms));
@@ -117,8 +117,8 @@ async function getFunctionOptions(raw) {
   const path = Array.isArray(raw.path) ? raw.path.map(item => String(item).trim()) : [];
   if (path.length > 2 || path.some(item => !item)) throw new Error('职能层级无效');
   let browser;
-  try { browser = await puppeteer.connect({ browserURL: 'http://127.0.0.1:9503', defaultViewport: null, protocolTimeout: 12000 }); }
-  catch { return { status: 'needs_login', message: '请先打开并登录 51job 企业浏览器', options: [] }; }
+  try { browser = await connectEverydayEdge(); }
+  catch { return { status: 'needs_login', message: SETUP, options: [] }; }
   let page;
   let session;
   try {
@@ -170,11 +170,11 @@ async function getFunctionOptions(raw) {
   }
 }
 
-// “查看页面”由用户主动触发：恢复专用浏览器窗口，且不新建后台抓取标签页。
+// “查看页面”由用户主动触发：恢复日常 Edge 中的 51job 标签页。
 async function show51JobPage() {
   let browser;
-  try { browser = await puppeteer.connect({ browserURL: 'http://127.0.0.1:9503', defaultViewport: null, protocolTimeout: 12000 }); }
-  catch { return { status: 'needs_login', message: '51job 专用浏览器已关闭' }; }
+  try { browser = await connectEverydayEdge(); }
+  catch { return { status: 'needs_login', message: SETUP }; }
   try {
     const pages = await browser.pages();
     const page = pages.find(item => item.url().includes('ehire.51job.com/Revision/job'))
@@ -183,11 +183,11 @@ async function show51JobPage() {
         try { return new URL(item.url()).hostname.endsWith('.51job.com'); }
         catch { return false; }
       });
-    if (!page) return { status: 'needs_login', message: '专用浏览器中没有 51job 页面' };
+    if (!page) return { status: 'needs_login', message: '常用 Edge 中没有 51job 页面，请先打开 51job 企业站点' };
     const restored = await setBrowserWindowState(page, 'normal');
     if (!restored) return { status: 'error', message: '无法还原 51job 浏览器窗口' };
     await page.bringToFront();
-    return { status: 'ready', message: '已显示 51job 专用浏览器', url: page.url() };
+    return { status: 'ready', message: '已显示常用 Edge 的 51job 页面', url: page.url() };
   } catch (error) {
     return { status: 'error', message: `无法显示 51job 浏览器：${error.message}` };
   } finally {
@@ -198,8 +198,8 @@ async function show51JobPage() {
 // 重新加载职位表单验证服务端会话；此步骤只读，不改变窗口状态。
 async function check51JobLogin() {
   let browser;
-  try { browser = await puppeteer.connect({ browserURL: 'http://127.0.0.1:9503', defaultViewport: null, protocolTimeout: 12000 }); }
-  catch { return { status: 'waiting', message: '等待 51job 专用浏览器启动' }; }
+  try { browser = await connectEverydayEdge(); }
+  catch { return { status: 'waiting', message: SETUP }; }
   try {
     const pages = await browser.pages();
     let page = pages.filter(item => item.url().includes('ehire.51job.com/Revision/job')).at(-1);
@@ -239,8 +239,8 @@ async function check51JobLogin() {
 
 async function minimize51JobBrowser() {
   let browser;
-  try { browser = await puppeteer.connect({ browserURL: 'http://127.0.0.1:9503', defaultViewport: null, protocolTimeout: 12000 }); }
-  catch { return { status: 'error', message: '51job 专用浏览器已关闭，无法最小化' }; }
+  try { browser = await connectEverydayEdge(); }
+  catch { return { status: 'error', message: SETUP }; }
   try {
     const pages = await browser.pages();
     const page = pages.filter(item => item.url().includes('ehire.51job.com/Revision/job')).at(-1);
@@ -322,8 +322,8 @@ async function chooseKeywords(page, keywords) {
 async function getKeywordSuggestions(raw) {
   const functionPath = parseFunctionPath(raw.functionPath);
   let browser;
-  try { browser = await puppeteer.connect({ browserURL: 'http://127.0.0.1:9503', defaultViewport: null, protocolTimeout: 12000 }); }
-  catch { return { status: 'needs_login', message: '请先打开并登录 51job 企业浏览器', groups: [] }; }
+  try { browser = await connectEverydayEdge(); }
+  catch { return { status: 'needs_login', message: SETUP, groups: [] }; }
   let page;
   let session;
   try {
@@ -414,8 +414,8 @@ async function fillForm(page, job) {
 async function run(raw, { dryRun = false } = {}) {
   const job = validate(raw);
   let browser;
-  try { browser = await puppeteer.connect({ browserURL: 'http://127.0.0.1:9503', defaultViewport: null, protocolTimeout: 12000 }); }
-  catch { return { status: 'needs_login', message: '前程无忧企业浏览器未启动，请先打开并登录 51job，再重试' }; }
+  try { browser = await connectEverydayEdge(); }
+  catch { return { status: 'needs_login', message: SETUP }; }
   let page;
   let session;
   let submitted = false;

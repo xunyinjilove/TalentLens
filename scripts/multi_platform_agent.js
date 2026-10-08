@@ -4,8 +4,8 @@
 
 const fs = require('fs');
 const path = require('path');
-const { spawn, execSync } = require('child_process');
 const puppeteer = require('puppeteer-core');
+const { connectEverydayEdge, getEdgePort } = require('./everyday_edge');
 
 // 命令行参数解析
 const args = process.argv.slice(2);
@@ -71,15 +71,12 @@ function sendMsg(type, payload = {}) {
   process.stdout.write(json + '\n');
 }
 
-// 寻找系统 Edge 或 Chrome
+// 当前共用浏览器模式仅支持 Edge；Chrome 默认资料目录不接受远程调试连接。
 function findBrowserExecutable() {
   const candidates = [
     'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe',
     'C:\\Program Files\\Microsoft\\Edge\\Application\\msedge.exe',
-    'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
-    'C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe',
-    (process.env.LOCALAPPDATA || '') + '\\Microsoft\\Edge SxS\\Application\\msedge.exe',
-    (process.env.LOCALAPPDATA || '') + '\\Google\\Chrome\\Application\\chrome.exe'
+    (process.env.LOCALAPPDATA || '') + '\\Microsoft\\Edge SxS\\Application\\msedge.exe'
   ];
 
   for (const p of candidates) {
@@ -88,16 +85,14 @@ function findBrowserExecutable() {
   return null;
 }
 
-// 平台配置定义 — 每个平台分配固定 debugPort 避免冲突
+// 平台配置定义；四个平台共用日常 Edge 的登录会话。
 const PLATFORM_CONFIGS = {
   boss: {
     name: 'BOSS直聘',
     code: 'boss',
     icon: '🏢',
     loginUrl: 'https://www.zhipin.com/web/user/',
-    homeUrl: 'https://www.zhipin.com/web/chat/index',
-    profileFolder: 'boss_isolated_profile',
-    debugPort: 9501
+    homeUrl: 'https://www.zhipin.com/web/chat/index'
   },
   zhaopin: {
     name: '智联招聘',
@@ -105,9 +100,7 @@ const PLATFORM_CONFIGS = {
     icon: '💼',
     loginUrl: 'https://passport.zhaopin.com/login',
     homeUrl: 'https://rd6.zhaopin.com/app/recommend',
-    fallbackHomeUrl: 'https://ihr.zhaopin.com/',
-    profileFolder: 'zhaopin_isolated_profile',
-    debugPort: 9502
+    fallbackHomeUrl: 'https://ihr.zhaopin.com/'
   },
   '51job': {
     name: '前程无忧',
@@ -115,9 +108,7 @@ const PLATFORM_CONFIGS = {
     icon: '📑',
     loginUrl: 'https://ehire.51job.com/MainLogin.aspx',
     homeUrl: 'https://ehire.51job.com/Revision/talent/search',
-    fallbackHomeUrl: 'https://ehire.51job.com/Revision/navigate/',
-    profileFolder: '51job_isolated_profile',
-    debugPort: 9503
+    fallbackHomeUrl: 'https://ehire.51job.com/Revision/navigate/'
   },
   liepin: {
     name: '猎聘网',
@@ -125,26 +116,13 @@ const PLATFORM_CONFIGS = {
     icon: '🎯',
     loginUrl: 'https://lpt.liepin.com/user/login',
     homeUrl: 'https://lpt.liepin.com/recommend',
-    fallbackHomeUrl: 'https://lpt.liepin.com/',
-    profileFolder: 'liepin_isolated_profile',
-    debugPort: 9504
+    fallbackHomeUrl: 'https://lpt.liepin.com/'
   }
 };
 
 function isBrowserStartPage(url) {
   return !url || url === 'about:blank' || /^(?:edge|chrome):\/\/(?:newtab|new-tab-page)\/?(?:[?#].*)?$/i.test(url)
     || /^https?:\/\/ntp\.msn\.cn\/edge\/ntp(?:[/?#]|$)/i.test(url);
-}
-
-function browserLaunchArgs(cfg, profileDir, isLoginTest) {
-  return [
-    `--remote-debugging-port=${cfg.debugPort}`,
-    `--user-data-dir=${profileDir}`,
-    '--no-first-run',
-    '--no-default-browser-check',
-    isLoginTest ? '--start-maximized' : '--start-minimized',
-    cfg.homeUrl
-  ];
 }
 
 function isPlatformPageUrl(url, cfg) {
@@ -221,15 +199,6 @@ async function submit51jobSearch(page, keyword) {
   return { ok: false, reason: '搜索按钮已点击，但页面仍显示“输入关键词搜索”，检索未生效' };
 }
 
-async function closeUnusedStartPages(browser, selectedPage) {
-  const pages = await browser.pages();
-  for (const page of pages) {
-    if (page !== selectedPage && isBrowserStartPage(page.url())) {
-      await page.close().catch(() => {});
-    }
-  }
-}
-
 // 跨批次与全局排重缓存
 const seenCandidateKeys = new Set();
 let safetyStopped = false;
@@ -295,29 +264,6 @@ function selectFreshCandidates(candidates, limit, excludedUrls = new Set(), seen
     if (selected.length >= limit) break;
   }
   return selected;
-}
-
-// 杀死占用指定 profile 目录的 Edge/Chrome 进程
-function killBrowserByProfile(profileDir) {
-  const normalizedDir = profileDir.replace(/\\/g, '\\\\');
-  for (const procName of ['msedge.exe', 'chrome.exe']) {
-    try {
-      const cmd = `wmic process where "name='${procName}' and CommandLine like '%${normalizedDir}%'" call terminate 2>nul`;
-      execSync(cmd, { stdio: 'ignore', timeout: 5000, windowsHide: true });
-    } catch (e) {
-      // 静默 — WMIC 在没有匹配进程时返回非零退出码
-    }
-  }
-}
-
-// 清除浏览器 profile 目录下的锁文件
-function clearProfileLocks(profileDir) {
-  for (const lockName of ['SingletonLock', 'SingletonSocket', 'SingletonCookie']) {
-    try {
-      const f = path.join(profileDir, lockName);
-      if (fs.existsSync(f)) fs.unlinkSync(f);
-    } catch (e) {}
-  }
 }
 
 // 模拟真人分段随机打字（汲取 GoodHR 拟人输入设计）
@@ -423,29 +369,31 @@ function allocateQuota(total, items) {
 
 // 设置浏览器窗口状态（'minimized' 最小化至任务栏沙盒 | 'normal' 正常还原窗口 | 'maximized' 最大化）
 async function setBrowserWindowState(browserOrPage, state = 'minimized') {
-  let session = null;
-  try {
-    let target = null;
-    if (browserOrPage && typeof browserOrPage.pages === 'function') {
-      const pages = await browserOrPage.pages();
-      if (pages && pages.length > 0) target = pages[0].target();
-    } else if (browserOrPage && typeof browserOrPage.target === 'function') {
-      target = browserOrPage.target();
+  for (let attempt = 0; attempt < 3; attempt++) {
+    let session = null;
+    try {
+      let target = null;
+      if (browserOrPage && typeof browserOrPage.pages === 'function') {
+        const pages = await browserOrPage.pages();
+        if (pages && pages.length > 0) target = pages[0].target();
+      } else if (browserOrPage && typeof browserOrPage.target === 'function') {
+        target = browserOrPage.target();
+      }
+      if (!target) return false;
+      session = await target.createCDPSession();
+      const { windowId } = await session.send('Browser.getWindowForTarget');
+      if (windowId !== undefined) {
+        await session.send('Browser.setWindowBounds', { windowId, bounds: { windowState: state } });
+        return true;
+      }
+    } catch (e) {
+      // 新建标签页可能暂时没有窗口 ID；等待后重试。
+    } finally {
+      if (session) await session.detach().catch(() => {});
     }
-    if (!target) return false;
-    session = await target.createCDPSession();
-    const { windowId } = await session.send('Browser.getWindowForTarget');
-    if (windowId === undefined) return false;
-    await session.send('Browser.setWindowBounds', {
-      windowId,
-      bounds: { windowState: state }
-    });
-    return true;
-  } catch (e) {
-    return false;
-  } finally {
-    if (session) await session.detach().catch(() => {});
+    await new Promise(resolve => setTimeout(resolve, 120));
   }
+  return false;
 }
 
 // CDP 在已有 Edge 窗口内创建后台标签页；browser.newPage() 会激活窗口并抢走 HR 的焦点。
@@ -460,6 +408,8 @@ async function createBackgroundPage(browser, sourcePage, url) {
     const target = await browser.waitForTarget(item => item._targetId === targetId, { timeout: 8000 });
     const page = await target.page();
     if (!page) throw new Error('后台详情标签页未就绪');
+    // 某些站点会在详情页加载时重新唤起 Edge；在新页就绪后再压回任务栏。
+    await setBrowserWindowState(page, 'minimized');
     return page;
   } catch (error) {
     if (targetId) await session.send('Target.closeTarget', { targetId }).catch(() => {});
@@ -1058,6 +1008,8 @@ async function enrichCandidatesWithFullDetail(page, browser, candidates, platfor
       }
     }
 
+    // 平台的异步详情脚本可能在读取结束后才唤起窗口；每人处理完再次最小化。
+    if (options.testLoginPlatform !== platformKey) await setBrowserWindowState(page, 'minimized');
     enriched.push(cand);
     await new Promise(r => setTimeout(r, 150));
   }
@@ -1065,52 +1017,11 @@ async function enrichCandidatesWithFullDetail(page, browser, candidates, platfor
   return enriched;
 }
 
-// 优先复用已有调试会话；没有会话时只启动一次 Edge，避免直启失败后再次启动产生第二个窗口。
-async function launchPlatformBrowser(cfg, browserPath, profileDir) {
-  const debugPort = cfg.debugPort;
-  const isLoginTest = options.testLoginPlatform === cfg.code;
-
-  // 先连接已经在跑的浏览器实例。
-  try {
-    const browser = await puppeteer.connect({
-      browserURL: `http://127.0.0.1:${debugPort}`,
-      defaultViewport: null
-    });
-    sendMsg('status', { platform: cfg.code, message: `♻️ 已复用【${cfg.name}】已打开的浏览器窗口` });
-    if (!isLoginTest) {
-      await setBrowserWindowState(browser, 'minimized');
-    }
-    return browser;
-  } catch (e) {
-    // 没有在跑的实例，继续下面的流程
-  }
-
-  // 清理仅属于当前平台隔离 profile 的残留进程与锁文件。
-  sendMsg('status', { platform: cfg.code, message: `🧹 清理【${cfg.name}】残留浏览器进程...` });
-  killBrowserByProfile(profileDir);
-  await new Promise(r => setTimeout(r, 1500)); // 等进程完全退出
-  clearProfileLocks(profileDir);
-
-  // Edge 只启动一次，并直接打开平台网址；不先打开新标签页再启动第二个 Edge。
-  const child = spawn(browserPath, browserLaunchArgs(cfg, profileDir, isLoginTest),
-    { detached: true, stdio: 'ignore', windowsHide: true });
-  child.unref();
-
-  for (let i = 0; i < 20; i++) {
-    await new Promise(r => setTimeout(r, 800));
-    try {
-      const browser = await puppeteer.connect({
-        browserURL: `http://127.0.0.1:${debugPort}`,
-        defaultViewport: null
-      });
-      if (!isLoginTest) {
-        await setBrowserWindowState(browser, 'minimized');
-      }
-      return browser;
-    } catch (e) {}
-  }
-
-  throw new Error(`无法连接刚启动的浏览器 (profile: ${path.basename(profileDir)})，请检查该配置文件是否被其他 Edge 窗口占用`);
+// 连接用户当前打开的日常 Edge，不创建第二份浏览器资料目录。
+async function launchPlatformBrowser(cfg) {
+  const browser = await connectEverydayEdge();
+  sendMsg('status', { platform: cfg.code, message: `♻️ 已连接常用 Edge 的【${cfg.name}】登录会话` });
+  return browser;
 }
 
 // 统一抓取单个平台 (返回 null 表示启动/连接失败，返回 [] 表示成功连接但无结果)
@@ -1124,16 +1035,13 @@ async function scrapePlatform(platformKey, browserPath, targetCount, keywordPlan
     message: `${cfg.icon} 正在连接【${cfg.name}】企业端后台通道...`
   });
 
-  const profileDir = path.join(options.dataDir, '..', cfg.profileFolder);
-  if (!fs.existsSync(profileDir)) fs.mkdirSync(profileDir, { recursive: true });
-
   let browser = null;
   try {
-    browser = await launchPlatformBrowser(cfg, browserPath, profileDir);
+    browser = await launchPlatformBrowser(cfg);
   } catch (err) {
     sendMsg('error', {
       platform: platformKey,
-      message: `❌ 无法启动 ${cfg.name} 浏览器直连: ${err.message}`
+      message: `❌ 无法连接常用 Edge 的 ${cfg.name} 会话：${err.message}`
     });
     return null; // null = 启动失败（区别于 [] 即成功但无结果）
   }
@@ -1146,15 +1054,16 @@ async function scrapePlatform(platformKey, browserPath, targetCount, keywordPlan
 
   let pages = await browser.pages();
 
-  // 优先选择已经在平台域名上的 tab（避免选错 about:blank tab）
-  const domainHint = cfg.code === '51job' ? '51job.com' : cfg.code;
-  let page = pages.find(p => {
-    const u = p.url() || '';
-    return u.includes(domainHint) && !u.includes('about:blank');
-  });
+  // 只复用平台工作台/搜索页，绝不把候选人详情页当作搜索起点。
+  let page = pages.find(p => (p.url() || '').startsWith(cfg.homeUrl));
+  if (!page && cfg.fallbackHomeUrl) {
+    page = pages.find(p => (p.url() || '').startsWith(cfg.fallbackHomeUrl));
+  }
 
   if (!page) {
-    page = pages[0] || (await browser.newPage());
+    if (!pages.length) throw new Error('常用 Edge 中没有可用标签页');
+    const source = pages.find(p => isPlatformPageUrl(p.url(), cfg)) || pages[0];
+    page = await createBackgroundPage(browser, source, cfg.homeUrl);
   }
 
   if (options.testLoginPlatform !== cfg.code) {
@@ -1164,12 +1073,9 @@ async function scrapePlatform(platformKey, browserPath, targetCount, keywordPlan
     }
   }
 
-  // 自动清理隔离 profile 中多余的 Edge 新标签页，避免额外窗口留在前台。
-  try {
-    await closeUnusedStartPages(browser, page);
-  } catch (e) {}
+  // 常用 Edge 中的其他标签页属于用户，不做清理。
 
-  // 仅在扫码登录测试时激活置顶窗口，常规寻才检索时维持后台沙盒最小化
+  // 仅在登录测试时激活窗口，常规检索保持最小化。
   const isLoginTest = options.testLoginPlatform === cfg.code;
   if (isLoginTest) {
     try { await page.bringToFront(); } catch (e) {}
@@ -1232,9 +1138,8 @@ async function scrapePlatform(platformKey, browserPath, targetCount, keywordPlan
     return outcome([], '招聘网站未能打开');
   }
 
-  // 导航完成后再次清理新标签页；常规检索保持最小化。
+  // 导航完成后维持窗口状态。
   try {
-    await closeUnusedStartPages(browser, page);
     if (isLoginTest) await page.bringToFront();
     else await setBrowserWindowState(page, 'minimized');
   } catch (e) {}
@@ -1808,7 +1713,7 @@ ${cleanedRawText}
 async function main() {
   const browserPath = findBrowserExecutable();
   if (!browserPath) {
-    sendMsg('error', { message: '❌ 未在系统中检测到 Edge 或 Chrome 浏览器，无法启动直连引擎。' });
+    sendMsg('error', { message: '❌ 未在系统中检测到 Microsoft Edge，无法连接常用浏览器会话。' });
     return;
   }
 
@@ -1849,8 +1754,14 @@ async function main() {
     let liveTriggered = false;
     let liveMsg = '';
 
-    // 尝试连接正在运行的浏览器端口进行真实页面同步交互（优先 51job 9503 与 BOSS 9501）
-    for (const port of [9503, 9501, 9502, 9504]) {
+    // 所有招聘平台都共用用户已登录的常用 Edge 会话。
+    let edgePort;
+    try { edgePort = await getEdgePort(); }
+    catch (error) {
+      sendMsg('action_result', { success: false, action: options.action, candidateName: cleanName, message: error.message });
+      return;
+    }
+    for (const port of [edgePort]) {
       try {
         const browser = await puppeteer.connect({
           browserURL: `http://127.0.0.1:${port}`,
@@ -1859,12 +1770,7 @@ async function main() {
         let pages = await browser.pages();
 
         // 若提供了 candidateUrl 且当前没有打开该简历页面，主动在该平台浏览器中打开
-        if (options.candidateUrl && (
-          (port === 9503 && options.candidateUrl.includes('51job')) ||
-          (port === 9501 && options.candidateUrl.includes('zhipin')) ||
-          (port === 9502 && options.candidateUrl.includes('zhaopin')) ||
-          (port === 9504 && options.candidateUrl.includes('liepin'))
-        )) {
+        if (options.candidateUrl && /(?:51job|zhipin|zhaopin|liepin)\.com/.test(options.candidateUrl)) {
           const hasUrl = pages.some(p => p.url() === options.candidateUrl);
           if (!hasUrl) {
             try {
@@ -2048,4 +1954,4 @@ if (require.main === module) {
   });
 }
 
-module.exports = { allocateQuota, smoothScroll, keepPageActiveInBackground, setBrowserWindowState, createBackgroundPage, capture51jobDetailUrl, isBrowserStartPage, browserLaunchArgs, closeUnusedStartPages, isPlatformPageUrl, ensurePlatformPage, submit51jobSearch, detectCaptcha, extractCandidatesAcrossFrames, selectFreshCandidates, advanceSearchResults, main };
+module.exports = { allocateQuota, smoothScroll, keepPageActiveInBackground, setBrowserWindowState, createBackgroundPage, capture51jobDetailUrl, isBrowserStartPage, isPlatformPageUrl, ensurePlatformPage, submit51jobSearch, detectCaptcha, extractCandidatesAcrossFrames, selectFreshCandidates, advanceSearchResults, main };

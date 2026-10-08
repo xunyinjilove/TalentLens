@@ -330,6 +330,7 @@ async function openLogin(): Promise<boolean> {
     const app: any = await import('../../wailsjs/go/main/App')
     const response = await app.Show51JobPage()
     if (response.status === 'ready') { ElMessage.success(response.message); return true }
+    if (response.status === 'needs_login') { ElMessage.warning(response.message); return false }
     ElMessage.error(response.message || '无法打开 51job 页面')
     return false
   } catch (error: any) { ElMessage.error(error.message || String(error)); return false }
