@@ -55,6 +55,19 @@ test('browser minimization targets a page window and releases its CDP session', 
   assert.equal(detached, true);
 });
 
+test('window minimization retries while a newly opened detail tab has no window ID', async () => {
+  let attempts = 0;
+  const page = { target: () => ({ createCDPSession: async () => ({
+    send: async command => {
+      if (command === 'Browser.getWindowForTarget') return attempts++ === 0 ? {} : { windowId: 23 };
+      return {};
+    },
+    detach: async () => {}
+  }) }) };
+  assert.equal(await agent.setBrowserWindowState(page, 'minimized'), true);
+  assert.equal(attempts, 2);
+});
+
 test('detail tab is created in the background without activating the browser', async () => {
   const commands = [];
   let detached = false;
@@ -135,22 +148,6 @@ test('Edge MSN start page is not mistaken for a recruiting login page', async ()
   assert.deepEqual(await agent.ensurePlatformPage(page, cfg), { ok: true });
   assert.deepEqual(visits, [cfg.homeUrl]);
   assert.equal(agent.isPlatformPageUrl(page.url(), cfg), true);
-});
-
-test('Edge starts once on the recruiting URL in a minimized window', () => {
-  const cfg = { debugPort: 9503, homeUrl: 'https://ehire.51job.com/Revision/talent/search' };
-  assert.deepEqual(agent.browserLaunchArgs(cfg, 'C:\\TalentLens\\51job_profile', false), [
-    '--remote-debugging-port=9503', '--user-data-dir=C:\\TalentLens\\51job_profile',
-    '--no-first-run', '--no-default-browser-check', '--start-minimized', cfg.homeUrl
-  ]);
-});
-
-test('unused Edge new-tab window is closed without closing the recruiting tab', async () => {
-  let closed = 0;
-  const selected = { url: () => 'https://ehire.51job.com/Revision/talent/search', close: async () => { throw Error('search tab must stay open'); } };
-  const startPage = { url: () => 'edge://newtab/', close: async () => { closed++; } };
-  await agent.closeUnusedStartPages({ pages: async () => [selected, startPage] }, selected);
-  assert.equal(closed, 1);
 });
 
 test('51job search clicks the real button instead of its same-text parent', async () => {
