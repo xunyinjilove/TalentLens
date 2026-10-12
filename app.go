@@ -24,7 +24,6 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
-	"syscall"
 	"time"
 
 	"github.com/ledongthuc/pdf"
@@ -1221,17 +1220,6 @@ func (a *App) CheckBossCookies() bool {
 // TestBossLogin 兼容旧接口：测试 BOSS 直聘登录
 func (a *App) TestBossLogin() bool {
 	return a.TestPlatformLogin("boss")
-}
-
-// hideConsoleWindow 在 Windows 下彻底隐藏被拉起的子进程控制台（CMD黑框），实现静默无感后台运行
-func hideConsoleWindow(cmd *exec.Cmd) {
-	if cmd == nil {
-		return
-	}
-	cmd.SysProcAttr = &syscall.SysProcAttr{
-		HideWindow:    true,
-		CreationFlags: 0x08000000, // CREATE_NO_WINDOW
-	}
 }
 
 // JobDraftRequest 为 51job 草稿提供项目外仍需由 HR 确认的字段；薪资绝不从旧岗位猜测。
