@@ -3,6 +3,7 @@ const fs = require('fs');
 const pathModule = require('path');
 const puppeteer = require('puppeteer-core');
 const { createBackgroundPage, keepPageActiveInBackground, setBrowserWindowState } = require('./multi_platform_agent');
+const majorCatalog = require('./51job_majors.json');
 
 const JOB_URL = 'https://ehire.51job.com/Revision/job?mark=new';
 const pause = ms => new Promise(resolve => setTimeout(resolve, ms));
@@ -10,8 +11,22 @@ const pause = ms => new Promise(resolve => setTimeout(resolve, ms));
 function validate(input) {
   const action = input.action || 'draft';
   const jobType = input.jobType || '社会招聘';
+  const employmentType = String(input.employmentType || '全职').trim();
+  const majors = (Array.isArray(input.majors) ? input.majors : []).map(item => ({
+    value: String(item.value || '').trim(), path: Array.isArray(item.path) ? item.path.map(name => String(name).trim()) : []
+  }));
   if (!['draft', 'publish'].includes(action)) throw new Error('职位操作只能是保存草稿或立即发布');
   if (!['社会招聘', '校园招聘'].includes(jobType)) throw new Error('职位类型只能是社会招聘或校园招聘');
+  if (!['全职', '兼职', '实习'].includes(employmentType) || (jobType === '社会招聘' && employmentType === '实习')) throw new Error('岗位性质与招聘类型不匹配');
+  if (jobType === '社会招聘' && majors.length) throw new Error('专业要求仅适用于校园招聘');
+  if (majors.length > majorCatalog.maxSelections) throw new Error(`51job 校招专业最多选择 ${majorCatalog.maxSelections} 项`);
+  if (new Set(majors.map(item => item.value)).size !== majors.length || new Set(majors.map(item => item.path.at(-1))).size !== majors.length) throw new Error('校招专业不能重复选择');
+  for (const major of majors) {
+    const root = majorCatalog.majors.find(item => item.name === major.path[0]);
+    const branch = root?.children?.find(item => item.name === major.path[1]);
+    const leaf = branch?.children?.find(item => item.name === major.path[2] && item.value === major.value);
+    if (major.path.length !== 3 || !leaf) throw new Error(`校招专业“${major.path.join(' > ')}”不在本地 51job 专业目录中`);
+  }
   const title = String(input.title || '').trim();
   const description = String(input.description || '').trim();
   const functionPath = String(input.functionPath || '').split('>').map(s => s.trim()).filter(Boolean);
@@ -40,7 +55,7 @@ function validate(input) {
   if (Boolean(language) !== Boolean(languageLevel)) throw new Error('选择语言时还需选择熟练程度');
   if (certificates.length > 10 || certificates.some(item => !item.category || !item.name)) throw new Error('证书最多选择 10 项，且须从 51job 证书分类中选择');
   if (new Set(certificates.map(item => item.name)).size !== certificates.length) throw new Error('证书不能重复选择');
-  return { action, jobType, title, description, functionPath, keywords, minSalary, maxSalary, salaryMonths, headcount, experienceYears, education: String(input.education).trim(), address, language, languageLevel, certificates };
+  return { action, jobType, employmentType, majors, title, description, functionPath, keywords, minSalary, maxSalary, salaryMonths, headcount, experienceYears, education: String(input.education).trim(), address, language, languageLevel, certificates };
 }
 
 function parseFunctionPath(value) {
@@ -113,6 +128,74 @@ async function chooseFunction(page, path) {
   }
   const selected = await page.evaluate(() => document.querySelector('[data-id="funcTypeInput"] input')?.value || '');
   if (selected !== path[path.length - 1]) throw new Error('51job 职能未选中，请在平台页面检查');
+}
+
+async function chooseEmploymentType(page, value) {
+  const found = await page.evaluate(name => {
+    const button = Array.from(document.querySelectorAll('button.term_width')).find(item => item.textContent.trim() === name && item.getBoundingClientRect().height > 0);
+    button?.click();
+    return Boolean(button);
+  }, value);
+  if (!found) throw new Error(`51job 页面未找到“${value}”岗位性质`);
+  await pause(150);
+  const chosen = await page.evaluate(name => {
+    const button = Array.from(document.querySelectorAll('button.term_width')).find(item => item.textContent.trim() === name && item.getBoundingClientRect().height > 0);
+    return Boolean(button && !button.classList.contains('is-plain'));
+  }, value);
+  if (!chosen) throw new Error(`51job 未选中“${value}”岗位性质`);
+}
+
+async function chooseMajors(page, majors) {
+  if (!majors.length) return;
+  await click(page, '[data-id="major"] input', '校招专业入口');
+  await page.waitForFunction(() => Array.from(document.querySelectorAll('.el-dialog')).some(item =>
+    item.getBoundingClientRect().height > 0 && item.querySelector('.jbs_cascader_dialog_title')?.textContent.trim() === '选择专业'), { timeout: 5000 });
+  for (let index = 0; index < majors.length; index++) {
+    const major = majors[index];
+    const liveMatch = await page.evaluate(({ path, value }) => {
+      const dialog = Array.from(document.querySelectorAll('.el-dialog')).find(item =>
+        item.getBoundingClientRect().height > 0 && item.querySelector('.jbs_cascader_dialog_title')?.textContent.trim() === '选择专业');
+      const panel = dialog?.querySelector('.jbs_cascader_panel');
+      let nodes = panel?.__vue__?.options;
+      let node;
+      for (const name of path) {
+        node = nodes?.find(item => item.label === name);
+        nodes = node?.children;
+      }
+      return Boolean(node && String(node.value) === value);
+    }, major);
+    if (!liveMatch) throw new Error(`51job 当前专业目录与本地不一致：${major.path.join(' > ')}；职位未提交`);
+    for (let level = 0; level < major.path.length; level++) {
+      const found = await page.evaluate(({ level, name, leaf }) => {
+        const dialog = Array.from(document.querySelectorAll('.el-dialog')).find(item =>
+          item.getBoundingClientRect().height > 0 && item.querySelector('.jbs_cascader_dialog_title')?.textContent.trim() === '选择专业');
+        const menu = dialog?.querySelectorAll('.cascader_panel_menu')[level];
+        const item = Array.from(menu?.querySelectorAll('.func-item') || []).find(element =>
+          element.title === name && Boolean(element.parentElement?.classList.contains('leaf')) === leaf);
+        item?.click();
+        return Boolean(item);
+      }, { level, name: major.path[level], leaf: level === major.path.length - 1 });
+      if (!found) throw new Error(`51job 未找到校招专业“${major.path.join(' > ')}”第 ${level + 1} 级；职位未提交`);
+      await pause(120);
+    }
+    const selected = await page.evaluate(() => {
+      const dialog = Array.from(document.querySelectorAll('.el-dialog')).find(item =>
+        item.getBoundingClientRect().height > 0 && item.querySelector('.jbs_cascader_dialog_title')?.textContent.trim() === '选择专业');
+      return Array.from(dialog?.querySelectorAll('.selected_list_wrapper_tag .el-tag') || []).map(item => item.textContent.trim());
+    });
+    if (selected.length !== index + 1 || !selected.includes(major.path.at(-1))) throw new Error('51job 校招专业未选中，职位未提交');
+  }
+  const confirmed = await page.evaluate(() => {
+    const dialog = Array.from(document.querySelectorAll('.el-dialog')).find(item =>
+      item.getBoundingClientRect().height > 0 && item.querySelector('.jbs_cascader_dialog_title')?.textContent.trim() === '选择专业');
+    const button = dialog?.querySelector('.confirm_button');
+    button?.click();
+    return Boolean(button);
+  });
+  if (!confirmed) throw new Error('51job 校招专业确认按钮不可用，职位未提交');
+  await pause(150);
+  const actual = await page.evaluate(() => Array.from(document.querySelectorAll('[data-id="major"] .el-tag')).map(item => item.getAttribute('title') || item.textContent.trim()));
+  if (actual.length !== majors.length || majors.some(item => !actual.includes(item.path.at(-1)))) throw new Error('51job 校招专业回读不一致，职位未提交');
 }
 
 async function waitForJobForm(page) {
@@ -565,14 +648,17 @@ async function chooseExperience(page, years) {
 async function fillForm(page, job) {
   await page.waitForFunction(() => document.querySelectorAll('.job_type_select .el-select-dropdown__item').length >= 2 && document.body.innerText.includes('保存'), { timeout: 20000 });
   await pause(1600);
-  const state = await page.evaluate(() => ({ loggedIn: !document.body.innerText.includes('账号密码登录'), address: Boolean(document.querySelector('#job_work_location .address_label.is-checked')) }));
-  if (!state.loggedIn) throw new Error('请先在 51job 浏览器中登录企业账号');
-  if (!state.address && !job.address) throw new Error('51job 账号尚未选定上班地址，请先选择企业账号已有地址');
-  await chooseAddress(page, job.address);
+  const loggedIn = await page.evaluate(() => !document.body.innerText.includes('账号密码登录'));
+  if (!loggedIn) throw new Error('请先在 51job 浏览器中登录企业账号');
   await choose(page, '.job_type_select', job.jobType, '职位类型');
+  await chooseEmploymentType(page, job.employmentType);
+  const hasAddress = await page.evaluate(() => Boolean(document.querySelector('#job_work_location .address_label.is-checked')));
+  if (!hasAddress && !job.address) throw new Error('51job 账号尚未选定上班地址，请先选择企业账号已有地址');
+  await chooseAddress(page, job.address);
   await fill(page, '[data-id="jobName"] input', job.title, '职位名称');
   await fill(page, '[data-id="jobInfo"] textarea', job.description, '职位描述');
   await chooseFunction(page, job.functionPath);
+  if (job.jobType === '校园招聘') await chooseMajors(page, job.majors);
   await chooseKeywords(page, job.keywords);
   if (job.jobType === '社会招聘') await chooseExperience(page, job.experienceYears);
   await choose(page, '.salary_type', '月薪', '薪资单位');
@@ -585,6 +671,8 @@ async function fillForm(page, job) {
   await chooseCertificates(page, job.certificates);
   return page.evaluate(() => ({
     jobType: document.querySelector('.job_type_select input')?.value,
+    employmentType: Array.from(document.querySelectorAll('button.term_width')).find(item => !item.classList.contains('is-plain') && item.getBoundingClientRect().height > 0)?.textContent.trim(),
+    majors: Array.from(document.querySelectorAll('[data-id="major"] .el-tag')).map(item => item.getAttribute('title') || item.textContent.trim()),
     title: document.querySelector('[data-id="jobName"] input')?.value,
     description: document.querySelector('[data-id="jobInfo"] textarea')?.value,
     functionName: document.querySelector('[data-id="funcTypeInput"] input')?.value,
@@ -616,7 +704,7 @@ async function run(raw, { dryRun = false } = {}) {
     page = await createBackgroundPage(browser, source, JOB_URL);
     session = await keepPageActiveInBackground(page);
     const fields = await fillForm(page, job);
-    if (fields.jobType !== job.jobType || fields.title !== job.title || fields.description !== job.description || fields.functionName !== job.functionPath.at(-1) || fields.minSalary !== String(job.minSalary) || fields.maxSalary !== String(job.maxSalary) || fields.headcount !== String(job.headcount) || fields.education !== job.education || (job.address && fields.address.trim() !== job.address) || fields.language !== job.language || fields.languageLevel !== job.languageLevel || fields.certificates.length !== job.certificates.length || job.certificates.some(item => !fields.certificates.includes(item.name))) {
+    if (fields.jobType !== job.jobType || fields.employmentType !== job.employmentType || fields.majors.length !== job.majors.length || job.majors.some(item => !fields.majors.includes(item.path.at(-1))) || fields.title !== job.title || fields.description !== job.description || fields.functionName !== job.functionPath.at(-1) || fields.minSalary !== String(job.minSalary) || fields.maxSalary !== String(job.maxSalary) || fields.headcount !== String(job.headcount) || fields.education !== job.education || (job.address && fields.address.trim() !== job.address) || fields.language !== job.language || fields.languageLevel !== job.languageLevel || fields.certificates.length !== job.certificates.length || job.certificates.some(item => !fields.certificates.includes(item.name))) {
       throw new Error('51job 表单回读与输入不一致，请在浏览器中核对');
     }
     if (dryRun) {
@@ -698,4 +786,4 @@ if (require.main === module) {
   });
 }
 
-module.exports = { validate, getFunctionOptions, getKeywordSuggestions, getPostingOptions, show51JobPage, check51JobLogin, minimize51JobBrowser, run };
+module.exports = { validate, chooseEmploymentType, chooseMajors, getFunctionOptions, getKeywordSuggestions, getPostingOptions, show51JobPage, check51JobLogin, minimize51JobBrowser, run };

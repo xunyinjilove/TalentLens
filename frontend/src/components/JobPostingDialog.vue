@@ -1,5 +1,5 @@
 <template>
-  <el-dialog v-model="opened" title="发布招聘 · 四平台" width="760px" :close-on-click-modal="false" :close-on-press-escape="!saving" :show-close="!saving">
+  <el-dialog v-model="opened" :title="form.jobType === '校园招聘' ? '发布招聘 · 校园招聘' : '发布招聘 · 社会招聘'" width="760px" :close-on-click-modal="false" :close-on-press-escape="!saving" :show-close="!saving">
     <p class="intro">招聘项目：<strong>{{ project?.name }}</strong>。前程无忧可保存草稿或立即发布，其他平台的职位发布入口尚未接入。</p>
     <div class="platforms">
       <div class="platform active"><strong>前程无忧 51job</strong><span>草稿 / 立即发布</span></div>
@@ -8,7 +8,7 @@
       <div class="platform"><strong>猎聘</strong><span>待接入</span></div>
     </div>
     <el-form label-position="top" class="posting-form">
-      <el-form-item label="招聘类型"><el-radio-group v-model="form.jobType"><el-radio label="社会招聘">社会招聘</el-radio><el-radio label="校园招聘">校园招聘</el-radio></el-radio-group></el-form-item>
+      <el-form-item label="招聘类型"><el-radio-group v-model="form.jobType"><el-radio-button label="社会招聘">社会招聘</el-radio-button><el-radio-button label="校园招聘">校园招聘</el-radio-button></el-radio-group></el-form-item>
       <el-form-item label="职位名称（必填）"><el-input v-model="form.title" maxlength="80" /></el-form-item>
       <el-form-item label="职位描述（必填）"><el-input v-model="form.description" type="textarea" :rows="5" maxlength="40000" show-word-limit /></el-form-item>
       <div class="form-grid">
@@ -49,9 +49,10 @@
         <el-form-item label="年薪发放月数"><el-select v-model="form.salaryMonths" placeholder="请选择" style="width: 100%"><el-option v-for="month in 13" :key="month" :label="`${month + 11}薪`" :value="month + 11" /></el-select></el-form-item>
         <el-form-item label="招聘人数"><el-input-number v-model="form.headcount" :min="1" :max="9999" style="width: 100%" /></el-form-item>
         <el-form-item v-if="form.jobType === '社会招聘'" label="工作经验（年）"><el-input-number v-model="form.experienceYears" :min="0" :max="10" style="width: 100%" /></el-form-item>
-        <el-form-item label="学历"><el-select v-model="form.education" style="width: 100%"><el-option v-for="item in educationOptions" :key="item" :label="item" :value="item" /></el-select></el-form-item>
+        <el-form-item v-if="form.jobType === '社会招聘'" label="学历"><el-select v-model="form.education" style="width: 100%"><el-option v-for="item in educationOptions" :key="item" :label="item" :value="item" /></el-select></el-form-item>
       </div>
-      <p v-if="form.jobType === '校园招聘'" class="location-note">校招按 51job 的应届生条件填写，可能同步到应届生求职网并消耗职位配额；请以平台页面显示的实时规则为准。</p>
+      <CampusJobPostingFields v-if="form.jobType === '校园招聘'" v-model:employment-type="form.employmentType" v-model:education="form.education" v-model:majors="form.majors" :education-options="educationOptions" />
+      <p v-if="form.jobType === '校园招聘'" class="location-note">51job 页面显示校招职位会发布到前程无忧和应届生求职网，并提示消耗无忧通。保存或发布前请在平台核对实时点数和渠道。</p>
       <el-form-item label="补充自定义关键词（可选，逗号分隔）"><el-input v-model="form.keywords" placeholder="例如：接口测试,Postman；与上方勾选词合计不超过 10 个" /></el-form-item>
       <p v-if="project?.job_config?.required_skills?.length" class="skill-hint">项目技能参考：{{ project.job_config.required_skills.slice(0, 5).join('、') }}</p>
       <el-alert v-if="keywordMessage" :closable="false" :title="keywordMessage" type="info" />
@@ -98,6 +99,7 @@ import type { Project } from '../composables/useProjectStore'
 import local51JobFunctions from '../data/51job_functions.json'
 import localPostingOptions from '../data/51job_posting_options.json'
 import { runWith51JobBrowser } from '../composables/51jobBrowserRecovery'
+import CampusJobPostingFields from './CampusJobPostingFields.vue'
 
 interface FuncNode {
   name: string
@@ -177,7 +179,7 @@ const completed = computed(() => ['saved', 'published', 'uncertain'].includes(re
 const currentKeywords = () => [...new Set([...selectedKeywords.value, ...form.keywords.split(/[,，、]/).map(s => s.trim()).filter(Boolean)])]
 const keywordCount = computed(() => currentKeywords().length)
 const educationOptions = ['本科', '大专', '硕士', '博士', '中技/中专', '高中', '初中及以下', '无学历要求']
-const form = reactive({ jobType: '社会招聘', title: '', description: '', functionPath: '', keywords: '', minSalary: 0, maxSalary: 0, salaryMonths: 0, headcount: 1, experienceYears: 0, education: '本科', address: '', language: '', languageLevel: '', certificates: [] as Array<{ category: string, name: string }> })
+const form = reactive({ jobType: '社会招聘', employmentType: '全职', majors: [] as Array<{ value: string, path: string[] }>, title: '', description: '', functionPath: '', keywords: '', minSalary: 0, maxSalary: 0, salaryMonths: 0, headcount: 1, experienceYears: 0, education: '本科', address: '', language: '', languageLevel: '', certificates: [] as Array<{ category: string, name: string }> })
 const languageLevels = computed(() => (localPostingOptions.languageLevels as Record<string, string[]>)[form.language] || [])
 const certificateOptions = computed(() => (localPostingOptions.certificates as Record<string, string[]>)[certificateCategory.value] || [])
 
@@ -189,6 +191,8 @@ watch(opened, value => {
 watch(() => props.project, project => {
   if (!project) return
   form.jobType = '社会招聘'
+  form.employmentType = '全职'
+  form.majors = []
   form.title = project.job_config?.title || ''
   form.description = project.job_config?.job_description || (project.job_config?.requirements || []).join('\n')
   form.functionPath = ''
@@ -234,6 +238,7 @@ watch(() => form.functionPath, () => {
   loadedFunctionPath.value = ''
   keywordMessage.value = ''
 })
+watch(() => form.jobType, () => { locationConfirmed.value = false })
 
 async function loadPostingOptions(kind: 'address') {
   if (loadingPostingOptions.address) return
@@ -468,7 +473,7 @@ async function submit(action: 'draft' | 'publish') {
     const app: any = await import('../../wailsjs/go/main/App')
     const request = {
       projectId: props.project.id,
-      jobType: form.jobType,
+      jobType: form.jobType, employmentType: form.jobType === '校园招聘' ? form.employmentType : '全职', majors: form.jobType === '校园招聘' ? form.majors : [],
       title: form.title.trim(), description: form.description.trim(), functionPath: form.functionPath.trim(),
       keywords, minSalary: form.minSalary, maxSalary: form.maxSalary, salaryMonths: form.salaryMonths,
       headcount: form.headcount, experienceYears: form.jobType === '校园招聘' ? 0 : form.experienceYears, education: form.education,
