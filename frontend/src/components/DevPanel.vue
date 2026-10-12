@@ -1,11 +1,4 @@
 <template>
-  <!-- 开发者按钮（右下角小图标） -->
-  <button v-if="!visible" class="dev-toggle" @click="visible = true" title="开发者工具 (F12)">
-    <svg viewBox="0 0 16 16" fill="currentColor">
-      <path d="M4.708 5.578L2.061 8.224l2.647 2.646-.708.708L.939 8.517V7.931L4 4.87l.708.708zm6.584 0L13.939 8.224l-2.647 2.646.708.708 3.061-3.061V7.931L12 4.87l-.708.708zM8.943 2.018l.813.188-2.7 11.776-.812-.188 2.7-11.776z"/>
-    </svg>
-  </button>
-
   <!-- 调试面板 -->
   <Transition name="panel-slide">
     <div v-if="visible" class="dev-panel">
@@ -80,35 +73,6 @@ function clearLogs() {
 </script>
 
 <style scoped lang="scss">
-// 开发者按钮
-.dev-toggle {
-  position: fixed;
-  bottom: 16px;
-  right: 16px;
-  width: 32px;
-  height: 32px;
-  border-radius: 8px;
-  border: 1px solid rgba(0, 0, 0, 0.1);
-  background: rgba(255, 255, 255, 0.9);
-  backdrop-filter: blur(10px);
-  color: #8E8E93;
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  z-index: 9998;
-  transition: all 0.15s;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
-
-  svg { width: 14px; height: 14px; }
-
-  &:hover {
-    color: #007AFF;
-    border-color: rgba(0, 122, 255, 0.3);
-    background: rgba(0, 122, 255, 0.06);
-  }
-}
-
 // 调试面板
 .dev-panel {
   position: fixed;
