@@ -104,6 +104,10 @@ jobs:
 
       - name: Generate release body
         run: |
+          if [ -f ".github/release-notes/${RELEASE_TAG}.md" ]; then
+            cp ".github/release-notes/${RELEASE_TAG}.md" release_notes.md
+            exit 0
+          fi
           version=$(echo "${{ env.RELEASE_TAG }}" | sed 's/^v//')
           cat > release_notes.md << NOTES_EOF
           ## TalentLens ${{ env.RELEASE_TAG }}

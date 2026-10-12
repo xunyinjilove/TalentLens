@@ -190,6 +190,22 @@
                   </div>
                 </div>
 
+                <div class="decision-overview">
+                  <div class="overview-score" :class="getScoreClass(resumeStore.selectedResume.score)">
+                    <strong :key="resumeStore.selectedResume.id">{{ animatedDetailScore }}</strong>
+                    <span>{{ $t('analysis.totalScore') }}</span>
+                  </div>
+                  <div class="overview-content">
+                    <div class="overview-status">
+                      <span class="recommendation-badge" :class="resumeStore.selectedResume.analysis.recommendation">
+                        {{ $t(`analysis.recommendations.${resumeStore.selectedResume.analysis.recommendation}`) }}
+                      </span>
+                      <span class="overview-review-status">红线：{{ !resumeStore.selectedResume.analysis.redLineChecks?.length ? '尚未配置' : resumeStore.selectedResume.analysis.redLineStatus === 'failed' ? '不满足' : resumeStore.selectedResume.analysis.redLineStatus === 'pending' ? '待 HR 核实' : '已满足' }}</span>
+                    </div>
+                    <p>{{ resumeStore.selectedResume.analysis.summary || '暂无分析总结' }}</p>
+                  </div>
+                </div>
+
                 <!-- 岗位红线始终显示；旧项目可由 HR 在这里补录核验条件。 -->
                 <div v-if="resumeStore.selectedResume.analysis" class="redline-alert-card">
                   <div class="redline-alert-header">
@@ -282,8 +298,8 @@
                 </div>
 
                 <!-- 🛡️ 简历防伪注水雷达与断层侦测器 (WaterCheck Radar) -->
-                <div class="water-radar-card" :class="getWaterRiskClass(resumeStore.selectedResume.analysis?.water_check?.risk_level)">
-                  <div class="water-radar-header">
+                <details :key="`water-${resumeStore.selectedResume.id}`" class="water-radar-card" :class="getWaterRiskClass(resumeStore.selectedResume.analysis?.water_check?.risk_level)" :open="resumeStore.selectedResume.analysis?.water_check?.risk_level === 'high'">
+                  <summary class="water-radar-header">
                     <div class="radar-title-group">
                       <div class="radar-icon-shield" :class="resumeStore.selectedResume.analysis?.water_check?.risk_level || 'low'">
                         <el-icon><Warning v-if="resumeStore.selectedResume.analysis?.water_check?.risk_level === 'high'" /><Check v-else /></el-icon>
@@ -295,16 +311,13 @@
                             {{ getWaterRiskTitle(resumeStore.selectedResume.analysis?.water_check) }}
                           </span>
                         </div>
-                        <div class="radar-sub-desc">
-                          AI 深度侦测：职场时间线断层空窗、假大空缺乏量化描述、外包驻场与跳槽动荡隐患
-                        </div>
                       </div>
                     </div>
                     <div class="radar-score-box" :class="resumeStore.selectedResume.analysis?.water_check?.risk_level || 'low'">
                       <div class="radar-score-num">{{ resumeStore.selectedResume.analysis?.water_check?.water_score ?? 15 }}</div>
                       <div class="radar-score-caption">注水破绽分 (越低越真实)</div>
                     </div>
-                  </div>
+                  </summary>
 
                   <div class="water-radar-grid">
                     <!-- 1. 职场时间断层侦测 -->
@@ -378,14 +391,14 @@
                       </div>
                     </div>
                   </div>
-                </div>
+                </details>
 
                 <!-- 候选人在线直达与沟通专区 -->
-                <div class="candidate-portal-bar">
-                  <div class="portal-header">
+                <details :key="`portal-${resumeStore.selectedResume.id}`" class="candidate-portal-bar">
+                  <summary class="portal-header">
                     <span class="portal-title">🌐 候选人在线直达与沟通</span>
-                    <span class="portal-sub">直连招聘平台候选人详情页，可直接在线联系、查看最新动态或加收藏</span>
-                  </div>
+                    <span class="portal-sub">{{ is51JobCandidate ? contactStatusText : resumeStore.selectedResume.url ? '打开主页或复制链接' : '暂无在线链接' }}</span>
+                  </summary>
                   <div class="portal-actions">
                     <button
                       class="portal-act-btn highlight"
@@ -418,14 +431,11 @@
                       （本地导入简历，暂无在线直达链接）
                     </span>
                   </div>
-                </div>
+                </details>
 
                 <!-- 评分面板 -->
-                <div class="score-section">
-                  <div class="main-score" :class="getScoreClass(resumeStore.selectedResume.score)">
-                    <span class="score-value" :key="resumeStore.selectedResume.id">{{ animatedDetailScore }}</span>
-                    <span class="score-label">{{ $t('analysis.totalScore') }}</span>
-                  </div>
+                <details :key="`score-${resumeStore.selectedResume.id}`" class="score-section preview-disclosure">
+                  <summary>查看评分依据 <span>核心能力 {{ resumeStore.selectedResume.analysis.abilityScore ?? resumeStore.selectedResume.score }} 分</span></summary>
                   <div class="score-breakdown">
                     <p v-if="resumeStore.selectedResume.analysis.abilityScore !== undefined" class="score-explanation">
                       核心能力 {{ resumeStore.selectedResume.analysis.abilityScore }} 分
@@ -449,17 +459,11 @@
                       <el-progress :percentage="resumeStore.selectedResume.analysis.educationMatch" :color="getProgressColor(resumeStore.selectedResume.analysis.educationMatch)" />
                     </div>
                   </div>
-                </div>
-
-                <!-- 推荐结论 -->
-                <div class="recommendation-section">
-                  <div class="recommendation-badge" :class="resumeStore.selectedResume.analysis.recommendation">
-                    {{ $t(`analysis.recommendations.${resumeStore.selectedResume.analysis.recommendation}`) }}
-                  </div>
-                </div>
+                </details>
 
                 <!-- 评分详解 -->
-                <div v-if="resumeStore.selectedResume.analysis.skillDetail" class="detail-cards">
+                <details v-if="resumeStore.selectedResume.analysis.skillDetail" :key="`breakdown-${resumeStore.selectedResume.id}`" class="detail-cards preview-disclosure">
+                  <summary>查看技能、经验与学历详解</summary>
                   <div class="detail-card">
                     <h4>{{ $t('analysis.skillMatch') }}详解</h4>
                     <p>{{ resumeStore.selectedResume.analysis.skillDetail }}</p>
@@ -472,7 +476,7 @@
                     <h4>{{ $t('analysis.educationMatch') }}详解</h4>
                     <p>{{ resumeStore.selectedResume.analysis.educationDetail }}</p>
                   </div>
-                </div>
+                </details>
 
                 <!-- 优势与不足 -->
                 <div class="strength-weakness">
@@ -511,31 +515,28 @@
                   <div class="qa-section-head">
                     <h4><el-icon><QuestionFilled /></el-icon> AI 预面试提纲与参考回答 ({{ resumeStore.selectedResume.analysis.interviewQA.length }}题)</h4>
                     <el-button size="small" type="primary" @click="showInterviewDialog = true">开始 / 继续 AI 文字初面</el-button>
+                  </div>
+                  <details :key="`qa-${resumeStore.selectedResume.id}`" class="qa-disclosure">
+                    <summary>查看全部 {{ resumeStore.selectedResume.analysis.interviewQA.length }} 道问题与参考回答</summary>
                     <button class="copy-qa-btn" @click="handleCopyAllQA" title="一键复制全套提纲">
                       <el-icon><DocumentCopy /></el-icon> 复制全套提纲
                     </button>
-                  </div>
-                  <div class="qa-list">
-                    <div v-for="(item, idx) in resumeStore.selectedResume.analysis.interviewQA" :key="idx" class="qa-card">
-                      <div class="qa-card-header">
-                        <span class="qa-badge" :class="getCategoryClass(item.category)">{{ item.category || '技术提问' }}</span>
-                        <span class="qa-tag">Q{{ idx + 1 }}</span>
-                        <span class="qa-question-text">{{ item.question }}</span>
-                      </div>
-                      <div v-if="item.reference_answer" class="qa-card-body">
-                        <div class="qa-answer-title">
-                          <el-icon><InfoFilled /></el-icon> 基于简历事实的参考回答要点：
+                    <div class="qa-list">
+                      <div v-for="(item, idx) in resumeStore.selectedResume.analysis.interviewQA" :key="idx" class="qa-card">
+                        <div class="qa-card-header">
+                          <span class="qa-badge" :class="getCategoryClass(item.category)">{{ item.category || '技术提问' }}</span>
+                          <span class="qa-tag">Q{{ idx + 1 }}</span>
+                          <span class="qa-question-text">{{ item.question }}</span>
                         </div>
-                        <div class="qa-answer-text">{{ item.reference_answer }}</div>
+                        <div v-if="item.reference_answer" class="qa-card-body">
+                          <div class="qa-answer-title">
+                            <el-icon><InfoFilled /></el-icon> 基于简历事实的参考回答要点：
+                          </div>
+                          <div class="qa-answer-text">{{ item.reference_answer }}</div>
+                        </div>
                       </div>
                     </div>
-                  </div>
-                </div>
-
-                <!-- AI 总结 -->
-                <div class="summary-section">
-                  <h4><el-icon><ChatLineSquare /></el-icon> {{ $t('analysis.summary') }}</h4>
-                  <p>{{ resumeStore.selectedResume.analysis.summary }}</p>
+                  </details>
                 </div>
               </div>
 
@@ -1725,7 +1726,7 @@ onUnmounted(() => {
 .preview-content {
   flex: 1;
   overflow: auto;
-  padding: 20px;
+  padding: 16px;
   background: $bg-secondary;
 
   :deep(.el-empty) {
@@ -1739,14 +1740,15 @@ onUnmounted(() => {
   .detail-header {
     display: flex;
     align-items: center;
+    flex-wrap: wrap;
     gap: 14px;
-    padding: 16px 20px;
+    padding: 12px 16px;
     background: $bg-primary;
     border-radius: $radius-lg;
-    margin-bottom: 14px;
+    margin-bottom: 10px;
     border: 1px solid $separator;
 
-    .file-icon { font-size: 36px; color: $system-blue; }
+    .file-icon { font-size: 28px; color: $system-blue; }
 
     .file-info {
       h3 { margin: 0 0 3px 0; font-size: 15px; font-weight: 600; color: $text-primary; }
@@ -1755,63 +1757,66 @@ onUnmounted(() => {
   }
 
   .analysis-result {
-    .score-section {
+    .decision-overview {
       display: flex;
-      gap: 20px;
-      padding: 20px;
+      align-items: flex-start;
+      gap: 16px;
+      padding: 14px 16px;
+      margin-bottom: 10px;
       background: $bg-primary;
-      border-radius: $radius-lg;
-      margin-bottom: 14px;
       border: 1px solid $separator;
+      border-radius: $radius-lg;
 
-      .main-score {
-        width: 90px;
-        height: 90px;
-        border-radius: 50%;
-        display: flex;
-        flex-direction: column;
-        align-items: center;
-        justify-content: center;
-        color: white;
-        flex-shrink: 0;
+      .overview-score {
+        width: 68px;
+        min-width: 68px;
+        padding: 7px 4px;
+        border-radius: 10px;
+        text-align: center;
+        background: #f1f5f9;
+        color: #475569;
 
-        &.high { background: linear-gradient(135deg, $system-green, darken($system-green, 10%)); }
-        &.medium { background: linear-gradient(135deg, $system-orange, darken($system-orange, 10%)); }
-        &.low { background: linear-gradient(135deg, $system-red, darken($system-red, 10%)); }
-
-        .score-value { font-size: 28px; font-weight: 700; line-height: 1; animation: scorePopIn 0.5s ease-out; }
-        .score-label { font-size: 10px; opacity: 0.9; margin-top: 3px; }
+        &.high { background: #ecfdf5; color: #047857; }
+        &.medium { background: #fff7ed; color: #c2410c; }
+        &.low { background: #fef2f2; color: #b91c1c; }
+        strong { display: block; font-size: 26px; line-height: 1.1; }
+        span { font-size: 11px; }
       }
 
+      .overview-content { min-width: 0; flex: 1; }
+      .overview-status { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-bottom: 7px; }
+      .recommendation-badge {
+        display: inline-block;
+        padding: 3px 9px;
+        border-radius: 6px;
+        font-size: 12px;
+        font-weight: 700;
+        &.strong_recommend, &.recommend { background: #ecfdf5; color: #047857; }
+        &.consider { background: #fff7ed; color: #c2410c; }
+        &.not_recommend { background: #fef2f2; color: #b91c1c; }
+      }
+      .overview-review-status { font-size: 12px; color: $text-secondary; }
+      p { margin: 0; font-size: 12.5px; line-height: 1.65; color: $text-secondary; }
+    }
+
+    .score-section {
+      display: block;
+      padding: 0;
+      background: $bg-primary;
+      border-radius: $radius-lg;
+      margin-bottom: 10px;
+      border: 1px solid $separator;
+
       .score-breakdown {
-        flex: 1;
         display: flex;
         flex-direction: column;
-        justify-content: center;
         gap: 10px;
+        padding: 0 16px 16px;
 
         .score-item {
           .label { display: block; font-size: 12px; color: $text-secondary; margin-bottom: 3px; }
           :deep(.el-progress__text) { font-size: 11px; font-weight: 600; }
         }
-      }
-    }
-
-    .recommendation-section {
-      text-align: center;
-      margin-bottom: 14px;
-
-      .recommendation-badge {
-        display: inline-block;
-        padding: 8px 20px;
-        border-radius: 16px;
-        font-size: 13px;
-        font-weight: 600;
-
-        &.strong_recommend { background: linear-gradient(135deg, $system-green, darken($system-green, 10%)); color: white; }
-        &.recommend { background: rgba(52, 199, 89, 0.12); color: $system-green; }
-        &.consider { background: rgba(255, 149, 0, 0.12); color: $system-orange; }
-        &.not_recommend { background: rgba(255, 59, 48, 0.12); color: $system-red; }
       }
     }
 
@@ -1837,13 +1842,13 @@ onUnmounted(() => {
 
     // 候选人信息卡片
     .candidate-card {
-      padding: 14px 18px;
-      background: linear-gradient(135deg, rgba(0,122,255,0.06), rgba(0,122,255,0.02));
-      border: 1px solid rgba(0,122,255,0.15);
+      padding: 12px 16px;
+      background: $bg-primary;
+      border: 1px solid $separator;
       border-radius: $radius-lg;
-      margin-bottom: 14px;
+      margin-bottom: 10px;
 
-      .candidate-name { font-size: 16px; font-weight: 700; color: $text-primary; margin-bottom: 6px; }
+      .candidate-name { font-size: 16px; font-weight: 700; color: $text-primary; margin-bottom: 4px; }
       .candidate-meta {
         display: flex; flex-wrap: wrap; gap: 8px;
         span {
@@ -1855,10 +1860,15 @@ onUnmounted(() => {
 
     // 评分详解
     .detail-cards {
-      display: flex; flex-direction: column; gap: 10px; margin-bottom: 14px;
+      display: block;
+      margin-bottom: 10px;
+      background: $bg-primary;
+      border: 1px solid $separator;
+      border-radius: $radius-lg;
 
       .detail-card {
-        padding: 14px 16px;
+        margin: 0 16px 10px;
+        padding: 10px 12px;
         background: $bg-primary;
         border: 1px solid $separator;
         border-radius: $radius-lg;
@@ -1896,17 +1906,18 @@ onUnmounted(() => {
 
     // AI 问答提纲卡片
     .qa-section {
-      padding: 16px;
-      background: linear-gradient(135deg, rgba(88, 86, 214, 0.04), rgba(0, 122, 255, 0.03));
-      border: 1px solid rgba(88, 86, 214, 0.2);
+      padding: 14px 16px;
+      background: $bg-primary;
+      border: 1px solid $separator;
       border-radius: $radius-lg;
-      margin-bottom: 14px;
+      margin-bottom: 10px;
 
       .qa-section-head {
         display: flex;
         justify-content: space-between;
         align-items: center;
-        margin-bottom: 12px;
+        gap: 12px;
+        margin-bottom: 8px;
 
         h4 {
           display: flex;
@@ -1918,24 +1929,25 @@ onUnmounted(() => {
           color: #5856D6;
         }
 
+        flex-wrap: wrap;
+      }
+
+      .qa-disclosure {
+        border-top: 1px solid $separator;
+        padding-top: 8px;
+
         .copy-qa-btn {
           display: inline-flex;
           align-items: center;
           gap: 4px;
-          padding: 4px 10px;
+          margin: 4px 0 10px;
+          padding: 5px 10px;
           font-size: 11.5px;
-          font-weight: 500;
           color: $system-blue;
-          background: rgba(0, 122, 255, 0.08);
-          border: 1px solid rgba(0, 122, 255, 0.2);
-          border-radius: 12px;
+          background: #eff6ff;
+          border: 1px solid #dbeafe;
+          border-radius: 6px;
           cursor: pointer;
-          transition: all 0.2s;
-
-          &:hover {
-            background: rgba(0, 122, 255, 0.16);
-            border-color: $system-blue;
-          }
         }
       }
 
@@ -2014,16 +2026,6 @@ onUnmounted(() => {
       }
     }
 
-    // AI 总结
-    .summary-section {
-      padding: 16px;
-      background: $bg-primary;
-      border-radius: $radius-lg;
-      border: 1px solid $separator;
-
-      h4 { display: flex; align-items: center; gap: 6px; margin: 0 0 10px 0; font-size: 13px; font-weight: 600; color: $system-blue; }
-      p { margin: 0; font-size: 13px; color: $text-secondary; line-height: 1.7; }
-    }
   }
 
   .status-hint {
@@ -2093,11 +2095,55 @@ onUnmounted(() => {
   }
 }
 
-@keyframes scorePopIn {
-  0% { transform: scale(0.5); opacity: 0; }
-  50% { transform: scale(1.1); }
-  100% { transform: scale(1); opacity: 1; }
+// 浏览器原生 details 保留键盘与读屏展开语义，切换候选人时由 key 重置。
+.preview-disclosure > summary,
+.water-radar-card > summary,
+.candidate-portal-bar > summary,
+.qa-disclosure > summary {
+  list-style: none;
+  cursor: pointer;
+  &:focus-visible { outline: 2px solid $system-blue; outline-offset: 2px; }
+  &::-webkit-details-marker { display: none; }
+  &::after {
+    content: '⌄';
+    flex-shrink: 0;
+    margin-left: auto;
+    color: $text-tertiary;
+    font-size: 18px;
+    line-height: 1;
+    transition: transform 0.15s ease;
+  }
 }
+
+.preview-disclosure[open] > summary::after,
+.water-radar-card[open] > summary::after,
+.candidate-portal-bar[open] > summary::after,
+.qa-disclosure[open] > summary::after { transform: rotate(180deg); }
+
+.preview-disclosure > summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 16px;
+  color: $text-primary;
+  font-size: 13px;
+  font-weight: 600;
+  span { margin-left: auto; color: $text-secondary; font-size: 12px; font-weight: 400; }
+  &::after { margin-left: 0; }
+}
+
+.qa-disclosure > summary {
+  display: flex;
+  align-items: center;
+  padding: 4px 0;
+  color: $system-blue;
+  font-size: 12px;
+}
+
+details.water-radar-card > summary.water-radar-header { margin: 0; padding: 0; border-bottom: 0; }
+details.water-radar-card[open] > summary.water-radar-header { margin-bottom: 14px; padding-bottom: 12px; border-bottom: 1px solid $separator; }
+details.candidate-portal-bar > summary.portal-header { margin: 0; }
+details.candidate-portal-bar[open] > summary.portal-header { margin-bottom: 12px; }
 
 :deep(.el-progress-bar__inner) {
   transition: width 0.5s ease-out !important;
@@ -2351,12 +2397,11 @@ onUnmounted(() => {
 
 // 红线一票否决警告卡片
 .redline-alert-card {
-  margin: 12px 0 16px 0;
-  padding: 14px 18px;
-  background: #fef2f2;
-  border: 1.5px solid #f87171;
+  margin: 0 0 10px;
+  padding: 12px 16px;
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
   border-radius: 12px;
-  box-shadow: 0 2px 8px rgba(220, 38, 38, 0.08);
 
   .redline-alert-header {
     margin-bottom: 8px;
@@ -2374,8 +2419,8 @@ onUnmounted(() => {
         width: 28px;
         height: 28px;
         border-radius: 50%;
-        background: #ef4444;
-        color: #ffffff;
+        background: #fee2e2;
+        color: #b91c1c;
         display: flex;
         align-items: center;
         justify-content: center;
@@ -2423,7 +2468,7 @@ onUnmounted(() => {
       font-size: 12px;
       font-weight: 600;
       color: #b91c1c;
-      background: #fee2e2;
+      background: #fff7f7;
       padding: 6px 10px;
       border-radius: 6px;
       border-left: 3px solid #dc2626;
@@ -2439,12 +2484,11 @@ onUnmounted(() => {
 
 // 加分达成看板
 .bonus-match-card {
-  margin: 12px 0 16px 0;
-  padding: 14px 18px;
-  background: #fefce8;
-  border: 1.5px solid #fde047;
+  margin: 0 0 10px;
+  padding: 12px 16px;
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
   border-radius: 12px;
-  box-shadow: 0 2px 8px rgba(202, 138, 4, 0.08);
 
   .bonus-header {
     margin-bottom: 8px;
@@ -2462,8 +2506,8 @@ onUnmounted(() => {
         width: 28px;
         height: 28px;
         border-radius: 50%;
-        background: #eab308;
-        color: #ffffff;
+        background: #fef3c7;
+        color: #a16207;
         display: flex;
         align-items: center;
         justify-content: center;
@@ -2511,7 +2555,7 @@ onUnmounted(() => {
       font-size: 12px;
       font-weight: 600;
       color: #854d0e;
-      background: #fef9c3;
+      background: #fffdf2;
       padding: 6px 10px;
       border-radius: 6px;
       border-left: 3px solid #ca8a04;
@@ -2527,12 +2571,11 @@ onUnmounted(() => {
 
 // 初筛 ➔ 终审阶段演进看板
 .merged-evolution-card {
-  margin: 12px 0 16px 0;
-  padding: 14px 18px;
-  background: linear-gradient(135deg, #fffbeb 0%, #fef3c7 100%);
-  border: 1px solid #fde68a;
+  margin: 0 0 10px;
+  padding: 12px 16px;
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
   border-radius: 12px;
-  box-shadow: 0 2px 8px rgba(217, 119, 6, 0.08);
 
   .evo-header {
     display: flex;
@@ -2632,17 +2675,18 @@ onUnmounted(() => {
 
 // 候选人在线直达专区
 .candidate-portal-bar {
-  margin: 14px 0 18px 0;
-  padding: 14px 18px;
-  background: linear-gradient(135deg, rgba(37, 99, 235, 0.06) 0%, rgba(14, 165, 233, 0.08) 100%);
-  border: 1px solid rgba(37, 99, 235, 0.22);
+  margin: 0 0 10px;
+  padding: 12px 16px;
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
   border-radius: 12px;
-  box-shadow: 0 2px 8px rgba(37, 99, 235, 0.04);
 
   .portal-header {
     display: flex;
     justify-content: space-between;
     align-items: center;
+    flex-wrap: wrap;
+    gap: 4px 12px;
     margin-bottom: 12px;
 
     .portal-title {
@@ -2819,12 +2863,11 @@ onUnmounted(() => {
 
 // 🛡️ 简历防伪注水雷达与断层侦测器
 .water-radar-card {
-  margin: 14px 0 16px 0;
-  padding: 16px 18px;
+  margin: 0 0 10px;
+  padding: 12px 16px;
   background: #ffffff;
   border-radius: 12px;
   border: 1px solid #e2e8f0;
-  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.03);
   transition: all 0.2s ease;
 
   &.risk-low {
@@ -2846,6 +2889,8 @@ onUnmounted(() => {
     display: flex;
     justify-content: space-between;
     align-items: center;
+    flex-wrap: wrap;
+    gap: 8px;
     padding-bottom: 12px;
     border-bottom: 1px solid rgba(226, 232, 240, 0.8);
     margin-bottom: 14px;
