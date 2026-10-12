@@ -1,4 +1,6 @@
 /** 51job 企业端职位填写：复用已登录浏览器，不重复启动 Edge。 */
+const fs = require('fs');
+const pathModule = require('path');
 const puppeteer = require('puppeteer-core');
 const { createBackgroundPage, keepPageActiveInBackground, setBrowserWindowState } = require('./multi_platform_agent');
 
@@ -118,13 +120,37 @@ async function waitForJobForm(page) {
     Boolean(document.querySelector('.func-dropdown .all_func_tips'))
     || /账号密码登录|扫码登录|企业账号登录/.test(document.body?.innerText || ''),
   { timeout: 20000 });
-  return Boolean(await page.$('.func-dropdown .all_func_tips'));
+  return page.evaluate(() => Boolean(document.querySelector('.func-dropdown .all_func_tips'))
+    && !/账号密码登录|扫码登录|企业账号登录/.test(document.body?.innerText || ''));
 }
 
-// 按已选上级读取下一列；只返回当前页面实际展示的职能，不缓存猜测分类。
+// 按已选上级读取下一列；优先读取本地抓取的完整全量职能字典，未命中时降级读取在线页面。
 async function getFunctionOptions(raw) {
   const path = Array.isArray(raw.path) ? raw.path.map(item => String(item).trim()) : [];
   if (path.length > 2 || path.some(item => !item)) throw new Error('职能层级无效');
+
+  // 本地已抓取缓存优先读取 (0ms 瞬时响应)
+  try {
+    const cacheFile = pathModule.join(__dirname, '51job_functions.json');
+    if (fs.existsSync(cacheFile)) {
+      const tree = JSON.parse(fs.readFileSync(cacheFile, 'utf8'));
+      let targetOptions = null;
+      if (path.length === 0) {
+        targetOptions = tree.map(n => ({ name: n.name, leaf: Boolean(n.leaf || !n.children || !n.children.length) }));
+      } else if (path.length === 1) {
+        const l1 = tree.find(n => n.name === path[0]);
+        if (l1 && l1.children) targetOptions = l1.children.map(n => ({ name: n.name, leaf: Boolean(n.leaf || !n.children || !n.children.length) }));
+      } else if (path.length === 2) {
+        const l1 = tree.find(n => n.name === path[0]);
+        const l2 = l1?.children?.find(n => n.name === path[1]);
+        if (l2 && l2.children) targetOptions = l2.children.map(n => ({ name: n.name, leaf: true }));
+      }
+      if (targetOptions && targetOptions.length) {
+        return { status: 'ready', message: `已从本地职能库读取 51job 第 ${path.length + 1} 级职能（共 ${targetOptions.length} 项）`, options: targetOptions };
+      }
+    }
+  } catch (e) {}
+
   let browser;
   try { browser = await puppeteer.connect({ browserURL: 'http://127.0.0.1:9503', defaultViewport: null, protocolTimeout: 12000 }); }
   catch { return { status: 'needs_login', message: '请先打开并登录 51job 企业浏览器', options: [] }; }
@@ -206,42 +232,23 @@ async function show51JobPage() {
 
 // 重新加载职位表单验证服务端会话；此步骤只读，不改变窗口状态。
 async function check51JobLogin() {
-  let browser;
+  let browser, page, session;
   try { browser = await puppeteer.connect({ browserURL: 'http://127.0.0.1:9503', defaultViewport: null, protocolTimeout: 12000 }); }
   catch { return { status: 'waiting', message: '等待 51job 专用浏览器启动' }; }
   try {
     const pages = await browser.pages();
-    let page = pages.filter(item => item.url().includes('ehire.51job.com/Revision/job')).at(-1);
-    if (!page) {
-      const source = pages.filter(item => item.url().includes('ehire.51job.com/Revision/')).at(-1);
-      if (source) {
-        const loggedInShell = await source.evaluate(() =>
-          !/账号密码登录|扫码登录|企业账号登录/.test(document.body?.innerText || '')
-          && /职位管理|我的工作台|人才管理/.test(document.body?.innerText || '')).catch(() => false);
-        if (loggedInShell) {
-          await source.goto(JOB_URL, { waitUntil: 'domcontentloaded', timeout: 12000 });
-          page = source;
-        }
-      }
-    }
-    if (!page) return { status: 'waiting', message: '请在 51job 浏览器完成登录' };
-    const visible = await page.evaluate(() => {
-      const el = document.querySelector('.func-dropdown .all_func_tips');
-      return Boolean(el && el.getBoundingClientRect().height > 0)
-        && !/账号密码登录|扫码登录|企业账号登录/.test(document.body?.innerText || '');
-    }).catch(() => false);
-    if (!visible) return { status: 'waiting', message: '请在 51job 浏览器完成登录' };
-    // 重新加载验证服务端会话，避免把登录前残留的表单 DOM 误判为已登录。
-    await page.reload({ waitUntil: 'domcontentloaded', timeout: 12000 });
-    await page.waitForFunction(() => {
-      const el = document.querySelector('.func-dropdown .all_func_tips');
-      return Boolean(el && el.getBoundingClientRect().height > 0)
-        && !/账号密码登录|扫码登录|企业账号登录/.test(document.body?.innerText || '');
-    }, { timeout: 8000 });
+    const source = pages.find(item => item.url().startsWith('https://ehire.51job.com/'));
+    if (!source) return { status: 'waiting', message: '请在 51job 浏览器完成登录' };
+    // 临时标签实际请求职位表单以验证服务端会话；不刷新 HR 正在看的页面。
+    page = await createBackgroundPage(browser, source, JOB_URL);
+    session = await keepPageActiveInBackground(page);
+    if (!await waitForJobForm(page)) return { status: 'waiting', message: '请在 51job 浏览器完成登录' };
     return { status: 'ready', message: '51job 登录已确认' };
   } catch (error) {
     return { status: 'waiting', message: `等待 51job 登录完成：${error.message}` };
   } finally {
+    if (session) await session.detach().catch(() => {});
+    if (page) await page.close().catch(() => {});
     await browser.disconnect().catch(() => {});
   }
 }
@@ -252,11 +259,8 @@ async function minimize51JobBrowser() {
   catch { return { status: 'error', message: '51job 专用浏览器已关闭，无法最小化' }; }
   try {
     const pages = await browser.pages();
-    const page = pages.filter(item => item.url().includes('ehire.51job.com/Revision/job')).at(-1);
-    if (!page) return { status: 'error', message: '未找到已登录的 51job 职位页面' };
-    const ready = await page.evaluate(() => Boolean(document.querySelector('.func-dropdown .all_func_tips'))
-      && !/账号密码登录|扫码登录|企业账号登录/.test(document.body?.innerText || ''));
-    if (!ready) return { status: 'error', message: '51job 职位页面尚未就绪，未最小化浏览器' };
+    const page = pages.find(item => item.url().startsWith('https://ehire.51job.com/'));
+    if (!page) return { status: 'error', message: '未找到 51job 企业页面' };
     const minimized = await setBrowserWindowState(page, 'minimized');
     return minimized
       ? { status: 'ready', message: '51job 已登录，专用浏览器已最小化' }

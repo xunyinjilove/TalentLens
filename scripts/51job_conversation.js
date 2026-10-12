@@ -57,7 +57,11 @@ async function candidatePage(browser, expected, name) {
   let created = false;
   if (!pages.length) {
     const source = (await browser.pages()).find(page => page.url().startsWith('https://ehire.51job.com/'));
-    if (!source) throw new Error('51job 专用浏览器尚未登录或未打开');
+    if (!source) {
+      const error = new Error('51job 专用浏览器尚未登录或未打开');
+      error.code = '51JOB_BROWSER_UNAVAILABLE';
+      throw error;
+    }
     const session = await source.target().createCDPSession();
     try {
       const { targetId } = await session.send('Target.createTarget', { url: expected.url, background: true });
@@ -557,7 +561,13 @@ async function main(argv = process.argv.slice(2)) {
         !Number.isSafeInteger(Number(args.expectedPoints)) || Number(args.expectedPoints) <= 0)) {
       throw new Error('51job 点数确认参数不完整，未点击发起Hi聊');
     }
-    browser = await puppeteer.connect({ browserURL: 'http://127.0.0.1:9503', defaultViewport: null });
+    try {
+      browser = await puppeteer.connect({ browserURL: 'http://127.0.0.1:9503', defaultViewport: null });
+    } catch (error) {
+      if (args.action === 'confirm_hi') throw error;
+      process.stdout.write(JSON.stringify({ status: 'needs_login', message: '51job 企业浏览器未启动，正在准备打开登录窗口' }) + '\n');
+      return;
+    }
     if (args.action === 'confirm_hi') {
       const result = await confirmHiChat(browser, args, expected);
       if (result.status === 'uncertain') {
@@ -605,7 +615,7 @@ async function main(argv = process.argv.slice(2)) {
       : await sendCandidateMessage(page, args.message, args.action === 'ask_resume');
     process.stdout.write(JSON.stringify(result) + '\n');
   } catch (error) {
-    const status = args.action === 'confirm_hi' ? 'uncertain' : 'error';
+    const status = args.action === 'confirm_hi' ? 'uncertain' : error.code === '51JOB_BROWSER_UNAVAILABLE' ? 'needs_login' : 'error';
     const message = args.action === 'confirm_hi'
       ? `51job 发起Hi聊过程未完成（${error.message}）；请核对该候选人的聊天记录，暂勿重复操作`
       : error.message;

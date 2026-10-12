@@ -1390,7 +1390,7 @@ func (a *App) Show51JobPage() JobDraftResult {
 
 // Check51JobLogin 核实职位表单可用，但不改变窗口状态；供前端登录期间轮询。
 func (a *App) Check51JobLogin() JobBrowserLoginResult {
-	out, err := run51JobScript([]byte("{}"), 25*time.Second, "--login-status")
+	out, err := run51JobScript([]byte("{}"), 40*time.Second, "--login-status")
 	if err != nil {
 		return JobBrowserLoginResult{Status: "error", Message: err.Error()}
 	}
