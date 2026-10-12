@@ -1,0 +1,7213 @@
+[
+  {
+    "name": "销售/客服",
+    "id": "9F01",
+    "children": [
+      {
+        "name": "销售人员",
+        "id": "3000",
+        "children": [
+          {
+            "name": "销售专员",
+            "id": "A0N7",
+            "leaf": true
+          },
+          {
+            "name": "客户代表",
+            "id": "A0MP",
+            "leaf": true
+          },
+          {
+            "name": "销售工程师",
+            "id": "3004",
+            "leaf": true
+          },
+          {
+            "name": "大客户销售",
+            "id": "3009",
+            "leaf": true
+          },
+          {
+            "name": "电话销售",
+            "id": "3005",
+            "leaf": true
+          },
+          {
+            "name": "渠道/分销专员",
+            "id": "3002",
+            "leaf": true
+          },
+          {
+            "name": "网络销售/在线销售",
+            "id": "3010",
+            "leaf": true
+          },
+          {
+            "name": "门店销售",
+            "id": "3016",
+            "leaf": true
+          },
+          {
+            "name": "海外销售",
+            "id": "3015",
+            "leaf": true
+          },
+          {
+            "name": "外贸销售",
+            "id": "4009",
+            "leaf": true
+          },
+          {
+            "name": "直播销售",
+            "id": "3013",
+            "leaf": true
+          },
+          {
+            "name": "地推专员",
+            "id": "3017",
+            "leaf": true
+          },
+          {
+            "name": "团购业务员",
+            "id": "3008",
+            "leaf": true
+          },
+          {
+            "name": "经销商",
+            "id": "3006",
+            "leaf": true
+          },
+          {
+            "name": "货运代理/物流销售",
+            "id": "0829",
+            "leaf": true
+          }
+        ]
+      },
+      {
+        "name": "销售高级管理",
+        "id": "0200",
+        "children": [
+          {
+            "name": "销售主管",
+            "id": "A0MQ",
+            "leaf": true
+          },
+          {
+            "name": "销售经理",
+            "id": "A0MR",
+            "leaf": true
+          },
+          {
+            "name": "销售总监",
+            "id": "A0MS",
+            "leaf": true
+          },
+          {
+            "name": "渠道分销经理/主管",
+            "id": "A0MT",
+            "leaf": true
+          },
+          {
+            "name": "渠道/分销总监",
+            "id": "0233",
+            "leaf": true
+          },
+          {
+            "name": "业务拓展经理/主管",
+            "id": "0232",
+            "leaf": true
+          },
+          {
+            "name": "大客户管理",
+            "id": "0235",
+            "leaf": true
+          },
+          {
+            "name": "客户经理/主管",
+            "id": "0208",
+            "leaf": true
+          },
+          {
+            "name": "房地产销售经理/主管",
+            "id": "6009",
+            "leaf": true
+          },
+          {
+            "name": "团购经理/主管",
+            "id": "0234",
+            "leaf": true
+          }
+        ]
+      },
+      {
+        "name": "客服",
+        "id": "3200",
+        "children": [
+          {
+            "name": "客服经理",
+            "id": "A0LK",
+            "leaf": true
+          },
+          {
+            "name": "客服主管",
+            "id": "3203",
+            "leaf": true
+          },
+          {
+            "name": "客户关系经理/主管",
+            "id": "3210",
+            "leaf": true
+          },
+          {
+            "name": "客服专员/助理",
+            "id": "A0L6",
+            "leaf": true
+          },
+          {
+            "name": "售后服务/客户服务",
+            "id": "5902",
+            "leaf": true
+          },
+          {
+            "name": "网络/在线客服",
+            "id": "3213",
+            "leaf": true
+          },
+          {
+            "name": "电话客服",
+            "id": "A0ML",
+            "leaf": true
+          },
+          {
+            "name": "网店客服",
+            "id": "6104",
+            "leaf": true
+          },
+          {
+            "name": "房地产客服",
+            "id": "6006",
+            "leaf": true
+          }
+        ]
+      },
+      {
+        "name": "销售行政及商务",
+        "id": "3100",
+        "children": [
+          {
+            "name": "销售助理",
+            "id": "3012",
+            "leaf": true
+          },
+          {
+            "name": "商务经理",
+            "id": "3103",
+            "leaf": true
+          },
+          {
+            "name": "商务助理",
+            "id": "3105",
+            "leaf": true
+          },
+          {
+            "name": "商务主管",
+            "id": "3110",
+            "leaf": true
+          },
+          {
+            "name": "商务专员",
+            "id": "3111",
+            "leaf": true
+          },
+          {
+            "name": "销售行政经理/主管",
+            "id": "3101",
+            "leaf": true
+          },
+          {
+            "name": "销售行政助理",
+            "id": "3106",
+            "leaf": true
+          },
+          {
+            "name": "销售行政专员",
+            "id": "3102",
+            "leaf": true
+          },
+          {
+            "name": "业务分析经理/主管",
+            "id": "3108",
+            "leaf": true
+          },
+          {
+            "name": "业务分析专员/助理",
+            "id": "3109",
+            "leaf": true
+          },
+          {
+            "name": "招投标管理",
+            "id": "4122",
+            "leaf": true
+          },
+          {
+            "name": "房地产项目招投标",
+            "id": "4608",
+            "leaf": true
+          }
+        ]
+      },
+      {
+        "name": "医疗销售",
+        "id": "8900",
+        "children": [
+          {
+            "name": "医疗器械销售",
+            "id": "A0MU",
+            "leaf": true
+          },
+          {
+            "name": "医疗器械市场推广",
+            "id": "4113",
+            "leaf": true
+          },
+          {
+            "name": "医药代表",
+            "id": "A0MV",
+            "leaf": true
+          },
+          {
+            "name": "医药招商",
+            "id": "4120",
+            "leaf": true
+          },
+          {
+            "name": "医药学术推广",
+            "id": "4126",
+            "leaf": true
+          },
+          {
+            "name": "药品市场推广",
+            "id": "A0MW",
+            "leaf": true
+          },
+          {
+            "name": "医美咨询",
+            "id": "1329",
+            "leaf": true
+          }
+        ]
+      },
+      {
+        "name": "房地产销售",
+        "id": "2A00",
+        "children": [
+          {
+            "name": "房地产销售专员",
+            "id": "6010",
+            "leaf": true
+          },
+          {
+            "name": "房地产中介/置业顾问",
+            "id": "6001",
+            "leaf": true
+          },
+          {
+            "name": "房地产销售经理/主管",
+            "id": "6009",
+            "leaf": true
+          }
+        ]
+      },
+      {
+        "name": "服务业销售",
+        "id": "A0JX",
+        "children": [
+          {
+            "name": "促销员/导购员",
+            "id": "5105",
+            "leaf": true
+          },
+          {
+            "name": "旅游顾问",
+            "id": "4924",
+            "leaf": true
+          },
+          {
+            "name": "促销经理",
+            "id": "0310",
+            "leaf": true
+          },
+          {
+            "name": "美容顾问",
+            "id": "5001",
+            "leaf": true
+          },
+          {
+            "name": "专柜彩妆顾问(BA)",
+            "id": "5014",
+            "leaf": true
+          },
+          {
+            "name": "奢侈品业务",
+            "id": "5115",
+            "leaf": true
+          },
+          {
+            "name": "珠宝销售顾问",
+            "id": "5116",
+            "leaf": true
+          },
+          {
+            "name": "促销主管/督导/巡店",
+            "id": "5117",
+            "leaf": true
+          },
+          {
+            "name": "导购管理",
+            "id": "5123",
+            "leaf": true
+          },
+          {
+            "name": "家装顾问",
+            "id": "6920",
+            "leaf": true
+          },
+          {
+            "name": "健身教练",
+            "id": "A0M5",
+            "leaf": true
+          },
+          {
+            "name": "会籍顾问",
+            "id": "3011",
+            "leaf": true
+          }
+        ]
+      },
+      {
+        "name": "教培销售",
+        "id": "2C00",
+        "children": [
+          {
+            "name": "课程顾问",
+            "id": "8101",
+            "leaf": true
+          },
+          {
+            "name": "招生老师",
+            "id": "8102",
+            "leaf": true
+          },
+          {
+            "name": "留学顾问",
+            "id": "8104",
+            "leaf": true
+          }
+        ]
+      },
+      {
+        "name": "汽车销售",
+        "id": "1E00",
+        "children": [
+          {
+            "name": "汽车销售/经纪人",
+            "id": "5903",
+            "leaf": true
+          },
+          {
+            "name": "二手车经纪人",
+            "id": "5919",
+            "leaf": true
+          },
+          {
+            "name": "汽车金融销售",
+            "id": "A0MO",
+            "leaf": true
+          }
+        ]
+      },
+      {
+        "name": "金融销售",
+        "id": "2B00",
+        "children": [
+          {
+            "name": "金融产品销售",
+            "id": "3315",
+            "leaf": true
+          },
+          {
+            "name": "理财顾问",
+            "id": "3326",
+            "leaf": true
+          },
+          {
+            "name": "机构业务销售",
+            "id": "3317",
+            "leaf": true
+          },
+          {
+            "name": "汽车金融销售",
+            "id": "A0MO",
+            "leaf": true
+          }
+        ]
+      },
+      {
+        "name": "销售支持",
+        "id": "1D00",
+        "children": [
+          {
+            "name": "售前技术支持经理/主管",
+            "id": "8403",
+            "leaf": true
+          },
+          {
+            "name": "售后技术支持经理/主管",
+            "id": "8404",
+            "leaf": true
+          },
+          {
+            "name": "售前技术支持工程师",
+            "id": "8401",
+            "leaf": true
+          },
+          {
+            "name": "售后技术支持工程师",
+            "id": "8402",
+            "leaf": true
+          },
+          {
+            "name": "解决方案经理",
+            "id": "1D01",
+            "leaf": true
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "互联网技术",
+    "id": "9F02",
+    "children": [
+      {
+        "name": "后端开发",
+        "id": "0100",
+        "children": [
+          {
+            "name": "软件工程师",
+            "id": "A0JQ",
+            "leaf": true
+          },
+          {
+            "name": "java",
+            "id": "0121",
+            "leaf": true
+          },
+          {
+            "name": "C/C++",
+            "id": "A0JR",
+            "leaf": true
+          },
+          {
+            "name": "C#",
+            "id": "0153",
+            "leaf": true
+          },
+          {
+            "name": ".NET",
+            "id": "0126",
+            "leaf": true
+          },
+          {
+            "name": "Golang",
+            "id": "0152",
+            "leaf": true
+          },
+          {
+            "name": "Python",
+            "id": "0124",
+            "leaf": true
+          },
+          {
+            "name": "PHP",
+            "id": "0120",
+            "leaf": true
+          },
+          {
+            "name": "Node.js",
+            "id": "0158",
+            "leaf": true
+          },
+          {
+            "name": "全栈工程师",
+            "id": "0154",
+            "leaf": true
+          },
+          {
+            "name": "架构师",
+            "id": "0143",
+            "leaf": true
+          },
+          {
+            "name": "数据开发",
+            "id": "0130",
+            "leaf": true
+          },
+          {
+            "name": "语音/视频/图形开发",
+            "id": "0133",
+            "leaf": true
+          },
+          {
+            "name": "GIS工程师",
+            "id": "0155",
+            "leaf": true
+          },
+          {
+            "name": "需求工程师",
+            "id": "A0JS",
+            "leaf": true
+          },
+          {
+            "name": "区块链开发",
+            "id": "0128",
+            "leaf": true
+          }
+        ]
+      },
+      {
+        "name": "运维/技术支持",
+        "id": "7900",
+        "children": [
+          {
+            "name": "IT技术支持",
+            "id": "A0LA",
+            "leaf": true
+          },
+          {
+            "name": "运维工程师",
+            "id": "A0L9",
+            "leaf": true
+          },
+          {
+            "name": "运维开发",
+            "id": "7915",
+            "leaf": true
+          },
+          {
+            "name": "自动化运维工程师",
+            "id": "7920",
+            "leaf": true
+          },
+          {
+            "name": "网络工程师",
+            "id": "A0LB",
+            "leaf": true
+          },
+          {
+            "name": "ERP实施顾问",
+            "id": "7905",
+            "leaf": true
+          },
+          {
+            "name": "系统工程师",
+            "id": "7902",
+            "leaf": true
+          },
+          {
+            "name": "网络安全工程师",
+            "id": "7906",
+            "leaf": true
+          },
+          {
+            "name": "技术文员/助理",
+            "id": "0149",
+            "leaf": true
+          },
+          {
+            "name": "系统集成工程师",
+            "id": "7904",
+            "leaf": true
+          },
+          {
+            "name": "DBA",
+            "id": "7903",
+            "leaf": true
+          },
+          {
+            "name": "技术文档工程师",
+            "id": "0150",
+            "leaf": true
+          }
+        ]
+      },
+      {
+        "name": "技术管理",
+        "id": "2600",
+        "children": [
+          {
+            "name": "网络工程师",
+            "id": "A0LB",
+            "leaf": true
+          },
+          {
+            "name": "测试经理",
+            "id": "A0JV",
+            "leaf": true
+          },
+          {
+            "name": "技术经理",
+            "id": "2604",
+            "leaf": true
+          },
+          {
+            "name": "技术总监",
+            "id": "2603",
+            "leaf": true
+          },
+          {
+            "name": "首席技术执行官CTO",
+            "id": "2611",
+            "leaf": true
+          },
+          {
+            "name": "首席信息官CIO",
+            "id": "2612",
+            "leaf": true
+          },
+          {
+            "name": "项目经理",
+            "id": "2606",
+            "leaf": true
+          },
+          {
+            "name": "项目助理",
+            "id": "2610",
+            "leaf": true
+          },
+          {
+            "name": "项目主管",
+            "id": "2607",
+            "leaf": true
+          },
+          {
+            "name": "项目总监",
+            "id": "2605",
+            "leaf": true
+          }
+        ]
+      },
+      {
+        "name": "测试",
+        "id": "2700",
+        "children": [
+          {
+            "name": "测试工程师",
+            "id": "A0JT",
+            "leaf": true
+          },
+          {
+            "name": "软件测试",
+            "id": "2707",
+            "leaf": true
+          },
+          {
+            "name": "硬件测试工程师",
+            "id": "2957",
+            "leaf": true
+          },
+          {
+            "name": "功能测试",
+            "id": "2718",
+            "leaf": true
+          },
+          {
+            "name": "体系工程师",
+            "id": "A0KG",
+            "leaf": true
+          },
+          {
+            "name": "测试开发",
+            "id": "2722",
+            "leaf": true
+          },
+          {
+            "name": "自动化测试",
+            "id": "2720",
+            "leaf": true
+          },
+          {
+            "name": "性能测试",
+            "id": "2719",
+            "leaf": true
+          },
+          {
+            "name": "游戏测试",
+            "id": "7821",
+            "leaf": true
+          },
+          {
+            "name": "通信测试工程师",
+            "id": "2816",
+            "leaf": true
+          },
+          {
+            "name": "测试经理",
+            "id": "A0JV",
+            "leaf": true
+          }
+        ]
+      },
+      {
+        "name": "人工智能",
+        "id": "7300",
+        "children": [
+          {
+            "name": "算法工程师",
+            "id": "7309",
+            "leaf": true
+          },
+          {
+            "name": "大模型算法",
+            "id": "A0NB",
+            "leaf": true
+          },
+          {
+            "name": "大模型应用工程师",
+            "id": "A0NC",
+            "leaf": true
+          },
+          {
+            "name": "规控算法",
+            "id": "A0ND",
+            "leaf": true
+          },
+          {
+            "name": "机器视觉工程师",
+            "id": "7307",
+            "leaf": true
+          },
+          {
+            "name": "机器学习工程师",
+            "id": "7301",
+            "leaf": true
+          },
+          {
+            "name": "深度学习工程师",
+            "id": "7302",
+            "leaf": true
+          },
+          {
+            "name": "智能驾驶工程师",
+            "id": "7120",
+            "leaf": true
+          },
+          {
+            "name": "自然语言处理(NLP)",
+            "id": "7308",
+            "leaf": true
+          },
+          {
+            "name": "SLAM算法",
+            "id": "A0NF",
+            "leaf": true
+          },
+          {
+            "name": "风控算法",
+            "id": "A0NG",
+            "leaf": true
+          },
+          {
+            "name": "语音识别工程师",
+            "id": "7306",
+            "leaf": true
+          },
+          {
+            "name": "高性能计算工程师",
+            "id": "A0NH",
+            "leaf": true
+          }
+        ]
+      },
+      {
+        "name": "前端/移动开发",
+        "id": "A0JW",
+        "children": [
+          {
+            "name": "前端开发",
+            "id": "A0JU",
+            "leaf": true
+          },
+          {
+            "name": "android",
+            "id": "7701",
+            "leaf": true
+          },
+          {
+            "name": "ios",
+            "id": "7702",
+            "leaf": true
+          },
+          {
+            "name": "U3D",
+            "id": "7811",
+            "leaf": true
+          },
+          {
+            "name": "UE4",
+            "id": "7823",
+            "leaf": true
+          },
+          {
+            "name": "cocos",
+            "id": "7810",
+            "leaf": true
+          },
+          {
+            "name": "游戏开发工程师",
+            "id": "7809",
+            "leaf": true
+          },
+          {
+            "name": "鸿蒙开发",
+            "id": "A0N6",
+            "leaf": true
+          }
+        ]
+      },
+      {
+        "name": "数据",
+        "id": "7500",
+        "children": [
+          {
+            "name": "爬虫工程师",
+            "id": "0131",
+            "leaf": true
+          },
+          {
+            "name": "数据分析师",
+            "id": "7501",
+            "leaf": true
+          },
+          {
+            "name": "数据挖掘",
+            "id": "A0NE",
+            "leaf": true
+          },
+          {
+            "name": "数据分析经理/主管",
+            "id": "7502",
+            "leaf": true
+          },
+          {
+            "name": "ETL开发工程师",
+            "id": "7503",
+            "leaf": true
+          },
+          {
+            "name": "数据采集工程师",
+            "id": "7506",
+            "leaf": true
+          },
+          {
+            "name": "数据治理工程师",
+            "id": "7508",
+            "leaf": true
+          },
+          {
+            "name": "BI工程师",
+            "id": "7504",
+            "leaf": true
+          },
+          {
+            "name": "数据标注师",
+            "id": "7512",
+            "leaf": true
+          },
+          {
+            "name": "数据建模工程师",
+            "id": "7507",
+            "leaf": true
+          },
+          {
+            "name": "数据仓库工程师",
+            "id": "7505",
+            "leaf": true
+          },
+          {
+            "name": "密码技术应用员",
+            "id": "7511",
+            "leaf": true
+          },
+          {
+            "name": "电子数据取证分析师",
+            "id": "7510",
+            "leaf": true
+          }
+        ]
+      },
+      {
+        "name": "销售技术支持",
+        "id": "8400",
+        "children": [
+          {
+            "name": "售前技术支持工程师",
+            "id": "8401",
+            "leaf": true
+          },
+          {
+            "name": "售后技术支持工程师",
+            "id": "8402",
+            "leaf": true
+          },
+          {
+            "name": "售前技术支持经理/主管",
+            "id": "8403",
+            "leaf": true
+          },
+          {
+            "name": "售后技术支持经理/主管",
+            "id": "8404",
+            "leaf": true
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "人事/行政",
+    "id": "9F03",
+    "children": [
+      {
+        "name": "人力资源",
+        "id": "0600",
+        "children": [
+          {
+            "name": "人事总监",
+            "id": "0601",
+            "leaf": true
+          },
+          {
+            "name": "人事经理",
+            "id": "0602",
+            "leaf": true
+          },
+          {
+            "name": "HRBP",
+            "id": "0611",
+            "leaf": true
+          },
+          {
+            "name": "人事主管",
+            "id": "0603",
+            "leaf": true
+          },
+          {
+            "name": "人事专员",
+            "id": "A0N3",
+            "leaf": true
+          },
+          {
+            "name": "招聘专员/助理",
+            "id": "0626",
+            "leaf": true
+          },
+          {
+            "name": "招聘经理/主管",
+            "id": "0606",
+            "leaf": true
+          },
+          {
+            "name": "培训经理/主管",
+            "id": "0609",
+            "leaf": true
+          },
+          {
+            "name": "培训专员/助理/培训师",
+            "id": "0610",
+            "leaf": true
+          },
+          {
+            "name": "企业文化/员工关系/工会管理",
+            "id": "0629",
+            "leaf": true
+          },
+          {
+            "name": "薪资福利经理/主管",
+            "id": "0607",
+            "leaf": true
+          },
+          {
+            "name": "薪资福利专员/助理",
+            "id": "0608",
+            "leaf": true
+          },
+          {
+            "name": "绩效考核经理/主管",
+            "id": "0627",
+            "leaf": true
+          },
+          {
+            "name": "绩效考核专员/助理",
+            "id": "0628",
+            "leaf": true
+          },
+          {
+            "name": "人力资源信息系统专员",
+            "id": "0630",
+            "leaf": true
+          },
+          {
+            "name": "劳务派遣专员",
+            "id": "0635",
+            "leaf": true
+          }
+        ]
+      },
+      {
+        "name": "行政/后勤",
+        "id": "2300",
+        "children": [
+          {
+            "name": "行政总监",
+            "id": "2301",
+            "leaf": true
+          },
+          {
+            "name": "行政经理/主管/办公室主任",
+            "id": "2302",
+            "leaf": true
+          },
+          {
+            "name": "行政专员/助理",
+            "id": "2303",
+            "leaf": true
+          },
+          {
+            "name": "文员",
+            "id": "A0K9",
+            "leaf": true
+          },
+          {
+            "name": "行政前台",
+            "id": "2305",
+            "leaf": true
+          },
+          {
+            "name": "后勤",
+            "id": "2306",
+            "leaf": true
+          },
+          {
+            "name": "经理助理/秘书",
+            "id": "2304",
+            "leaf": true
+          },
+          {
+            "name": "党工团干事",
+            "id": "2310",
+            "leaf": true
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "财务/税务/法务",
+    "id": "9F04",
+    "children": [
+      {
+        "name": "财务",
+        "id": "0400",
+        "children": [
+          {
+            "name": "首席财务官CFO",
+            "id": "0444",
+            "leaf": true
+          },
+          {
+            "name": "高级财务总监/财务总监",
+            "id": "0401",
+            "leaf": true
+          },
+          {
+            "name": "财务经理",
+            "id": "0402",
+            "leaf": true
+          },
+          {
+            "name": "财务顾问",
+            "id": "0445",
+            "leaf": true
+          },
+          {
+            "name": "财务专员",
+            "id": "A0KF",
+            "leaf": true
+          },
+          {
+            "name": "财务分析经理/主管",
+            "id": "0406",
+            "leaf": true
+          },
+          {
+            "name": "财务分析员",
+            "id": "0407",
+            "leaf": true
+          },
+          {
+            "name": "统计员",
+            "id": "0446",
+            "leaf": true
+          },
+          {
+            "name": "财务主管/总账主管",
+            "id": "0403",
+            "leaf": true
+          },
+          {
+            "name": "成本经理/成本主管",
+            "id": "0408",
+            "leaf": true
+          },
+          {
+            "name": "成本管理员",
+            "id": "0409",
+            "leaf": true
+          },
+          {
+            "name": "资金经理/主管",
+            "id": "0449",
+            "leaf": true
+          },
+          {
+            "name": "资金专员",
+            "id": "0450",
+            "leaf": true
+          },
+          {
+            "name": "出纳",
+            "id": "A0KE",
+            "leaf": true
+          }
+        ]
+      },
+      {
+        "name": "会计",
+        "id": "2D00",
+        "children": [
+          {
+            "name": "注册会计师",
+            "id": "0460",
+            "leaf": true
+          },
+          {
+            "name": "会计经理/主管",
+            "id": "0404",
+            "leaf": true
+          },
+          {
+            "name": "会计师",
+            "id": "0405",
+            "leaf": true
+          },
+          {
+            "name": "总账会计",
+            "id": "2D01",
+            "leaf": true
+          },
+          {
+            "name": "结算会计",
+            "id": "2D02",
+            "leaf": true
+          },
+          {
+            "name": "建筑/工程会计",
+            "id": "2D03",
+            "leaf": true
+          },
+          {
+            "name": "固定资产会计",
+            "id": "0448",
+            "leaf": true
+          },
+          {
+            "name": "出纳",
+            "id": "A0KE",
+            "leaf": true
+          }
+        ]
+      },
+      {
+        "name": "法务",
+        "id": "1100",
+        "children": [
+          {
+            "name": "法务总监",
+            "id": "1111",
+            "leaf": true
+          },
+          {
+            "name": "法务经理",
+            "id": "1106",
+            "leaf": true
+          },
+          {
+            "name": "法务主管",
+            "id": "1113",
+            "leaf": true
+          },
+          {
+            "name": "法律顾问",
+            "id": "1114",
+            "leaf": true
+          },
+          {
+            "name": "知识产权/专利/商标",
+            "id": "1108",
+            "leaf": true
+          },
+          {
+            "name": "注册法规专员",
+            "id": "A0NA",
+            "leaf": true
+          },
+          {
+            "name": "法务专员/助理",
+            "id": "1107",
+            "leaf": true
+          }
+        ]
+      },
+      {
+        "name": "审计/税务",
+        "id": "2E00",
+        "children": [
+          {
+            "name": "审计经理/主管",
+            "id": "0410",
+            "leaf": true
+          },
+          {
+            "name": "审计专员/助理",
+            "id": "0419",
+            "leaf": true
+          },
+          {
+            "name": "税务经理/主管",
+            "id": "0411",
+            "leaf": true
+          },
+          {
+            "name": "税务专员/助理",
+            "id": "0412",
+            "leaf": true
+          }
+        ]
+      },
+      {
+        "name": "合规",
+        "id": "1F00",
+        "children": [
+          {
+            "name": "合规经理",
+            "id": "1109",
+            "leaf": true
+          },
+          {
+            "name": "合规主管",
+            "id": "1F01",
+            "leaf": true
+          },
+          {
+            "name": "合规专员",
+            "id": "1F02",
+            "leaf": true
+          },
+          {
+            "name": "风险控制",
+            "id": "2209",
+            "leaf": true
+          },
+          {
+            "name": "信审核查",
+            "id": "2229",
+            "leaf": true
+          },
+          {
+            "name": "监察人员",
+            "id": "4612",
+            "leaf": true
+          }
+        ]
+      },
+      {
+        "name": "高级财务管理",
+        "id": "2F00",
+        "children": [
+          {
+            "name": "首席财务官CFO",
+            "id": "0444",
+            "leaf": true
+          },
+          {
+            "name": "高级财务总监/财务总监",
+            "id": "0401",
+            "leaf": true
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "运营",
+    "id": "9F05",
+    "children": [
+      {
+        "name": "业务运营",
+        "id": "8000",
+        "children": [
+          {
+            "name": "运营助理",
+            "id": "8053",
+            "leaf": true
+          },
+          {
+            "name": "运营专员",
+            "id": "8047",
+            "leaf": true
+          },
+          {
+            "name": "运营主管",
+            "id": "8048",
+            "leaf": true
+          },
+          {
+            "name": "运营经理",
+            "id": "8049",
+            "leaf": true
+          },
+          {
+            "name": "网站运营",
+            "id": "A0LC",
+            "leaf": true
+          },
+          {
+            "name": "网络推广",
+            "id": "A0LD",
+            "leaf": true
+          },
+          {
+            "name": "用户运营",
+            "id": "8041",
+            "leaf": true
+          },
+          {
+            "name": "数据运营",
+            "id": "8044",
+            "leaf": true
+          },
+          {
+            "name": "产品运营",
+            "id": "8057",
+            "leaf": true
+          },
+          {
+            "name": "游戏运营",
+            "id": "7814",
+            "leaf": true
+          },
+          {
+            "name": "活动运营",
+            "id": "8042",
+            "leaf": true
+          },
+          {
+            "name": "电子竞技运营",
+            "id": "7815",
+            "leaf": true
+          }
+        ]
+      },
+      {
+        "name": "电商运营",
+        "id": "9000",
+        "children": [
+          {
+            "name": "国内电商运营",
+            "id": "6102",
+            "leaf": true
+          },
+          {
+            "name": "跨境电商运营",
+            "id": "6112",
+            "leaf": true
+          },
+          {
+            "name": "电商专员",
+            "id": "6109",
+            "leaf": true
+          },
+          {
+            "name": "电商经理/电商主管",
+            "id": "6110",
+            "leaf": true
+          },
+          {
+            "name": "电商总监",
+            "id": "6111",
+            "leaf": true
+          },
+          {
+            "name": "网店店长",
+            "id": "6101",
+            "leaf": true
+          },
+          {
+            "name": "店铺推广",
+            "id": "6105",
+            "leaf": true
+          },
+          {
+            "name": "品类运营",
+            "id": "8051",
+            "leaf": true
+          }
+        ]
+      },
+      {
+        "name": "内容运营",
+        "id": "9100",
+        "children": [
+          {
+            "name": "新媒体运营",
+            "id": "A0LE",
+            "leaf": true
+          },
+          {
+            "name": "直播运营",
+            "id": "8059",
+            "leaf": true
+          },
+          {
+            "name": "社区/社群运营",
+            "id": "8058",
+            "leaf": true
+          },
+          {
+            "name": "内容审核",
+            "id": "8052",
+            "leaf": true
+          }
+        ]
+      },
+      {
+        "name": "线下运营",
+        "id": "9300",
+        "children": [
+          {
+            "name": "线下拓展运营",
+            "id": "9301",
+            "leaf": true
+          },
+          {
+            "name": "线下推广",
+            "id": "9303",
+            "leaf": true
+          },
+          {
+            "name": "车辆运营",
+            "id": "9302",
+            "leaf": true
+          }
+        ]
+      },
+      {
+        "name": "高级运营管理",
+        "id": "9400",
+        "children": [
+          {
+            "name": "运营总监",
+            "id": "8050",
+            "leaf": true
+          },
+          {
+            "name": "首席运营官COO",
+            "id": "0707",
+            "leaf": true
+          },
+          {
+            "name": "首席营销官CMO",
+            "id": "9401",
+            "leaf": true
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "市场/公关",
+    "id": "9F06",
+    "children": [
+      {
+        "name": "市场/营销",
+        "id": "0300",
+        "children": [
+          {
+            "name": "首席营销官CMO",
+            "id": "9401",
+            "leaf": true
+          },
+          {
+            "name": "市场/营销/拓展总监",
+            "id": "0301",
+            "leaf": true
+          },
+          {
+            "name": "市场/营销/拓展经理",
+            "id": "0302",
+            "leaf": true
+          },
+          {
+            "name": "市场/营销/拓展主管",
+            "id": "0303",
+            "leaf": true
+          },
+          {
+            "name": "市场/营销/拓展专员",
+            "id": "0304",
+            "leaf": true
+          },
+          {
+            "name": "品牌经理",
+            "id": "0306",
+            "leaf": true
+          },
+          {
+            "name": "品牌主管",
+            "id": "0307",
+            "leaf": true
+          },
+          {
+            "name": "品牌专员",
+            "id": "0330",
+            "leaf": true
+          },
+          {
+            "name": "市场企划经理/主管",
+            "id": "0336",
+            "leaf": true
+          },
+          {
+            "name": "市场企划专员",
+            "id": "0337",
+            "leaf": true
+          },
+          {
+            "name": "市场分析/调研人员",
+            "id": "0324",
+            "leaf": true
+          },
+          {
+            "name": "市场助理",
+            "id": "0305",
+            "leaf": true
+          },
+          {
+            "name": "SEO/SEM",
+            "id": "0339",
+            "leaf": true
+          },
+          {
+            "name": "选址拓展/新店开发",
+            "id": "0338",
+            "leaf": true
+          },
+          {
+            "name": "互联网营销师",
+            "id": "0340",
+            "leaf": true
+          },
+          {
+            "name": "市场通路",
+            "id": "A0K8",
+            "leaf": true
+          }
+        ]
+      },
+      {
+        "name": "广告",
+        "id": "4200",
+        "children": [
+          {
+            "name": "广告创意总监",
+            "id": "4205",
+            "leaf": true
+          },
+          {
+            "name": "广告创意/设计主管",
+            "id": "4216",
+            "leaf": true
+          },
+          {
+            "name": "广告创意/设计专员",
+            "id": "4217",
+            "leaf": true
+          },
+          {
+            "name": "广告客户总监/副总监",
+            "id": "4201",
+            "leaf": true
+          },
+          {
+            "name": "广告客户经理",
+            "id": "4202",
+            "leaf": true
+          },
+          {
+            "name": "广告客户主管",
+            "id": "4218",
+            "leaf": true
+          },
+          {
+            "name": "广告客户专员",
+            "id": "4219",
+            "leaf": true
+          },
+          {
+            "name": "文案/策划",
+            "id": "4207",
+            "leaf": true
+          },
+          {
+            "name": "企业策划人员",
+            "id": "4209",
+            "leaf": true
+          },
+          {
+            "name": "广告投放专员",
+            "id": "4214",
+            "leaf": true
+          },
+          {
+            "name": "广告销售",
+            "id": "4213",
+            "leaf": true
+          },
+          {
+            "name": "广告制作执行",
+            "id": "4212",
+            "leaf": true
+          },
+          {
+            "name": "广告创意/设计经理",
+            "id": "4204",
+            "leaf": true
+          },
+          {
+            "name": "美术指导",
+            "id": "4211",
+            "leaf": true
+          },
+          {
+            "name": "企业/业务发展经理",
+            "id": "4208",
+            "leaf": true
+          },
+          {
+            "name": "广告投放经理/主管",
+            "id": "4215",
+            "leaf": true
+          }
+        ]
+      },
+      {
+        "name": "公关/媒介",
+        "id": "4300",
+        "children": [
+          {
+            "name": "公关总监",
+            "id": "4315",
+            "leaf": true
+          },
+          {
+            "name": "公关经理",
+            "id": "4301",
+            "leaf": true
+          },
+          {
+            "name": "公关主管",
+            "id": "4302",
+            "leaf": true
+          },
+          {
+            "name": "公关专员",
+            "id": "4303",
+            "leaf": true
+          },
+          {
+            "name": "公关/媒介助理",
+            "id": "4310",
+            "leaf": true
+          },
+          {
+            "name": "政府事务管理",
+            "id": "4121",
+            "leaf": true
+          },
+          {
+            "name": "活动策划",
+            "id": "4313",
+            "leaf": true
+          },
+          {
+            "name": "活动执行",
+            "id": "4314",
+            "leaf": true
+          },
+          {
+            "name": "媒介经理",
+            "id": "4307",
+            "leaf": true
+          },
+          {
+            "name": "媒介主管",
+            "id": "4308",
+            "leaf": true
+          },
+          {
+            "name": "媒介专员",
+            "id": "4309",
+            "leaf": true
+          },
+          {
+            "name": "会务/会展经理",
+            "id": "4304",
+            "leaf": true
+          },
+          {
+            "name": "会务/会展主管",
+            "id": "4305",
+            "leaf": true
+          },
+          {
+            "name": "会务/会展专员",
+            "id": "4306",
+            "leaf": true
+          },
+          {
+            "name": "媒介销售",
+            "id": "4312",
+            "leaf": true
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "设计",
+    "id": "9F07",
+    "children": [
+      {
+        "name": "平面设计",
+        "id": "9600",
+        "children": [
+          {
+            "name": "平面设计师",
+            "id": "7413",
+            "leaf": true
+          },
+          {
+            "name": "平面设计经理/主管",
+            "id": "7421",
+            "leaf": true
+          },
+          {
+            "name": "平面设计总监",
+            "id": "7420",
+            "leaf": true
+          },
+          {
+            "name": "包装设计",
+            "id": "0927",
+            "leaf": true
+          }
+        ]
+      },
+      {
+        "name": "互联网设计",
+        "id": "7400",
+        "children": [
+          {
+            "name": "UI设计师",
+            "id": "7412",
+            "leaf": true
+          },
+          {
+            "name": "交互设计师",
+            "id": "7402",
+            "leaf": true
+          },
+          {
+            "name": "视觉设计师",
+            "id": "7403",
+            "leaf": true
+          },
+          {
+            "name": "多媒体设计",
+            "id": "7416",
+            "leaf": true
+          },
+          {
+            "name": "美工/电商设计师",
+            "id": "7419",
+            "leaf": true
+          },
+          {
+            "name": "网页设计师",
+            "id": "7401",
+            "leaf": true
+          },
+          {
+            "name": "用户体验(UE/UX)设计师",
+            "id": "7404",
+            "leaf": true
+          },
+          {
+            "name": "用户研究",
+            "id": "6617",
+            "leaf": true
+          },
+          {
+            "name": "互联网设计经理/主管",
+            "id": "7424",
+            "leaf": true
+          },
+          {
+            "name": "互联网设计总监",
+            "id": "7423",
+            "leaf": true
+          }
+        ]
+      },
+      {
+        "name": "工业设计",
+        "id": "0900",
+        "children": [
+          {
+            "name": "工业设计/产品设计",
+            "id": "0919",
+            "leaf": true
+          },
+          {
+            "name": "家具设计",
+            "id": "0940",
+            "leaf": true
+          },
+          {
+            "name": "包装设计",
+            "id": "0927",
+            "leaf": true
+          },
+          {
+            "name": "照明设计",
+            "id": "0934",
+            "leaf": true
+          },
+          {
+            "name": "陈列设计",
+            "id": "A0MK",
+            "leaf": true
+          },
+          {
+            "name": "展览/展示/店面设计",
+            "id": "0925",
+            "leaf": true
+          }
+        ]
+      },
+      {
+        "name": "动画设计",
+        "id": "9500",
+        "children": [
+          {
+            "name": "动画/3D设计",
+            "id": "7422",
+            "leaf": true
+          },
+          {
+            "name": "绘画",
+            "id": "7417",
+            "leaf": true
+          },
+          {
+            "name": "原画师",
+            "id": "7418",
+            "leaf": true
+          },
+          {
+            "name": "特效设计师",
+            "id": "7407",
+            "leaf": true
+          }
+        ]
+      },
+      {
+        "name": "广告设计",
+        "id": "1B00",
+        "children": [
+          {
+            "name": "广告创意/设计专员",
+            "id": "4217",
+            "leaf": true
+          },
+          {
+            "name": "广告创意/设计主管",
+            "id": "4216",
+            "leaf": true
+          },
+          {
+            "name": "广告创意/设计经理",
+            "id": "4204",
+            "leaf": true
+          }
+        ]
+      },
+      {
+        "name": "建筑/室内设计",
+        "id": "9700",
+        "children": [
+          {
+            "name": "室内设计",
+            "id": "A0LL",
+            "leaf": true
+          },
+          {
+            "name": "室内设计师助理",
+            "id": "6917",
+            "leaf": true
+          },
+          {
+            "name": "室内设计经理/主管",
+            "id": "6918",
+            "leaf": true
+          },
+          {
+            "name": "室内设计总监",
+            "id": "6919",
+            "leaf": true
+          },
+          {
+            "name": "家居设计",
+            "id": "0941",
+            "leaf": true
+          },
+          {
+            "name": "软装设计",
+            "id": "6902",
+            "leaf": true
+          },
+          {
+            "name": "建筑设计师",
+            "id": "6905",
+            "leaf": true
+          },
+          {
+            "name": "园艺/园林/景观设计",
+            "id": "6914",
+            "leaf": true
+          },
+          {
+            "name": "规划与设计",
+            "id": "6904",
+            "leaf": true
+          },
+          {
+            "name": "城市规划设计",
+            "id": "6913",
+            "leaf": true
+          },
+          {
+            "name": "建筑制图/模型/渲染",
+            "id": "6909",
+            "leaf": true
+          },
+          {
+            "name": "照明设计",
+            "id": "0934",
+            "leaf": true
+          },
+          {
+            "name": "陈列设计",
+            "id": "A0MK",
+            "leaf": true
+          }
+        ]
+      },
+      {
+        "name": "游戏设计",
+        "id": "9800",
+        "children": [
+          {
+            "name": "游戏场景设计师",
+            "id": "7819",
+            "leaf": true
+          },
+          {
+            "name": "游戏界面设计师",
+            "id": "7806",
+            "leaf": true
+          },
+          {
+            "name": "游戏特效设计师",
+            "id": "7817",
+            "leaf": true
+          },
+          {
+            "name": "游戏角色设计师",
+            "id": "7820",
+            "leaf": true
+          },
+          {
+            "name": "游戏动作设计师",
+            "id": "7818",
+            "leaf": true
+          },
+          {
+            "name": "游戏原画师",
+            "id": "7807",
+            "leaf": true
+          },
+          {
+            "name": "游戏动画师",
+            "id": "7808",
+            "leaf": true
+          },
+          {
+            "name": "UE4特效师",
+            "id": "7822",
+            "leaf": true
+          }
+        ]
+      },
+      {
+        "name": "高级设计管理",
+        "id": "1C00",
+        "children": [
+          {
+            "name": "互联网设计经理/主管",
+            "id": "7424",
+            "leaf": true
+          },
+          {
+            "name": "互联网设计总监",
+            "id": "7423",
+            "leaf": true
+          },
+          {
+            "name": "平面设计经理/主管",
+            "id": "7421",
+            "leaf": true
+          },
+          {
+            "name": "平面设计总监",
+            "id": "7420",
+            "leaf": true
+          },
+          {
+            "name": "广告创意/设计经理",
+            "id": "4204",
+            "leaf": true
+          },
+          {
+            "name": "广告创意总监",
+            "id": "4205",
+            "leaf": true
+          },
+          {
+            "name": "室内设计经理/主管",
+            "id": "6918",
+            "leaf": true
+          },
+          {
+            "name": "室内设计总监",
+            "id": "6919",
+            "leaf": true
+          },
+          {
+            "name": "服装/纺织设计总监",
+            "id": "3812",
+            "leaf": true
+          }
+        ]
+      },
+      {
+        "name": "服装设计",
+        "id": "1A00",
+        "children": [
+          {
+            "name": "服装/纺织设计",
+            "id": "3801",
+            "leaf": true
+          },
+          {
+            "name": "服装/纺织/皮革工艺师",
+            "id": "3813",
+            "leaf": true
+          },
+          {
+            "name": "面料辅料开发",
+            "id": "3802",
+            "leaf": true
+          },
+          {
+            "name": "服装/纺织设计总监",
+            "id": "3812",
+            "leaf": true
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "产品",
+    "id": "9F08",
+    "children": [
+      {
+        "name": "互联网产品经理",
+        "id": "6600",
+        "children": [
+          {
+            "name": "产品经理/主管",
+            "id": "6602",
+            "leaf": true
+          },
+          {
+            "name": "产品专员",
+            "id": "6601",
+            "leaf": true
+          },
+          {
+            "name": "产品助理",
+            "id": "6603",
+            "leaf": true
+          },
+          {
+            "name": "需求工程师",
+            "id": "A0JS",
+            "leaf": true
+          },
+          {
+            "name": "电商产品经理",
+            "id": "6608",
+            "leaf": true
+          },
+          {
+            "name": "用户产品经理",
+            "id": "6607",
+            "leaf": true
+          },
+          {
+            "name": "数据产品经理",
+            "id": "6611",
+            "leaf": true
+          },
+          {
+            "name": "增长产品经理",
+            "id": "6616",
+            "leaf": true
+          },
+          {
+            "name": "策略产品经理",
+            "id": "6613",
+            "leaf": true
+          },
+          {
+            "name": "商业化产品经理",
+            "id": "6614",
+            "leaf": true
+          },
+          {
+            "name": "AI产品经理",
+            "id": "6612",
+            "leaf": true
+          },
+          {
+            "name": "平台产品经理",
+            "id": "6615",
+            "leaf": true
+          },
+          {
+            "name": "用户研究",
+            "id": "6617",
+            "leaf": true
+          }
+        ]
+      },
+      {
+        "name": "硬件产品经理",
+        "id": "8600",
+        "children": [
+          {
+            "name": "智能硬件产品经理",
+            "id": "8604",
+            "leaf": true
+          },
+          {
+            "name": "半导体产品经理",
+            "id": "A0LI",
+            "leaf": true
+          },
+          {
+            "name": "IoT产品经理",
+            "id": "8602",
+            "leaf": true
+          },
+          {
+            "name": "AR/VR产品经理",
+            "id": "8603",
+            "leaf": true
+          }
+        ]
+      },
+      {
+        "name": "其他产品经理",
+        "id": "8700",
+        "children": [
+          {
+            "name": "金融产品经理",
+            "id": "3312",
+            "leaf": true
+          },
+          {
+            "name": "旅游产品经理",
+            "id": "8701",
+            "leaf": true
+          },
+          {
+            "name": "医药产品经理",
+            "id": "8702",
+            "leaf": true
+          },
+          {
+            "name": "化妆品产品经理",
+            "id": "8703",
+            "leaf": true
+          },
+          {
+            "name": "电子产品经理/产品工程师",
+            "id": "2954",
+            "leaf": true
+          },
+          {
+            "name": "通信产品经理/产品工程师",
+            "id": "2813",
+            "leaf": true
+          }
+        ]
+      },
+      {
+        "name": "游戏策划",
+        "id": "8500",
+        "children": [
+          {
+            "name": "游戏策划师",
+            "id": "7801",
+            "leaf": true
+          },
+          {
+            "name": "游戏数值策划",
+            "id": "7803",
+            "leaf": true
+          },
+          {
+            "name": "游戏系统策划",
+            "id": "7802",
+            "leaf": true
+          },
+          {
+            "name": "游戏文案策划/剧情策划",
+            "id": "7805",
+            "leaf": true
+          },
+          {
+            "name": "游戏关卡策划",
+            "id": "7804",
+            "leaf": true
+          },
+          {
+            "name": "游戏制作人",
+            "id": "8501",
+            "leaf": true
+          }
+        ]
+      },
+      {
+        "name": "高级产品管理",
+        "id": "8800",
+        "children": [
+          {
+            "name": "高级产品总监/产品总监",
+            "id": "6604",
+            "leaf": true
+          },
+          {
+            "name": "首席产品官CPO",
+            "id": "8801",
+            "leaf": true
+          },
+          {
+            "name": "产品VP",
+            "id": "8802",
+            "leaf": true
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "项目经理/管理",
+    "id": "9F27",
+    "children": [
+      {
+        "name": "项目经理/管理",
+        "id": "A0L5",
+        "children": [
+          {
+            "name": "机械项目管理",
+            "id": "0584",
+            "leaf": true
+          },
+          {
+            "name": "ERP实施顾问",
+            "id": "7905",
+            "leaf": true
+          },
+          {
+            "name": "汽车项目管理",
+            "id": "7101",
+            "leaf": true
+          },
+          {
+            "name": "建筑工程管理/项目经理",
+            "id": "2106",
+            "leaf": true
+          },
+          {
+            "name": "通信项目管理",
+            "id": "2821",
+            "leaf": true
+          },
+          {
+            "name": "项目经理",
+            "id": "2606",
+            "leaf": true
+          },
+          {
+            "name": "项目助理",
+            "id": "2610",
+            "leaf": true
+          },
+          {
+            "name": "生产项目经理",
+            "id": "3503",
+            "leaf": true
+          },
+          {
+            "name": "项目工程师",
+            "id": "3504",
+            "leaf": true
+          },
+          {
+            "name": "项目主管",
+            "id": "2607",
+            "leaf": true
+          },
+          {
+            "name": "项目总监",
+            "id": "2605",
+            "leaf": true
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "生产制造",
+    "id": "9F09",
+    "children": [
+      {
+        "name": "工程/机械",
+        "id": "0500",
+        "children": [
+          {
+            "name": "机械工程师",
+            "id": "0539",
+            "leaf": true
+          },
+          {
+            "name": "NPI工程师",
+            "id": "A0NP",
+            "leaf": true
+          },
+          {
+            "name": "工艺/制程工程师",
+            "id": "0547",
+            "leaf": true
+          },
+          {
+            "name": "机械研发工程师",
+            "id": "0511",
+            "leaf": true
+          },
+          {
+            "name": "机械设备工程师",
+            "id": "0515",
+            "leaf": true
+          },
+          {
+            "name": "机械结构工程师",
+            "id": "0561",
+            "leaf": true
+          },
+          {
+            "name": "机械项目管理",
+            "id": "0584",
+            "leaf": true
+          },
+          {
+            "name": "CNC/数控操机",
+            "id": "6201",
+            "leaf": true
+          },
+          {
+            "name": "机械设计",
+            "id": "0586",
+            "leaf": true
+          },
+          {
+            "name": "机器人工程师",
+            "id": "A0NO",
+            "leaf": true
+          },
+          {
+            "name": "机电工程师",
+            "id": "0544",
+            "leaf": true
+          },
+          {
+            "name": "线束工程师",
+            "id": "A0NQ",
+            "leaf": true
+          },
+          {
+            "name": "工业工程师",
+            "id": "0560",
+            "leaf": true
+          },
+          {
+            "name": "机械制图",
+            "id": "0523",
+            "leaf": true
+          },
+          {
+            "name": "模具工程师",
+            "id": "0548",
+            "leaf": true
+          },
+          {
+            "name": "机械研发经理/主管",
+            "id": "0510",
+            "leaf": true
+          },
+          {
+            "name": "材料工程师",
+            "id": "0582",
+            "leaf": true
+          },
+          {
+            "name": "机械装配工程师",
+            "id": "0581",
+            "leaf": true
+          },
+          {
+            "name": "注塑工程师",
+            "id": "0563",
+            "leaf": true
+          },
+          {
+            "name": "CNC/数控编程",
+            "id": "A0K0",
+            "leaf": true
+          },
+          {
+            "name": "机械设备经理/主管",
+            "id": "A0JZ",
+            "leaf": true
+          },
+          {
+            "name": "实验室负责人/工程师",
+            "id": "0512",
+            "leaf": true
+          },
+          {
+            "name": "模具设计",
+            "id": "0587",
+            "leaf": true
+          },
+          {
+            "name": "焊接工程师",
+            "id": "0564",
+            "leaf": true
+          },
+          {
+            "name": "夹具工程师",
+            "id": "0565",
+            "leaf": true
+          },
+          {
+            "name": "机械产品工程师",
+            "id": "0559",
+            "leaf": true
+          },
+          {
+            "name": "铸造/锻造工程师/技师",
+            "id": "0562",
+            "leaf": true
+          },
+          {
+            "name": "飞行器设计与制造",
+            "id": "0573",
+            "leaf": true
+          },
+          {
+            "name": "机械维修/保养",
+            "id": "A0K1",
+            "leaf": true
+          },
+          {
+            "name": "船舶工程师",
+            "id": "0572",
+            "leaf": true
+          },
+          {
+            "name": "船舶船体工程师",
+            "id": "A0NL",
+            "leaf": true
+          },
+          {
+            "name": "船舶轮机工程师",
+            "id": "A0NM",
+            "leaf": true
+          },
+          {
+            "name": "冲压工程师",
+            "id": "0567",
+            "leaf": true
+          },
+          {
+            "name": "光源与照明工程",
+            "id": "0570",
+            "leaf": true
+          },
+          {
+            "name": "热能工程师",
+            "id": "A0K2",
+            "leaf": true
+          },
+          {
+            "name": "轨道交通工程师",
+            "id": "0575",
+            "leaf": true
+          },
+          {
+            "name": "飞机维修机械师",
+            "id": "0576",
+            "leaf": true
+          },
+          {
+            "name": "CAD绘图",
+            "id": "7409",
+            "leaf": true
+          },
+          {
+            "name": "仿真应用工程师",
+            "id": "7410",
+            "leaf": true
+          }
+        ]
+      },
+      {
+        "name": "普工",
+        "id": "6E00",
+        "children": [
+          {
+            "name": "普工/操作工",
+            "id": "3734",
+            "leaf": true
+          },
+          {
+            "name": "组装工",
+            "id": "3715",
+            "leaf": true
+          },
+          {
+            "name": "包装工",
+            "id": "3716",
+            "leaf": true
+          },
+          {
+            "name": "学徒工",
+            "id": "3727",
+            "leaf": true
+          },
+          {
+            "name": "搬运工",
+            "id": "0836",
+            "leaf": true
+          },
+          {
+            "name": "装卸工",
+            "id": "0839",
+            "leaf": true
+          }
+        ]
+      },
+      {
+        "name": "技工",
+        "id": "6F00",
+        "children": [
+          {
+            "name": "电工",
+            "id": "3735",
+            "leaf": true
+          },
+          {
+            "name": "机修工",
+            "id": "6203",
+            "leaf": true
+          },
+          {
+            "name": "空调工",
+            "id": "3708",
+            "leaf": true
+          },
+          {
+            "name": "锅炉工",
+            "id": "3726",
+            "leaf": true
+          },
+          {
+            "name": "电梯工",
+            "id": "3725",
+            "leaf": true
+          },
+          {
+            "name": "木工",
+            "id": "3723",
+            "leaf": true
+          },
+          {
+            "name": "水工",
+            "id": "3709",
+            "leaf": true
+          },
+          {
+            "name": "技工",
+            "id": "3736",
+            "leaf": true
+          },
+          {
+            "name": "仪表工",
+            "id": "3720",
+            "leaf": true
+          },
+          {
+            "name": "喷塑工",
+            "id": "3722",
+            "leaf": true
+          }
+        ]
+      },
+      {
+        "name": "运输设备操作",
+        "id": "7A00",
+        "children": [
+          {
+            "name": "叉车司机",
+            "id": "3732",
+            "leaf": true
+          },
+          {
+            "name": "吊车司机",
+            "id": "3728",
+            "leaf": true
+          },
+          {
+            "name": "铲车司机",
+            "id": "3733",
+            "leaf": true
+          },
+          {
+            "name": "挖掘机司机",
+            "id": "3729",
+            "leaf": true
+          }
+        ]
+      },
+      {
+        "name": "机械加工",
+        "id": "7B00",
+        "children": [
+          {
+            "name": "焊工",
+            "id": "3703",
+            "leaf": true
+          },
+          {
+            "name": "氩弧焊工",
+            "id": "3717",
+            "leaf": true
+          },
+          {
+            "name": "CNC/数控操机",
+            "id": "6201",
+            "leaf": true
+          },
+          {
+            "name": "钳工",
+            "id": "6210",
+            "leaf": true
+          },
+          {
+            "name": "车工",
+            "id": "6205",
+            "leaf": true
+          },
+          {
+            "name": "模具工",
+            "id": "6217",
+            "leaf": true
+          },
+          {
+            "name": "切割技工",
+            "id": "6216",
+            "leaf": true
+          },
+          {
+            "name": "磨工",
+            "id": "6206",
+            "leaf": true
+          },
+          {
+            "name": "铣工",
+            "id": "6207",
+            "leaf": true
+          },
+          {
+            "name": "注塑工",
+            "id": "6221",
+            "leaf": true
+          },
+          {
+            "name": "抛光工",
+            "id": "6215",
+            "leaf": true
+          },
+          {
+            "name": "折弯工",
+            "id": "6204",
+            "leaf": true
+          },
+          {
+            "name": "冲压工",
+            "id": "6208",
+            "leaf": true
+          },
+          {
+            "name": "钣金工",
+            "id": "6214",
+            "leaf": true
+          },
+          {
+            "name": "钻工",
+            "id": "6211",
+            "leaf": true
+          },
+          {
+            "name": "铆工",
+            "id": "6213",
+            "leaf": true
+          },
+          {
+            "name": "电镀工/镀膜操作",
+            "id": "3721",
+            "leaf": true
+          },
+          {
+            "name": "模切工",
+            "id": "3731",
+            "leaf": true
+          },
+          {
+            "name": "镗工",
+            "id": "6212",
+            "leaf": true
+          },
+          {
+            "name": "吹膜工",
+            "id": "6220",
+            "leaf": true
+          },
+          {
+            "name": "炼胶工",
+            "id": "6218",
+            "leaf": true
+          },
+          {
+            "name": "硫化工",
+            "id": "6219",
+            "leaf": true
+          },
+          {
+            "name": "刨工",
+            "id": "6209",
+            "leaf": true
+          },
+          {
+            "name": "技工",
+            "id": "3736",
+            "leaf": true
+          }
+        ]
+      },
+      {
+        "name": "质量管理",
+        "id": "3600",
+        "children": [
+          {
+            "name": "质检员QC",
+            "id": "3604",
+            "leaf": true
+          },
+          {
+            "name": "质量工程师",
+            "id": "3603",
+            "leaf": true
+          },
+          {
+            "name": "质量/品质主管",
+            "id": "3602",
+            "leaf": true
+          },
+          {
+            "name": "质量/品质经理",
+            "id": "3601",
+            "leaf": true
+          },
+          {
+            "name": "EHS安全工程师",
+            "id": "3610",
+            "leaf": true
+          },
+          {
+            "name": "EHS安全经理/主管",
+            "id": "3609",
+            "leaf": true
+          },
+          {
+            "name": "体系工程师",
+            "id": "A0KG",
+            "leaf": true
+          },
+          {
+            "name": "计量工程师",
+            "id": "A0N2",
+            "leaf": true
+          },
+          {
+            "name": "生产安全员",
+            "id": "3614",
+            "leaf": true
+          },
+          {
+            "name": "供应商质量工程师",
+            "id": "A0KD",
+            "leaf": true
+          },
+          {
+            "name": "体系认证审核员",
+            "id": "3615",
+            "leaf": true
+          },
+          {
+            "name": "认证工程师",
+            "id": "3607",
+            "leaf": true
+          },
+          {
+            "name": "采购材料、设备质量管理",
+            "id": "3612",
+            "leaf": true
+          },
+          {
+            "name": "服装纺织质检员(QA/QC)",
+            "id": "3805",
+            "leaf": true
+          },
+          {
+            "name": "汽车质量工程师",
+            "id": "5404",
+            "leaf": true
+          },
+          {
+            "name": "客户质量工程师",
+            "id": "5424",
+            "leaf": true
+          },
+          {
+            "name": "前期质量工程师",
+            "id": "5422",
+            "leaf": true
+          },
+          {
+            "name": "过程质量工程师",
+            "id": "5423",
+            "leaf": true
+          },
+          {
+            "name": "药品生产/质量管理",
+            "id": "4108",
+            "leaf": true
+          },
+          {
+            "name": "医疗器械生产/质量管理",
+            "id": "4118",
+            "leaf": true
+          },
+          {
+            "name": "化学分析测试员",
+            "id": "4116",
+            "leaf": true
+          },
+          {
+            "name": "可靠度工程师",
+            "id": "3605",
+            "leaf": true
+          },
+          {
+            "name": "故障分析工程师",
+            "id": "3606",
+            "leaf": true
+          }
+        ]
+      },
+      {
+        "name": "生产安全",
+        "id": "A0LN",
+        "children": [
+          {
+            "name": "生产安全员",
+            "id": "3614",
+            "leaf": true
+          },
+          {
+            "name": "施工安全员",
+            "id": "A0LM",
+            "leaf": true
+          },
+          {
+            "name": "消防安全",
+            "id": "2112",
+            "leaf": true
+          },
+          {
+            "name": "EHS安全工程师",
+            "id": "3610",
+            "leaf": true
+          },
+          {
+            "name": "EHS安全经理/主管",
+            "id": "3609",
+            "leaf": true
+          }
+        ]
+      },
+      {
+        "name": "生产/营运",
+        "id": "3500",
+        "children": [
+          {
+            "name": "机械项目管理",
+            "id": "0584",
+            "leaf": true
+          },
+          {
+            "name": "生产计划/物料管理(PMC)",
+            "id": "3508",
+            "leaf": true
+          },
+          {
+            "name": "生产领班/组长",
+            "id": "3515",
+            "leaf": true
+          },
+          {
+            "name": "生产主管",
+            "id": "3509",
+            "leaf": true
+          },
+          {
+            "name": "生产经理/车间主任",
+            "id": "3507",
+            "leaf": true
+          },
+          {
+            "name": "生产文员",
+            "id": "3512",
+            "leaf": true
+          },
+          {
+            "name": "项目工程师",
+            "id": "3504",
+            "leaf": true
+          },
+          {
+            "name": "生产项目经理",
+            "id": "3503",
+            "leaf": true
+          },
+          {
+            "name": "工厂经理/厂长",
+            "id": "3501",
+            "leaf": true
+          },
+          {
+            "name": "设备主管",
+            "id": "3516",
+            "leaf": true
+          },
+          {
+            "name": "营运主管",
+            "id": "3506",
+            "leaf": true
+          },
+          {
+            "name": "营运经理",
+            "id": "3505",
+            "leaf": true
+          },
+          {
+            "name": "生产总监",
+            "id": "3514",
+            "leaf": true
+          },
+          {
+            "name": "生产跟单",
+            "id": "3518",
+            "leaf": true
+          },
+          {
+            "name": "厂务",
+            "id": "3517",
+            "leaf": true
+          },
+          {
+            "name": "总工程师/副总工程师",
+            "id": "3502",
+            "leaf": true
+          }
+        ]
+      },
+      {
+        "name": "汽车研发设计",
+        "id": "7100",
+        "children": [
+          {
+            "name": "汽车/摩托车工程师",
+            "id": "0571",
+            "leaf": true
+          },
+          {
+            "name": "汽车设计工程师",
+            "id": "7102",
+            "leaf": true
+          },
+          {
+            "name": "汽车电子工程师",
+            "id": "7106",
+            "leaf": true
+          },
+          {
+            "name": "新能源电池工程师",
+            "id": "7114",
+            "leaf": true
+          },
+          {
+            "name": "电气/电器工程师",
+            "id": "7107",
+            "leaf": true
+          },
+          {
+            "name": "汽车项目管理",
+            "id": "7101",
+            "leaf": true
+          },
+          {
+            "name": "内外饰工程师",
+            "id": "7105",
+            "leaf": true
+          },
+          {
+            "name": "汽车结构工程师",
+            "id": "7104",
+            "leaf": true
+          },
+          {
+            "name": "底盘工程师",
+            "id": "7111",
+            "leaf": true
+          },
+          {
+            "name": "汽车试验工程师",
+            "id": "7113",
+            "leaf": true
+          },
+          {
+            "name": "新能源电机工程师",
+            "id": "7116",
+            "leaf": true
+          },
+          {
+            "name": "新能源电控工程师",
+            "id": "7115",
+            "leaf": true
+          },
+          {
+            "name": "车身/造型设计",
+            "id": "7103",
+            "leaf": true
+          },
+          {
+            "name": "汽车安全性能工程师",
+            "id": "7112",
+            "leaf": true
+          },
+          {
+            "name": "研发总监/部长/专家",
+            "id": "7121",
+            "leaf": true
+          },
+          {
+            "name": "动力总成工程师",
+            "id": "7109",
+            "leaf": true
+          },
+          {
+            "name": "汽车标定工程师",
+            "id": "7117",
+            "leaf": true
+          },
+          {
+            "name": "智能驾驶工程师",
+            "id": "7120",
+            "leaf": true
+          },
+          {
+            "name": "发动机工程师",
+            "id": "7110",
+            "leaf": true
+          },
+          {
+            "name": "附件系统工程师",
+            "id": "7108",
+            "leaf": true
+          },
+          {
+            "name": "车联网工程师",
+            "id": "7119",
+            "leaf": true
+          },
+          {
+            "name": "智能驾驶测试工程师",
+            "id": "7124",
+            "leaf": true
+          },
+          {
+            "name": "发动机匹配工程师",
+            "id": "7118",
+            "leaf": true
+          },
+          {
+            "name": "仿真应用工程师",
+            "id": "7410",
+            "leaf": true
+          }
+        ]
+      },
+      {
+        "name": "服装/纺织/皮革",
+        "id": "3800",
+        "children": [
+          {
+            "name": "浆纱工",
+            "id": "3828",
+            "leaf": true
+          },
+          {
+            "name": "服装/纺织设计",
+            "id": "3801",
+            "leaf": true
+          },
+          {
+            "name": "服装/纺织设计总监",
+            "id": "3812",
+            "leaf": true
+          },
+          {
+            "name": "服装/纺织/皮革跟单",
+            "id": "3804",
+            "leaf": true
+          },
+          {
+            "name": "服装纺织质检员(QA/QC)",
+            "id": "3805",
+            "leaf": true
+          },
+          {
+            "name": "打样/制版",
+            "id": "3807",
+            "leaf": true
+          },
+          {
+            "name": "服装/纺织/皮革工艺师",
+            "id": "3813",
+            "leaf": true
+          },
+          {
+            "name": "面料辅料开发",
+            "id": "3802",
+            "leaf": true
+          },
+          {
+            "name": "缝纫工",
+            "id": "3816",
+            "leaf": true
+          },
+          {
+            "name": "面料辅料采购",
+            "id": "3803",
+            "leaf": true
+          },
+          {
+            "name": "纸样师/车板工",
+            "id": "3808",
+            "leaf": true
+          },
+          {
+            "name": "样衣工",
+            "id": "3819",
+            "leaf": true
+          },
+          {
+            "name": "服装领班",
+            "id": "3814",
+            "leaf": true
+          },
+          {
+            "name": "裁剪工",
+            "id": "3815",
+            "leaf": true
+          },
+          {
+            "name": "裁床",
+            "id": "3809",
+            "leaf": true
+          },
+          {
+            "name": "烫工",
+            "id": "3818",
+            "leaf": true
+          },
+          {
+            "name": "板房/楦头/底格出格师",
+            "id": "3806",
+            "leaf": true
+          },
+          {
+            "name": "纺织工",
+            "id": "3820",
+            "leaf": true
+          },
+          {
+            "name": "印染工",
+            "id": "3823",
+            "leaf": true
+          },
+          {
+            "name": "电脑放码员",
+            "id": "3811",
+            "leaf": true
+          },
+          {
+            "name": "手缝工",
+            "id": "3817",
+            "leaf": true
+          },
+          {
+            "name": "挡车工",
+            "id": "3825",
+            "leaf": true
+          },
+          {
+            "name": "配色工",
+            "id": "3822",
+            "leaf": true
+          },
+          {
+            "name": "针织工",
+            "id": "3821",
+            "leaf": true
+          },
+          {
+            "name": "漂染工",
+            "id": "3824",
+            "leaf": true
+          },
+          {
+            "name": "整经工",
+            "id": "3826",
+            "leaf": true
+          },
+          {
+            "name": "细纱工",
+            "id": "3827",
+            "leaf": true
+          }
+        ]
+      },
+      {
+        "name": "汽车制造",
+        "id": "5400",
+        "children": [
+          {
+            "name": "汽车质量工程师",
+            "id": "5404",
+            "leaf": true
+          },
+          {
+            "name": "客户质量工程师",
+            "id": "5424",
+            "leaf": true
+          },
+          {
+            "name": "汽车装配工艺工程师",
+            "id": "5406",
+            "leaf": true
+          },
+          {
+            "name": "焊接工艺工程师",
+            "id": "5426",
+            "leaf": true
+          },
+          {
+            "name": "过程质量工程师",
+            "id": "5423",
+            "leaf": true
+          },
+          {
+            "name": "涂装工艺工程师",
+            "id": "5428",
+            "leaf": true
+          },
+          {
+            "name": "前期质量工程师",
+            "id": "5422",
+            "leaf": true
+          },
+          {
+            "name": "冲压工艺工程师",
+            "id": "5427",
+            "leaf": true
+          },
+          {
+            "name": "总装工程师",
+            "id": "5425",
+            "leaf": true
+          }
+        ]
+      },
+      {
+        "name": "印刷包装",
+        "id": "6300",
+        "children": [
+          {
+            "name": "印刷机械机长",
+            "id": "6309",
+            "leaf": true
+          },
+          {
+            "name": "印刷工",
+            "id": "6301",
+            "leaf": true
+          },
+          {
+            "name": "印刷排版/制版",
+            "id": "6307",
+            "leaf": true
+          },
+          {
+            "name": "切纸机操作工",
+            "id": "6314",
+            "leaf": true
+          },
+          {
+            "name": "校对/录入",
+            "id": "6302",
+            "leaf": true
+          },
+          {
+            "name": "调色员",
+            "id": "6304",
+            "leaf": true
+          },
+          {
+            "name": "复卷工",
+            "id": "6317",
+            "leaf": true
+          },
+          {
+            "name": "调墨技师",
+            "id": "6311",
+            "leaf": true
+          },
+          {
+            "name": "烫金工",
+            "id": "6305",
+            "leaf": true
+          },
+          {
+            "name": "装订工",
+            "id": "6308",
+            "leaf": true
+          },
+          {
+            "name": "数码直印/菲林输出",
+            "id": "6310",
+            "leaf": true
+          },
+          {
+            "name": "压痕工",
+            "id": "6316",
+            "leaf": true
+          },
+          {
+            "name": "晒版员",
+            "id": "6306",
+            "leaf": true
+          },
+          {
+            "name": "裱胶工",
+            "id": "6315",
+            "leaf": true
+          },
+          {
+            "name": "电分操作员",
+            "id": "6312",
+            "leaf": true
+          },
+          {
+            "name": "打稿机操作员",
+            "id": "6313",
+            "leaf": true
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "通信/电子",
+    "id": "9F10",
+    "children": [
+      {
+        "name": "电子/电气/仪器仪表",
+        "id": "2900",
+        "children": [
+          {
+            "name": "电气工程师",
+            "id": "A0L8",
+            "leaf": true
+          },
+          {
+            "name": "嵌入式软件开发",
+            "id": "A0MZ",
+            "leaf": true
+          },
+          {
+            "name": "硬件工程师",
+            "id": "2955",
+            "leaf": true
+          },
+          {
+            "name": "电子工程师",
+            "id": "A0MY",
+            "leaf": true
+          },
+          {
+            "name": "自动控制工程师",
+            "id": "2908",
+            "leaf": true
+          },
+          {
+            "name": "硬件测试工程师",
+            "id": "2957",
+            "leaf": true
+          },
+          {
+            "name": "电池/电源开发",
+            "id": "2911",
+            "leaf": true
+          },
+          {
+            "name": "电子电气维修工程师",
+            "id": "2920",
+            "leaf": true
+          },
+          {
+            "name": "高级硬件工程师",
+            "id": "2956",
+            "leaf": true
+          },
+          {
+            "name": "激光/光电子技术",
+            "id": "2918",
+            "leaf": true
+          },
+          {
+            "name": "嵌入式硬件开发(主板机等)",
+            "id": "2919",
+            "leaf": true
+          },
+          {
+            "name": "电子工艺工程师",
+            "id": "2951",
+            "leaf": true
+          },
+          {
+            "name": "PCB工程师",
+            "id": "2964",
+            "leaf": true
+          },
+          {
+            "name": "SMT工程师",
+            "id": "2965",
+            "leaf": true
+          },
+          {
+            "name": "电子元器件工程师",
+            "id": "2962",
+            "leaf": true
+          },
+          {
+            "name": "电子销售工程师",
+            "id": "2952",
+            "leaf": true
+          },
+          {
+            "name": "计量工程师",
+            "id": "A0N2",
+            "leaf": true
+          },
+          {
+            "name": "电子设备工程师",
+            "id": "2959",
+            "leaf": true
+          },
+          {
+            "name": "电子产品经理/产品工程师",
+            "id": "2954",
+            "leaf": true
+          },
+          {
+            "name": "变压器与磁电工程师",
+            "id": "2921",
+            "leaf": true
+          },
+          {
+            "name": "电声/音响工程师/技术员",
+            "id": "2906",
+            "leaf": true
+          },
+          {
+            "name": "电子文档工程师",
+            "id": "2953",
+            "leaf": true
+          },
+          {
+            "name": "安防系统工程师",
+            "id": "2925",
+            "leaf": true
+          },
+          {
+            "name": "智能硬件装调员",
+            "id": "2970",
+            "leaf": true
+          },
+          {
+            "name": "工业视觉系统运维员",
+            "id": "2971",
+            "leaf": true
+          },
+          {
+            "name": "服务机器人应用技术员",
+            "id": "2969",
+            "leaf": true
+          },
+          {
+            "name": "仿真应用工程师",
+            "id": "7410",
+            "leaf": true
+          }
+        ]
+      },
+      {
+        "name": "半导体/芯片",
+        "id": "6700",
+        "children": [
+          {
+            "name": "集成电路IC设计",
+            "id": "6701",
+            "leaf": true
+          },
+          {
+            "name": "FAE 现场应用工程师",
+            "id": "6712",
+            "leaf": true
+          },
+          {
+            "name": "半导体工艺工程师",
+            "id": "6723",
+            "leaf": true
+          },
+          {
+            "name": "半导体设备工程师",
+            "id": "6739",
+            "leaf": true
+          },
+          {
+            "name": "半导体器件工程师",
+            "id": "6761",
+            "leaf": true
+          },
+          {
+            "name": "FPGA开发工程师",
+            "id": "6728",
+            "leaf": true
+          },
+          {
+            "name": "芯片销售工程师",
+            "id": "6746",
+            "leaf": true
+          },
+          {
+            "name": "IC验证工程师",
+            "id": "A0MX",
+            "leaf": true
+          },
+          {
+            "name": "模拟芯片设计",
+            "id": "A0LG",
+            "leaf": true
+          },
+          {
+            "name": "IC版图设计",
+            "id": "A0LF",
+            "leaf": true
+          },
+          {
+            "name": "半导体产品经理",
+            "id": "A0LI",
+            "leaf": true
+          },
+          {
+            "name": "工艺整合工程师(PIE)",
+            "id": "6740",
+            "leaf": true
+          },
+          {
+            "name": "芯片测试工程师",
+            "id": "A0LH",
+            "leaf": true
+          },
+          {
+            "name": "封装工程师",
+            "id": "A0LJ",
+            "leaf": true
+          },
+          {
+            "name": "数字前端工程师",
+            "id": "6733",
+            "leaf": true
+          },
+          {
+            "name": "失效分析工程师(FA)",
+            "id": "6741",
+            "leaf": true
+          },
+          {
+            "name": "数字后端工程师",
+            "id": "6737",
+            "leaf": true
+          },
+          {
+            "name": "芯片架构工程师",
+            "id": "6727",
+            "leaf": true
+          },
+          {
+            "name": "EDA工程师",
+            "id": "6735",
+            "leaf": true
+          }
+        ]
+      },
+      {
+        "name": "硬件开发",
+        "id": "3A00",
+        "children": [
+          {
+            "name": "高级硬件工程师",
+            "id": "2956",
+            "leaf": true
+          },
+          {
+            "name": "硬件工程师",
+            "id": "2955",
+            "leaf": true
+          },
+          {
+            "name": "硬件测试工程师",
+            "id": "2957",
+            "leaf": true
+          },
+          {
+            "name": "嵌入式硬件开发(主板机等)",
+            "id": "2919",
+            "leaf": true
+          }
+        ]
+      },
+      {
+        "name": "通信技术开发与应用",
+        "id": "2800",
+        "children": [
+          {
+            "name": "通信技术工程师",
+            "id": "2801",
+            "leaf": true
+          },
+          {
+            "name": "通信网络工程师",
+            "id": "2807",
+            "leaf": true
+          },
+          {
+            "name": "通信项目管理",
+            "id": "2821",
+            "leaf": true
+          },
+          {
+            "name": "通信电源工程师",
+            "id": "2808",
+            "leaf": true
+          },
+          {
+            "name": "通信测试工程师",
+            "id": "2816",
+            "leaf": true
+          },
+          {
+            "name": "通信产品经理/产品工程师",
+            "id": "2813",
+            "leaf": true
+          },
+          {
+            "name": "通信设备工程师",
+            "id": "2820",
+            "leaf": true
+          },
+          {
+            "name": "通信销售工程师",
+            "id": "2817",
+            "leaf": true
+          },
+          {
+            "name": "无线通信工程师",
+            "id": "2803",
+            "leaf": true
+          },
+          {
+            "name": "光通信工程师",
+            "id": "2814",
+            "leaf": true
+          },
+          {
+            "name": "数据通信工程师",
+            "id": "2805",
+            "leaf": true
+          },
+          {
+            "name": "射频工程师",
+            "id": "2815",
+            "leaf": true
+          },
+          {
+            "name": "有线传输工程师",
+            "id": "2802",
+            "leaf": true
+          },
+          {
+            "name": "基站工程师",
+            "id": "2818",
+            "leaf": true
+          },
+          {
+            "name": "核心网工程师",
+            "id": "2819",
+            "leaf": true
+          }
+        ]
+      },
+      {
+        "name": "技术项目管理",
+        "id": "3B00",
+        "children": [
+          {
+            "name": "通信项目管理",
+            "id": "2821",
+            "leaf": true
+          },
+          {
+            "name": "首席信息官CIO",
+            "id": "2612",
+            "leaf": true
+          },
+          {
+            "name": "首席技术执行官CTO",
+            "id": "2611",
+            "leaf": true
+          },
+          {
+            "name": "技术总监",
+            "id": "2603",
+            "leaf": true
+          },
+          {
+            "name": "技术经理",
+            "id": "2604",
+            "leaf": true
+          },
+          {
+            "name": "项目总监",
+            "id": "2605",
+            "leaf": true
+          },
+          {
+            "name": "项目经理",
+            "id": "2606",
+            "leaf": true
+          },
+          {
+            "name": "项目主管",
+            "id": "2607",
+            "leaf": true
+          },
+          {
+            "name": "项目执行/协调人员",
+            "id": "2608",
+            "leaf": true
+          },
+          {
+            "name": "项目助理",
+            "id": "2610",
+            "leaf": true
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "建筑/房地产",
+    "id": "9F11",
+    "children": [
+      {
+        "name": "建筑工程",
+        "id": "2100",
+        "children": [
+          {
+            "name": "安全管理",
+            "id": "A0NJ",
+            "leaf": true
+          },
+          {
+            "name": "建筑工程管理/项目经理",
+            "id": "2106",
+            "leaf": true
+          },
+          {
+            "name": "生产安全员",
+            "id": "3614",
+            "leaf": true
+          },
+          {
+            "name": "消防安全",
+            "id": "2112",
+            "leaf": true
+          },
+          {
+            "name": "工程造价/预结算",
+            "id": "A0K3",
+            "leaf": true
+          },
+          {
+            "name": "结构/土木/土建工程师",
+            "id": "2102",
+            "leaf": true
+          },
+          {
+            "name": "资料员",
+            "id": "2130",
+            "leaf": true
+          },
+          {
+            "name": "施工员",
+            "id": "2111",
+            "leaf": true
+          },
+          {
+            "name": "建筑工程师",
+            "id": "2101",
+            "leaf": true
+          },
+          {
+            "name": "工程监理",
+            "id": "2107",
+            "leaf": true
+          },
+          {
+            "name": "工程质量管理",
+            "id": "A0N9",
+            "leaf": true
+          },
+          {
+            "name": "建筑机电工程师",
+            "id": "2103",
+            "leaf": true
+          },
+          {
+            "name": "测绘/测量",
+            "id": "2120",
+            "leaf": true
+          },
+          {
+            "name": "公路/桥梁/港口/隧道工程",
+            "id": "2118",
+            "leaf": true
+          },
+          {
+            "name": "高级建筑工程师/总工",
+            "id": "2123",
+            "leaf": true
+          },
+          {
+            "name": "市政工程师",
+            "id": "2132",
+            "leaf": true
+          },
+          {
+            "name": "精装修工程师",
+            "id": "2146",
+            "leaf": true
+          },
+          {
+            "name": "建筑项目助理",
+            "id": "2133",
+            "leaf": true
+          },
+          {
+            "name": "材料员",
+            "id": "2149",
+            "leaf": true
+          },
+          {
+            "name": "劳务员",
+            "id": "2150",
+            "leaf": true
+          },
+          {
+            "name": "技工",
+            "id": "3736",
+            "leaf": true
+          },
+          {
+            "name": "给排水/暖通工程",
+            "id": "A0K4",
+            "leaf": true
+          },
+          {
+            "name": "合同管理",
+            "id": "2128",
+            "leaf": true
+          },
+          {
+            "name": "岩土工程",
+            "id": "2119",
+            "leaf": true
+          },
+          {
+            "name": "幕墙工程师",
+            "id": "2122",
+            "leaf": true
+          },
+          {
+            "name": "开发报建",
+            "id": "2127",
+            "leaf": true
+          },
+          {
+            "name": "建筑工程验收",
+            "id": "2121",
+            "leaf": true
+          },
+          {
+            "name": "工长",
+            "id": "2145",
+            "leaf": true
+          },
+          {
+            "name": "智能大厦/综合布线/安防/弱电",
+            "id": "A0K5",
+            "leaf": true
+          },
+          {
+            "name": "房修工程师",
+            "id": "2147",
+            "leaf": true
+          }
+        ]
+      },
+      {
+        "name": "物业管理",
+        "id": "4700",
+        "children": [
+          {
+            "name": "保安",
+            "id": "A0MG",
+            "leaf": true
+          },
+          {
+            "name": "保安经理",
+            "id": "4710",
+            "leaf": true
+          },
+          {
+            "name": "招商/租赁/租售",
+            "id": "A0MI",
+            "leaf": true
+          },
+          {
+            "name": "住房租赁运营",
+            "id": "A0NI",
+            "leaf": true
+          },
+          {
+            "name": "物业管理专员/助理",
+            "id": "4703",
+            "leaf": true
+          },
+          {
+            "name": "物业管理主管",
+            "id": "4714",
+            "leaf": true
+          },
+          {
+            "name": "物业管理经理",
+            "id": "4702",
+            "leaf": true
+          },
+          {
+            "name": "物业维修员",
+            "id": "4706",
+            "leaf": true
+          },
+          {
+            "name": "写字楼运营",
+            "id": "4719",
+            "leaf": true
+          },
+          {
+            "name": "保洁",
+            "id": "A0M8",
+            "leaf": true
+          },
+          {
+            "name": "物业设施管理人员",
+            "id": "4705",
+            "leaf": true
+          },
+          {
+            "name": "物业机电维修工",
+            "id": "4715",
+            "leaf": true
+          },
+          {
+            "name": "绿化工",
+            "id": "4713",
+            "leaf": true
+          },
+          {
+            "name": "物业机电工程师",
+            "id": "4708",
+            "leaf": true
+          },
+          {
+            "name": "房地产项目招投标",
+            "id": "4608",
+            "leaf": true
+          },
+          {
+            "name": "长租公寓管家/养老专员",
+            "id": "4717",
+            "leaf": true
+          },
+          {
+            "name": "停车管理员",
+            "id": "4709",
+            "leaf": true
+          },
+          {
+            "name": "高级物业顾问/物业顾问",
+            "id": "4701",
+            "leaf": true
+          },
+          {
+            "name": "前介工程师",
+            "id": "4716",
+            "leaf": true
+          }
+        ]
+      },
+      {
+        "name": "房地产销售与中介",
+        "id": "6000",
+        "children": [
+          {
+            "name": "房地产销售专员",
+            "id": "6010",
+            "leaf": true
+          },
+          {
+            "name": "房地产中介/置业顾问",
+            "id": "6001",
+            "leaf": true
+          },
+          {
+            "name": "房地产销售经理/主管",
+            "id": "6009",
+            "leaf": true
+          },
+          {
+            "name": "房地产评估",
+            "id": "6002",
+            "leaf": true
+          },
+          {
+            "name": "房地产内勤",
+            "id": "6007",
+            "leaf": true
+          },
+          {
+            "name": "房地产客服",
+            "id": "6006",
+            "leaf": true
+          }
+        ]
+      },
+      {
+        "name": "建筑规划与设计",
+        "id": "6900",
+        "children": [
+          {
+            "name": "室内设计",
+            "id": "A0LL",
+            "leaf": true
+          },
+          {
+            "name": "规划与设计",
+            "id": "6904",
+            "leaf": true
+          },
+          {
+            "name": "建筑设计师",
+            "id": "6905",
+            "leaf": true
+          },
+          {
+            "name": "园艺/园林/景观设计",
+            "id": "6914",
+            "leaf": true
+          },
+          {
+            "name": "暖通设计",
+            "id": "6911",
+            "leaf": true
+          },
+          {
+            "name": "建筑结构设计",
+            "id": "6908",
+            "leaf": true
+          },
+          {
+            "name": "建筑制图/模型/渲染",
+            "id": "6909",
+            "leaf": true
+          },
+          {
+            "name": "给排水设计",
+            "id": "6912",
+            "leaf": true
+          },
+          {
+            "name": "建筑机电设计",
+            "id": "6910",
+            "leaf": true
+          },
+          {
+            "name": "钢结构设计",
+            "id": "6906",
+            "leaf": true
+          },
+          {
+            "name": "BIM工程师",
+            "id": "6916",
+            "leaf": true
+          },
+          {
+            "name": "幕墙设计",
+            "id": "6907",
+            "leaf": true
+          },
+          {
+            "name": "城市规划设计",
+            "id": "6913",
+            "leaf": true
+          },
+          {
+            "name": "软装设计",
+            "id": "6902",
+            "leaf": true
+          },
+          {
+            "name": "室内设计师助理",
+            "id": "6917",
+            "leaf": true
+          },
+          {
+            "name": "室内设计经理/主管",
+            "id": "6918",
+            "leaf": true
+          },
+          {
+            "name": "室内设计总监",
+            "id": "6919",
+            "leaf": true
+          }
+        ]
+      },
+      {
+        "name": "房地产开发",
+        "id": "4600",
+        "children": [
+          {
+            "name": "房地产项目/策划专员",
+            "id": "4613",
+            "leaf": true
+          },
+          {
+            "name": "房地产项目/策划主管",
+            "id": "4614",
+            "leaf": true
+          },
+          {
+            "name": "房地产项目/策划经理",
+            "id": "4601",
+            "leaf": true
+          },
+          {
+            "name": "房地产项目招投标",
+            "id": "4608",
+            "leaf": true
+          },
+          {
+            "name": "房产项目配套工程师",
+            "id": "4603",
+            "leaf": true
+          },
+          {
+            "name": "房地产投资管理",
+            "id": "4604",
+            "leaf": true
+          },
+          {
+            "name": "房地产资产管理",
+            "id": "4611",
+            "leaf": true
+          },
+          {
+            "name": "房地产投资分析",
+            "id": "4610",
+            "leaf": true
+          }
+        ]
+      },
+      {
+        "name": "建筑/装修工人",
+        "id": "4D00",
+        "children": [
+          {
+            "name": "电梯工",
+            "id": "3725",
+            "leaf": true
+          },
+          {
+            "name": "木工",
+            "id": "3723",
+            "leaf": true
+          },
+          {
+            "name": "油漆工",
+            "id": "2140",
+            "leaf": true
+          },
+          {
+            "name": "混凝土工",
+            "id": "2136",
+            "leaf": true
+          },
+          {
+            "name": "技工",
+            "id": "3736",
+            "leaf": true
+          },
+          {
+            "name": "施工开料工",
+            "id": "2143",
+            "leaf": true
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "医药/医疗",
+    "id": "9F12",
+    "children": [
+      {
+        "name": "生物制药",
+        "id": "4100",
+        "children": [
+          {
+            "name": "医药代表",
+            "id": "A0MV",
+            "leaf": true
+          },
+          {
+            "name": "药品生产/质量管理",
+            "id": "4108",
+            "leaf": true
+          },
+          {
+            "name": "医药技术研发人员",
+            "id": "4104",
+            "leaf": true
+          },
+          {
+            "name": "化学分析测试员",
+            "id": "4116",
+            "leaf": true
+          },
+          {
+            "name": "医药技术研发管理人员",
+            "id": "4103",
+            "leaf": true
+          },
+          {
+            "name": "药品市场推广",
+            "id": "A0MW",
+            "leaf": true
+          },
+          {
+            "name": "药物合成/有机合成研究员",
+            "id": "4134",
+            "leaf": true
+          },
+          {
+            "name": "药品注册",
+            "id": "4107",
+            "leaf": true
+          },
+          {
+            "name": "药物分析研究员",
+            "id": "4131",
+            "leaf": true
+          },
+          {
+            "name": "制剂研究员",
+            "id": "4130",
+            "leaf": true
+          },
+          {
+            "name": "细胞培养技术员",
+            "id": "4135",
+            "leaf": true
+          },
+          {
+            "name": "动物实验技术员",
+            "id": "4138",
+            "leaf": true
+          },
+          {
+            "name": "药理研究员",
+            "id": "4132",
+            "leaf": true
+          },
+          {
+            "name": "试剂研发",
+            "id": "A0K7",
+            "leaf": true
+          },
+          {
+            "name": "病理研究员",
+            "id": "4133",
+            "leaf": true
+          },
+          {
+            "name": "药物警戒",
+            "id": "A0K6",
+            "leaf": true
+          }
+        ]
+      },
+      {
+        "name": "医疗器械",
+        "id": "5A00",
+        "children": [
+          {
+            "name": "医疗器械生产/质量管理",
+            "id": "4118",
+            "leaf": true
+          },
+          {
+            "name": "医疗器械维修人员",
+            "id": "4119",
+            "leaf": true
+          },
+          {
+            "name": "医疗器械研发",
+            "id": "4124",
+            "leaf": true
+          },
+          {
+            "name": "医疗器械注册",
+            "id": "4117",
+            "leaf": true
+          },
+          {
+            "name": "医疗器械销售",
+            "id": "A0MU",
+            "leaf": true
+          }
+        ]
+      },
+      {
+        "name": "医疗销售",
+        "id": "8900",
+        "children": [
+          {
+            "name": "医疗器械销售",
+            "id": "A0MU",
+            "leaf": true
+          },
+          {
+            "name": "医疗器械市场推广",
+            "id": "4113",
+            "leaf": true
+          },
+          {
+            "name": "医药代表",
+            "id": "A0MV",
+            "leaf": true
+          },
+          {
+            "name": "医药招商",
+            "id": "4120",
+            "leaf": true
+          },
+          {
+            "name": "医药学术推广",
+            "id": "4126",
+            "leaf": true
+          },
+          {
+            "name": "药品市场推广",
+            "id": "A0MW",
+            "leaf": true
+          },
+          {
+            "name": "医美咨询",
+            "id": "1329",
+            "leaf": true
+          }
+        ]
+      },
+      {
+        "name": "医生/医技",
+        "id": "1300",
+        "children": [
+          {
+            "name": "医学检验",
+            "id": "1310",
+            "leaf": true
+          },
+          {
+            "name": "医院管理人员",
+            "id": "1302",
+            "leaf": true
+          },
+          {
+            "name": "药库主任/药剂师",
+            "id": "1304",
+            "leaf": true
+          },
+          {
+            "name": "内科医生",
+            "id": "1301",
+            "leaf": true
+          },
+          {
+            "name": "超声影像/放射科医师",
+            "id": "1327",
+            "leaf": true
+          },
+          {
+            "name": "综合门诊/全科医生",
+            "id": "1328",
+            "leaf": true
+          },
+          {
+            "name": "专科医生",
+            "id": "1318",
+            "leaf": true
+          },
+          {
+            "name": "牙科医生",
+            "id": "1319",
+            "leaf": true
+          },
+          {
+            "name": "理疗师",
+            "id": "1321",
+            "leaf": true
+          },
+          {
+            "name": "验光师",
+            "id": "1326",
+            "leaf": true
+          },
+          {
+            "name": "健康管理师",
+            "id": "1330",
+            "leaf": true
+          },
+          {
+            "name": "外科医生",
+            "id": "1317",
+            "leaf": true
+          },
+          {
+            "name": "中医科医生",
+            "id": "1322",
+            "leaf": true
+          },
+          {
+            "name": "营养师",
+            "id": "1314",
+            "leaf": true
+          },
+          {
+            "name": "针灸/推拿",
+            "id": "1313",
+            "leaf": true
+          },
+          {
+            "name": "导医",
+            "id": "1336",
+            "leaf": true
+          },
+          {
+            "name": "眼科医生",
+            "id": "1339",
+            "leaf": true
+          },
+          {
+            "name": "心理咨询师",
+            "id": "1335",
+            "leaf": true
+          },
+          {
+            "name": "美容整形师",
+            "id": "1320",
+            "leaf": true
+          },
+          {
+            "name": "儿科医生",
+            "id": "1325",
+            "leaf": true
+          },
+          {
+            "name": "公共卫生/疾病控制",
+            "id": "1323",
+            "leaf": true
+          },
+          {
+            "name": "核酸检测员",
+            "id": "1331",
+            "leaf": true
+          },
+          {
+            "name": "妇产科医生",
+            "id": "1337",
+            "leaf": true
+          },
+          {
+            "name": "麻醉医生",
+            "id": "1308",
+            "leaf": true
+          },
+          {
+            "name": "心理医生",
+            "id": "1309",
+            "leaf": true
+          },
+          {
+            "name": "消毒员",
+            "id": "1333",
+            "leaf": true
+          },
+          {
+            "name": "防疫员",
+            "id": "1332",
+            "leaf": true
+          }
+        ]
+      },
+      {
+        "name": "护理/护士",
+        "id": "5B00",
+        "children": [
+          {
+            "name": "护士/护理人员",
+            "id": "1305",
+            "leaf": true
+          },
+          {
+            "name": "护理主任/护士长",
+            "id": "1324",
+            "leaf": true
+          }
+        ]
+      },
+      {
+        "name": "临床试验",
+        "id": "4F00",
+        "children": [
+          {
+            "name": "临床研究员",
+            "id": "4105",
+            "leaf": true
+          },
+          {
+            "name": "临床协调员",
+            "id": "4106",
+            "leaf": true
+          },
+          {
+            "name": "临床数据分析员",
+            "id": "4123",
+            "leaf": true
+          },
+          {
+            "name": "临床监查员",
+            "id": "4127",
+            "leaf": true
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "生活服务/零售",
+    "id": "9F13",
+    "children": [
+      {
+        "name": "零售",
+        "id": "5100",
+        "children": [
+          {
+            "name": "店员",
+            "id": "A0M0",
+            "leaf": true
+          },
+          {
+            "name": "门店经理/店长",
+            "id": "5101",
+            "leaf": true
+          },
+          {
+            "name": "促销员/导购员",
+            "id": "5105",
+            "leaf": true
+          },
+          {
+            "name": "促销主管/督导/巡店",
+            "id": "5117",
+            "leaf": true
+          },
+          {
+            "name": "收银员",
+            "id": "A0MF",
+            "leaf": true
+          },
+          {
+            "name": "珠宝销售顾问",
+            "id": "5116",
+            "leaf": true
+          },
+          {
+            "name": "奢侈品业务",
+            "id": "5115",
+            "leaf": true
+          },
+          {
+            "name": "商品管理",
+            "id": "5130",
+            "leaf": true
+          },
+          {
+            "name": "品类管理",
+            "id": "5112",
+            "leaf": true
+          },
+          {
+            "name": "理货员",
+            "id": "5121",
+            "leaf": true
+          },
+          {
+            "name": "陈列员",
+            "id": "5104",
+            "leaf": true
+          },
+          {
+            "name": "食品加工处理",
+            "id": "A0MH",
+            "leaf": true
+          },
+          {
+            "name": "导购管理",
+            "id": "5123",
+            "leaf": true
+          },
+          {
+            "name": "营运经理",
+            "id": "3505",
+            "leaf": true
+          },
+          {
+            "name": "营运主管",
+            "id": "3506",
+            "leaf": true
+          },
+          {
+            "name": "安防主管",
+            "id": "5113",
+            "leaf": true
+          }
+        ]
+      },
+      {
+        "name": "交通运输服务",
+        "id": "1800",
+        "children": [
+          {
+            "name": "货运司机",
+            "id": "1831",
+            "leaf": true
+          },
+          {
+            "name": "商务司机",
+            "id": "1810",
+            "leaf": true
+          },
+          {
+            "name": "乘务员",
+            "id": "1801",
+            "leaf": true
+          },
+          {
+            "name": "出租车司机",
+            "id": "1832",
+            "leaf": true
+          },
+          {
+            "name": "地勤人员",
+            "id": "1824",
+            "leaf": true
+          },
+          {
+            "name": "客运司机",
+            "id": "1830",
+            "leaf": true
+          },
+          {
+            "name": "代驾",
+            "id": "1840",
+            "leaf": true
+          },
+          {
+            "name": "特种车司机",
+            "id": "1835",
+            "leaf": true
+          },
+          {
+            "name": "班车司机",
+            "id": "1833",
+            "leaf": true
+          },
+          {
+            "name": "船员",
+            "id": "1828",
+            "leaf": true
+          },
+          {
+            "name": "站务人员",
+            "id": "1842",
+            "leaf": true
+          },
+          {
+            "name": "船长/副船长",
+            "id": "1827",
+            "leaf": true
+          },
+          {
+            "name": "列车/地铁司机",
+            "id": "1826",
+            "leaf": true
+          },
+          {
+            "name": "驾校教练",
+            "id": "1839",
+            "leaf": true
+          },
+          {
+            "name": "空乘人员",
+            "id": "1823",
+            "leaf": true
+          },
+          {
+            "name": "飞机机长/副机长",
+            "id": "1822",
+            "leaf": true
+          },
+          {
+            "name": "列车/地铁车长",
+            "id": "1825",
+            "leaf": true
+          },
+          {
+            "name": "网约车司机",
+            "id": "1843",
+            "leaf": true
+          }
+        ]
+      },
+      {
+        "name": "美容美发",
+        "id": "5000",
+        "children": [
+          {
+            "name": "美容师",
+            "id": "A0MA",
+            "leaf": true
+          },
+          {
+            "name": "美容顾问",
+            "id": "5001",
+            "leaf": true
+          },
+          {
+            "name": "美容培训师/导师",
+            "id": "5016",
+            "leaf": true
+          },
+          {
+            "name": "专柜彩妆顾问(BA)",
+            "id": "5014",
+            "leaf": true
+          },
+          {
+            "name": "美容店长",
+            "id": "5018",
+            "leaf": true
+          },
+          {
+            "name": "化妆师",
+            "id": "A0MD",
+            "leaf": true
+          },
+          {
+            "name": "美甲师",
+            "id": "5006",
+            "leaf": true
+          },
+          {
+            "name": "美体师",
+            "id": "5017",
+            "leaf": true
+          },
+          {
+            "name": "发型师",
+            "id": "A0MB",
+            "leaf": true
+          },
+          {
+            "name": "造型师",
+            "id": "5021",
+            "leaf": true
+          },
+          {
+            "name": "瘦身顾问",
+            "id": "5003",
+            "leaf": true
+          },
+          {
+            "name": "美发店长",
+            "id": "5022",
+            "leaf": true
+          }
+        ]
+      },
+      {
+        "name": "服务员",
+        "id": "6B00",
+        "children": [
+          {
+            "name": "服务员",
+            "id": "A0M1",
+            "leaf": true
+          },
+          {
+            "name": "客房服务员",
+            "id": "A0M3",
+            "leaf": true
+          },
+          {
+            "name": "前台迎宾",
+            "id": "A0M4",
+            "leaf": true
+          }
+        ]
+      },
+      {
+        "name": "家政服务",
+        "id": "5200",
+        "children": [
+          {
+            "name": "保姆",
+            "id": "5206",
+            "leaf": true
+          },
+          {
+            "name": "育婴师/保育员",
+            "id": "5210",
+            "leaf": true
+          },
+          {
+            "name": "月嫂",
+            "id": "5209",
+            "leaf": true
+          },
+          {
+            "name": "护工",
+            "id": "5211",
+            "leaf": true
+          },
+          {
+            "name": "钟点工",
+            "id": "5212",
+            "leaf": true
+          },
+          {
+            "name": "家电维修",
+            "id": "5216",
+            "leaf": true
+          },
+          {
+            "name": "手机维修",
+            "id": "7917",
+            "leaf": true
+          }
+        ]
+      },
+      {
+        "name": "运动健身",
+        "id": "6400",
+        "children": [
+          {
+            "name": "健身教练",
+            "id": "A0M5",
+            "leaf": true
+          },
+          {
+            "name": "体育运动教练",
+            "id": "A0N5",
+            "leaf": true
+          },
+          {
+            "name": "舞蹈老师",
+            "id": "6403",
+            "leaf": true
+          },
+          {
+            "name": "游泳教练",
+            "id": "6404",
+            "leaf": true
+          },
+          {
+            "name": "救生员",
+            "id": "6405",
+            "leaf": true
+          },
+          {
+            "name": "瑜伽老师",
+            "id": "6402",
+            "leaf": true
+          }
+        ]
+      },
+      {
+        "name": "保健理疗",
+        "id": "5E00",
+        "children": [
+          {
+            "name": "按摩师",
+            "id": "A0ME",
+            "leaf": true
+          },
+          {
+            "name": "足疗",
+            "id": "5024",
+            "leaf": true
+          }
+        ]
+      },
+      {
+        "name": "婚庆",
+        "id": "6A00",
+        "children": [
+          {
+            "name": "婚礼/庆典策划服务",
+            "id": "6502",
+            "leaf": true
+          },
+          {
+            "name": "司仪",
+            "id": "6501",
+            "leaf": true
+          }
+        ]
+      },
+      {
+        "name": "宠物服务",
+        "id": "5F00",
+        "children": [
+          {
+            "name": "宠物美容",
+            "id": "A0MC",
+            "leaf": true
+          },
+          {
+            "name": "宠物医生",
+            "id": "A0MM",
+            "leaf": true
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "物流/供应链",
+    "id": "9F14",
+    "children": [
+      {
+        "name": "物流/运输",
+        "id": "0800",
+        "children": [
+          {
+            "name": "货运司机",
+            "id": "1831",
+            "leaf": true
+          },
+          {
+            "name": "物流专员/助理",
+            "id": "0814",
+            "leaf": true
+          },
+          {
+            "name": "物流经理",
+            "id": "0801",
+            "leaf": true
+          },
+          {
+            "name": "物流主管",
+            "id": "0802",
+            "leaf": true
+          },
+          {
+            "name": "单证员",
+            "id": "0812",
+            "leaf": true
+          },
+          {
+            "name": "报关与报检",
+            "id": "0811",
+            "leaf": true
+          },
+          {
+            "name": "运输经理/主管",
+            "id": "0810",
+            "leaf": true
+          },
+          {
+            "name": "物流总监",
+            "id": "0827",
+            "leaf": true
+          },
+          {
+            "name": "海关事务管理",
+            "id": "0832",
+            "leaf": true
+          },
+          {
+            "name": "货运代理/物流销售",
+            "id": "0829",
+            "leaf": true
+          },
+          {
+            "name": "无人机飞手",
+            "id": "A0N8",
+            "leaf": true
+          },
+          {
+            "name": "无人机工程师",
+            "id": "A0NR",
+            "leaf": true
+          }
+        ]
+      },
+      {
+        "name": "仓储",
+        "id": "4B00",
+        "children": [
+          {
+            "name": "仓库管理员",
+            "id": "A0MJ",
+            "leaf": true
+          },
+          {
+            "name": "仓库经理/主管",
+            "id": "0808",
+            "leaf": true
+          },
+          {
+            "name": "仓储理货员",
+            "id": "0823",
+            "leaf": true
+          },
+          {
+            "name": "仓库文员",
+            "id": "0840",
+            "leaf": true
+          }
+        ]
+      },
+      {
+        "name": "配送管理",
+        "id": "3F00",
+        "children": [
+          {
+            "name": "快递员",
+            "id": "0813",
+            "leaf": true
+          },
+          {
+            "name": "船务/空运陆运操作",
+            "id": "0815",
+            "leaf": true
+          },
+          {
+            "name": "订单处理员",
+            "id": "0834",
+            "leaf": true
+          },
+          {
+            "name": "调度员",
+            "id": "0831",
+            "leaf": true
+          },
+          {
+            "name": "安检员",
+            "id": "0835",
+            "leaf": true
+          },
+          {
+            "name": "集装箱业务",
+            "id": "0830",
+            "leaf": true
+          }
+        ]
+      },
+      {
+        "name": "供应链",
+        "id": "4C00",
+        "children": [
+          {
+            "name": "供应链专员",
+            "id": "0844",
+            "leaf": true
+          },
+          {
+            "name": "供应链主管",
+            "id": "0843",
+            "leaf": true
+          },
+          {
+            "name": "供应链经理",
+            "id": "0825",
+            "leaf": true
+          },
+          {
+            "name": "供应链总监",
+            "id": "0828",
+            "leaf": true
+          },
+          {
+            "name": "生产计划/物料管理(PMC)",
+            "id": "3508",
+            "leaf": true
+          }
+        ]
+      },
+      {
+        "name": "装卸搬运",
+        "id": "4A00",
+        "children": [
+          {
+            "name": "分拣员",
+            "id": "0838",
+            "leaf": true
+          },
+          {
+            "name": "搬运工",
+            "id": "0836",
+            "leaf": true
+          },
+          {
+            "name": "装卸工",
+            "id": "0839",
+            "leaf": true
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "采购/贸易",
+    "id": "9F15",
+    "children": [
+      {
+        "name": "采购",
+        "id": "3900",
+        "children": [
+          {
+            "name": "采购员",
+            "id": "3904",
+            "leaf": true
+          },
+          {
+            "name": "采购助理",
+            "id": "3905",
+            "leaf": true
+          },
+          {
+            "name": "采购主管",
+            "id": "3903",
+            "leaf": true
+          },
+          {
+            "name": "采购经理",
+            "id": "3902",
+            "leaf": true
+          },
+          {
+            "name": "采购工程师",
+            "id": "3909",
+            "leaf": true
+          },
+          {
+            "name": "采购总监",
+            "id": "3901",
+            "leaf": true
+          },
+          {
+            "name": "买手",
+            "id": "3908",
+            "leaf": true
+          }
+        ]
+      },
+      {
+        "name": "贸易",
+        "id": "4000",
+        "children": [
+          {
+            "name": "贸易/外贸专员/助理",
+            "id": "4002",
+            "leaf": true
+          },
+          {
+            "name": "业务跟单",
+            "id": "4006",
+            "leaf": true
+          },
+          {
+            "name": "贸易/外贸经理/主管",
+            "id": "4001",
+            "leaf": true
+          },
+          {
+            "name": "外贸销售",
+            "id": "4009",
+            "leaf": true
+          },
+          {
+            "name": "助理业务跟单",
+            "id": "4007",
+            "leaf": true
+          },
+          {
+            "name": "国内贸易人员",
+            "id": "4003",
+            "leaf": true
+          },
+          {
+            "name": "高级业务跟单",
+            "id": "4005",
+            "leaf": true
+          },
+          {
+            "name": "服装/纺织/皮革跟单",
+            "id": "3804",
+            "leaf": true
+          },
+          {
+            "name": "业务跟单经理",
+            "id": "4004",
+            "leaf": true
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "金融",
+    "id": "9F16",
+    "children": [
+      {
+        "name": "金融",
+        "id": "3300",
+        "children": [
+          {
+            "name": "金融产品销售",
+            "id": "3315",
+            "leaf": true
+          },
+          {
+            "name": "金融/经济研究员",
+            "id": "3304",
+            "leaf": true
+          },
+          {
+            "name": "金融产品经理",
+            "id": "3312",
+            "leaf": true
+          },
+          {
+            "name": "金融衍生品",
+            "id": "3336",
+            "leaf": true
+          },
+          {
+            "name": "催收",
+            "id": "3340",
+            "leaf": true
+          },
+          {
+            "name": "风险控制",
+            "id": "2209",
+            "leaf": true
+          },
+          {
+            "name": "理财顾问",
+            "id": "3326",
+            "leaf": true
+          },
+          {
+            "name": "机构业务销售",
+            "id": "3317",
+            "leaf": true
+          },
+          {
+            "name": "互联网金融",
+            "id": "3335",
+            "leaf": true
+          },
+          {
+            "name": "公司金融顾问",
+            "id": "3321",
+            "leaf": true
+          },
+          {
+            "name": "拍卖/担保/典当业务",
+            "id": "3310",
+            "leaf": true
+          },
+          {
+            "name": "信托",
+            "id": "3334",
+            "leaf": true
+          }
+        ]
+      },
+      {
+        "name": "保险",
+        "id": "3400",
+        "children": [
+          {
+            "name": "保险业务经理/主管",
+            "id": "3403",
+            "leaf": true
+          },
+          {
+            "name": "保险业务推动/督导",
+            "id": "3415",
+            "leaf": true
+          },
+          {
+            "name": "保险产品开发/项目策划",
+            "id": "3402",
+            "leaf": true
+          },
+          {
+            "name": "保险经纪人/保险代理",
+            "id": "3404",
+            "leaf": true
+          },
+          {
+            "name": "保险客户服务/续期管理",
+            "id": "3409",
+            "leaf": true
+          },
+          {
+            "name": "保险内勤",
+            "id": "3411",
+            "leaf": true
+          },
+          {
+            "name": "保险理赔",
+            "id": "3408",
+            "leaf": true
+          },
+          {
+            "name": "保险电销",
+            "id": "3414",
+            "leaf": true
+          },
+          {
+            "name": "保险核保",
+            "id": "3407",
+            "leaf": true
+          },
+          {
+            "name": "保险培训师",
+            "id": "3410",
+            "leaf": true
+          },
+          {
+            "name": "保险精算师",
+            "id": "3401",
+            "leaf": true
+          },
+          {
+            "name": "理财顾问",
+            "id": "3326",
+            "leaf": true
+          },
+          {
+            "name": "储备经理人",
+            "id": "3406",
+            "leaf": true
+          },
+          {
+            "name": "契约管理",
+            "id": "3413",
+            "leaf": true
+          }
+        ]
+      },
+      {
+        "name": "银行",
+        "id": "2200",
+        "children": [
+          {
+            "name": "行长/副行长",
+            "id": "2207",
+            "leaf": true
+          },
+          {
+            "name": "银行客户总监",
+            "id": "2231",
+            "leaf": true
+          },
+          {
+            "name": "高级客户经理/客户经理",
+            "id": "2213",
+            "leaf": true
+          },
+          {
+            "name": "公司业务客户经理",
+            "id": "2226",
+            "leaf": true
+          },
+          {
+            "name": "公司业务部门经理/主管",
+            "id": "2225",
+            "leaf": true
+          },
+          {
+            "name": "公司金融顾问",
+            "id": "3321",
+            "leaf": true
+          },
+          {
+            "name": "综合业务经理/主管",
+            "id": "2227",
+            "leaf": true
+          },
+          {
+            "name": "个人业务客户经理",
+            "id": "2224",
+            "leaf": true
+          },
+          {
+            "name": "个人业务部门经理/主管",
+            "id": "2223",
+            "leaf": true
+          },
+          {
+            "name": "风险控制",
+            "id": "2209",
+            "leaf": true
+          },
+          {
+            "name": "信贷管理",
+            "id": "2215",
+            "leaf": true
+          },
+          {
+            "name": "信用卡销售",
+            "id": "2222",
+            "leaf": true
+          },
+          {
+            "name": "理财经理",
+            "id": "2233",
+            "leaf": true
+          },
+          {
+            "name": "银行柜员",
+            "id": "2216",
+            "leaf": true
+          },
+          {
+            "name": "综合业务专员",
+            "id": "2228",
+            "leaf": true
+          },
+          {
+            "name": "营业部大堂经理",
+            "id": "2230",
+            "leaf": true
+          },
+          {
+            "name": "资产评估/分析",
+            "id": "2208",
+            "leaf": true
+          },
+          {
+            "name": "资产管理",
+            "id": "8308",
+            "leaf": true
+          },
+          {
+            "name": "信审核查",
+            "id": "2229",
+            "leaf": true
+          },
+          {
+            "name": "小微信贷专员",
+            "id": "2234",
+            "leaf": true
+          },
+          {
+            "name": "客户主管",
+            "id": "2235",
+            "leaf": true
+          },
+          {
+            "name": "客户专员",
+            "id": "2236",
+            "leaf": true
+          },
+          {
+            "name": "清算人员",
+            "id": "2211",
+            "leaf": true
+          },
+          {
+            "name": "进出口/信用证结算",
+            "id": "2210",
+            "leaf": true
+          },
+          {
+            "name": "外汇交易",
+            "id": "2212",
+            "leaf": true
+          }
+        ]
+      },
+      {
+        "name": "金融销售",
+        "id": "2B00",
+        "children": [
+          {
+            "name": "金融产品销售",
+            "id": "3315",
+            "leaf": true
+          },
+          {
+            "name": "理财顾问",
+            "id": "3326",
+            "leaf": true
+          },
+          {
+            "name": "机构业务销售",
+            "id": "3317",
+            "leaf": true
+          },
+          {
+            "name": "汽车金融销售",
+            "id": "A0MO",
+            "leaf": true
+          }
+        ]
+      },
+      {
+        "name": "证券",
+        "id": "3C00",
+        "children": [
+          {
+            "name": "营业部总经理/副总经理",
+            "id": "3318",
+            "leaf": true
+          },
+          {
+            "name": "证券/期货/外汇经纪人",
+            "id": "3301",
+            "leaf": true
+          },
+          {
+            "name": "股票/期货操盘手",
+            "id": "3303",
+            "leaf": true
+          },
+          {
+            "name": "证券投资顾问",
+            "id": "3327",
+            "leaf": true
+          },
+          {
+            "name": "证券分析师",
+            "id": "3302",
+            "leaf": true
+          },
+          {
+            "name": "证券交易员",
+            "id": "3320",
+            "leaf": true
+          },
+          {
+            "name": "基金经理",
+            "id": "3341",
+            "leaf": true
+          },
+          {
+            "name": "量化研究",
+            "id": "3316",
+            "leaf": true
+          }
+        ]
+      },
+      {
+        "name": "投融资",
+        "id": "8300",
+        "children": [
+          {
+            "name": "融资总监",
+            "id": "8310",
+            "leaf": true
+          },
+          {
+            "name": "融资经理/融资主管",
+            "id": "8312",
+            "leaf": true
+          },
+          {
+            "name": "融资顾问",
+            "id": "8311",
+            "leaf": true
+          },
+          {
+            "name": "融资专员",
+            "id": "8313",
+            "leaf": true
+          },
+          {
+            "name": "投资总监",
+            "id": "8301",
+            "leaf": true
+          },
+          {
+            "name": "投资经理",
+            "id": "8302",
+            "leaf": true
+          },
+          {
+            "name": "投资顾问",
+            "id": "8303",
+            "leaf": true
+          },
+          {
+            "name": "投资银行业务",
+            "id": "8304",
+            "leaf": true
+          },
+          {
+            "name": "投资者关系",
+            "id": "8305",
+            "leaf": true
+          },
+          {
+            "name": "投后管理",
+            "id": "8306",
+            "leaf": true
+          },
+          {
+            "name": "投资并购",
+            "id": "8307",
+            "leaf": true
+          }
+        ]
+      },
+      {
+        "name": "期货",
+        "id": "3D00",
+        "children": [
+          {
+            "name": "证券/期货/外汇经纪人",
+            "id": "3301",
+            "leaf": true
+          },
+          {
+            "name": "股票/期货操盘手",
+            "id": "3303",
+            "leaf": true
+          },
+          {
+            "name": "期货分析师",
+            "id": "3319",
+            "leaf": true
+          },
+          {
+            "name": "量化研究",
+            "id": "3316",
+            "leaf": true
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "汽车",
+    "id": "9F17",
+    "children": [
+      {
+        "name": "汽车服务",
+        "id": "5900",
+        "children": [
+          {
+            "name": "汽车售后服务顾问",
+            "id": "5921",
+            "leaf": true
+          },
+          {
+            "name": "车险定损/理赔",
+            "id": "5915",
+            "leaf": true
+          },
+          {
+            "name": "4S店经理/维修站经理",
+            "id": "5901",
+            "leaf": true
+          },
+          {
+            "name": "二手车评估师",
+            "id": "5904",
+            "leaf": true
+          },
+          {
+            "name": "汽车维修",
+            "id": "A0MN",
+            "leaf": true
+          },
+          {
+            "name": "汽车改装",
+            "id": "5906",
+            "leaf": true
+          },
+          {
+            "name": "汽车喷漆",
+            "id": "5914",
+            "leaf": true
+          },
+          {
+            "name": "汽车检验/检测",
+            "id": "5905",
+            "leaf": true
+          },
+          {
+            "name": "加油站工作员",
+            "id": "5910",
+            "leaf": true
+          },
+          {
+            "name": "汽车救援员",
+            "id": "5920",
+            "leaf": true
+          },
+          {
+            "name": "洗车工",
+            "id": "5908",
+            "leaf": true
+          }
+        ]
+      },
+      {
+        "name": "汽车研发设计",
+        "id": "7100",
+        "children": [
+          {
+            "name": "汽车/摩托车工程师",
+            "id": "0571",
+            "leaf": true
+          },
+          {
+            "name": "汽车设计工程师",
+            "id": "7102",
+            "leaf": true
+          },
+          {
+            "name": "汽车电子工程师",
+            "id": "7106",
+            "leaf": true
+          },
+          {
+            "name": "新能源电池工程师",
+            "id": "7114",
+            "leaf": true
+          },
+          {
+            "name": "电气/电器工程师",
+            "id": "7107",
+            "leaf": true
+          },
+          {
+            "name": "汽车项目管理",
+            "id": "7101",
+            "leaf": true
+          },
+          {
+            "name": "内外饰工程师",
+            "id": "7105",
+            "leaf": true
+          },
+          {
+            "name": "汽车结构工程师",
+            "id": "7104",
+            "leaf": true
+          },
+          {
+            "name": "底盘工程师",
+            "id": "7111",
+            "leaf": true
+          },
+          {
+            "name": "汽车试验工程师",
+            "id": "7113",
+            "leaf": true
+          },
+          {
+            "name": "新能源电机工程师",
+            "id": "7116",
+            "leaf": true
+          },
+          {
+            "name": "新能源电控工程师",
+            "id": "7115",
+            "leaf": true
+          },
+          {
+            "name": "车身/造型设计",
+            "id": "7103",
+            "leaf": true
+          },
+          {
+            "name": "汽车安全性能工程师",
+            "id": "7112",
+            "leaf": true
+          },
+          {
+            "name": "研发总监/部长/专家",
+            "id": "7121",
+            "leaf": true
+          },
+          {
+            "name": "动力总成工程师",
+            "id": "7109",
+            "leaf": true
+          },
+          {
+            "name": "汽车标定工程师",
+            "id": "7117",
+            "leaf": true
+          },
+          {
+            "name": "智能驾驶工程师",
+            "id": "7120",
+            "leaf": true
+          },
+          {
+            "name": "发动机工程师",
+            "id": "7110",
+            "leaf": true
+          },
+          {
+            "name": "附件系统工程师",
+            "id": "7108",
+            "leaf": true
+          },
+          {
+            "name": "车联网工程师",
+            "id": "7119",
+            "leaf": true
+          },
+          {
+            "name": "智能驾驶测试工程师",
+            "id": "7124",
+            "leaf": true
+          },
+          {
+            "name": "发动机匹配工程师",
+            "id": "7118",
+            "leaf": true
+          },
+          {
+            "name": "仿真应用工程师",
+            "id": "7410",
+            "leaf": true
+          }
+        ]
+      },
+      {
+        "name": "汽车制造",
+        "id": "5400",
+        "children": [
+          {
+            "name": "汽车质量工程师",
+            "id": "5404",
+            "leaf": true
+          },
+          {
+            "name": "客户质量工程师",
+            "id": "5424",
+            "leaf": true
+          },
+          {
+            "name": "汽车装配工艺工程师",
+            "id": "5406",
+            "leaf": true
+          },
+          {
+            "name": "焊接工艺工程师",
+            "id": "5426",
+            "leaf": true
+          },
+          {
+            "name": "过程质量工程师",
+            "id": "5423",
+            "leaf": true
+          },
+          {
+            "name": "涂装工艺工程师",
+            "id": "5428",
+            "leaf": true
+          },
+          {
+            "name": "前期质量工程师",
+            "id": "5422",
+            "leaf": true
+          },
+          {
+            "name": "冲压工艺工程师",
+            "id": "5427",
+            "leaf": true
+          },
+          {
+            "name": "总装工程师",
+            "id": "5425",
+            "leaf": true
+          }
+        ]
+      },
+      {
+        "name": "新能源汽车",
+        "id": "3E00",
+        "children": [
+          {
+            "name": "新能源电池工程师",
+            "id": "7114",
+            "leaf": true
+          },
+          {
+            "name": "新能源电机工程师",
+            "id": "7116",
+            "leaf": true
+          },
+          {
+            "name": "新能源电控工程师",
+            "id": "7115",
+            "leaf": true
+          }
+        ]
+      },
+      {
+        "name": "汽车销售",
+        "id": "1E00",
+        "children": [
+          {
+            "name": "汽车销售/经纪人",
+            "id": "5903",
+            "leaf": true
+          },
+          {
+            "name": "二手车经纪人",
+            "id": "5919",
+            "leaf": true
+          },
+          {
+            "name": "汽车金融销售",
+            "id": "A0MO",
+            "leaf": true
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "科研/教育/培训",
+    "id": "9F18",
+    "children": [
+      {
+        "name": "教师",
+        "id": "1200",
+        "children": [
+          {
+            "name": "英语老师",
+            "id": "1219",
+            "leaf": true
+          },
+          {
+            "name": "讲师/助教",
+            "id": "1204",
+            "leaf": true
+          },
+          {
+            "name": "幼教",
+            "id": "A0N4",
+            "leaf": true
+          },
+          {
+            "name": "高中教师",
+            "id": "1232",
+            "leaf": true
+          },
+          {
+            "name": "职业技术教师",
+            "id": "1211",
+            "leaf": true
+          },
+          {
+            "name": "数学老师",
+            "id": "1220",
+            "leaf": true
+          },
+          {
+            "name": "小学教师",
+            "id": "1209",
+            "leaf": true
+          },
+          {
+            "name": "语文老师",
+            "id": "1221",
+            "leaf": true
+          },
+          {
+            "name": "日语老师",
+            "id": "1224",
+            "leaf": true
+          },
+          {
+            "name": "物理老师",
+            "id": "1222",
+            "leaf": true
+          },
+          {
+            "name": "初中教师",
+            "id": "1231",
+            "leaf": true
+          },
+          {
+            "name": "美术老师",
+            "id": "1228",
+            "leaf": true
+          },
+          {
+            "name": "化学老师",
+            "id": "1223",
+            "leaf": true
+          },
+          {
+            "name": "音乐老师",
+            "id": "1226",
+            "leaf": true
+          },
+          {
+            "name": "体育老师",
+            "id": "1216",
+            "leaf": true
+          },
+          {
+            "name": "其他外语老师",
+            "id": "1215",
+            "leaf": true
+          },
+          {
+            "name": "家教",
+            "id": "1205",
+            "leaf": true
+          },
+          {
+            "name": "大学教授",
+            "id": "1208",
+            "leaf": true
+          },
+          {
+            "name": "早教老师",
+            "id": "1225",
+            "leaf": true
+          },
+          {
+            "name": "留学考试老师(SAT/TOEFL/IELTS等)",
+            "id": "1234",
+            "leaf": true
+          },
+          {
+            "name": "编程老师",
+            "id": "1235",
+            "leaf": true
+          },
+          {
+            "name": "钢琴老师",
+            "id": "1233",
+            "leaf": true
+          },
+          {
+            "name": "在线辅导老师",
+            "id": "1218",
+            "leaf": true
+          }
+        ]
+      },
+      {
+        "name": "科研",
+        "id": "1000",
+        "children": [
+          {
+            "name": "科研人员",
+            "id": "1001",
+            "leaf": true
+          },
+          {
+            "name": "科研管理人员",
+            "id": "1002",
+            "leaf": true
+          }
+        ]
+      },
+      {
+        "name": "教育咨询",
+        "id": "8100",
+        "children": [
+          {
+            "name": "课程顾问",
+            "id": "8101",
+            "leaf": true
+          },
+          {
+            "name": "招生老师",
+            "id": "8102",
+            "leaf": true
+          },
+          {
+            "name": "留学顾问",
+            "id": "8104",
+            "leaf": true
+          },
+          {
+            "name": "学习规划师",
+            "id": "8103",
+            "leaf": true
+          }
+        ]
+      },
+      {
+        "name": "教育管理",
+        "id": "8200",
+        "children": [
+          {
+            "name": "院校教务管理人员",
+            "id": "8203",
+            "leaf": true
+          },
+          {
+            "name": "班主任/辅导员",
+            "id": "8202",
+            "leaf": true
+          },
+          {
+            "name": "校长",
+            "id": "8201",
+            "leaf": true
+          },
+          {
+            "name": "教研员",
+            "id": "8206",
+            "leaf": true
+          },
+          {
+            "name": "教研组长/主管",
+            "id": "8205",
+            "leaf": true
+          },
+          {
+            "name": "园长",
+            "id": "8204",
+            "leaf": true
+          },
+          {
+            "name": "教师培训/师训",
+            "id": "8207",
+            "leaf": true
+          }
+        ]
+      },
+      {
+        "name": "特长教育/培训",
+        "id": "5700",
+        "children": [
+          {
+            "name": "培训讲师",
+            "id": "5702",
+            "leaf": true
+          },
+          {
+            "name": "培训督导",
+            "id": "5701",
+            "leaf": true
+          },
+          {
+            "name": "培训助理",
+            "id": "5704",
+            "leaf": true
+          },
+          {
+            "name": "拓展培训",
+            "id": "5708",
+            "leaf": true
+          }
+        ]
+      },
+      {
+        "name": "培训管理",
+        "id": "5D00",
+        "children": [
+          {
+            "name": "培训产品开发",
+            "id": "5707",
+            "leaf": true
+          },
+          {
+            "name": "培训策划",
+            "id": "5703",
+            "leaf": true
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "餐饮",
+    "id": "9F19",
+    "children": [
+      {
+        "name": "前厅",
+        "id": "4800",
+        "children": [
+          {
+            "name": "送餐员",
+            "id": "4815",
+            "leaf": true
+          },
+          {
+            "name": "咖啡师",
+            "id": "4816",
+            "leaf": true
+          },
+          {
+            "name": "餐饮大堂经理",
+            "id": "4819",
+            "leaf": true
+          },
+          {
+            "name": "杂工",
+            "id": "4817",
+            "leaf": true
+          },
+          {
+            "name": "收银员",
+            "id": "A0MF",
+            "leaf": true
+          },
+          {
+            "name": "茶艺师",
+            "id": "4809",
+            "leaf": true
+          },
+          {
+            "name": "传菜员",
+            "id": "A0M6",
+            "leaf": true
+          },
+          {
+            "name": "调饮师",
+            "id": "A0M2",
+            "leaf": true
+          }
+        ]
+      },
+      {
+        "name": "后厨",
+        "id": "6C00",
+        "children": [
+          {
+            "name": "中餐厨师",
+            "id": "4807",
+            "leaf": true
+          },
+          {
+            "name": "行政主厨/厨师长",
+            "id": "4806",
+            "leaf": true
+          },
+          {
+            "name": "配菜/打荷",
+            "id": "4813",
+            "leaf": true
+          },
+          {
+            "name": "面点师",
+            "id": "A0M7",
+            "leaf": true
+          },
+          {
+            "name": "厨师助理/学徒",
+            "id": "4812",
+            "leaf": true
+          },
+          {
+            "name": "西餐厨师",
+            "id": "4820",
+            "leaf": true
+          },
+          {
+            "name": "洗碗工",
+            "id": "4814",
+            "leaf": true
+          },
+          {
+            "name": "日式厨师",
+            "id": "4821",
+            "leaf": true
+          }
+        ]
+      },
+      {
+        "name": "餐饮管理",
+        "id": "6D00",
+        "children": [
+          {
+            "name": "餐饮店长/经理",
+            "id": "4801",
+            "leaf": true
+          },
+          {
+            "name": "食品安全管理师",
+            "id": "4827",
+            "leaf": true
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "能源/环保/化工",
+    "id": "9F20",
+    "children": [
+      {
+        "name": "化工",
+        "id": "5500",
+        "children": [
+          {
+            "name": "化工工程师",
+            "id": "A0N0",
+            "leaf": true
+          },
+          {
+            "name": "化学实验室研究员",
+            "id": "5502",
+            "leaf": true
+          },
+          {
+            "name": "食品/饮料研发",
+            "id": "5507",
+            "leaf": true
+          },
+          {
+            "name": "化妆品研发",
+            "id": "5506",
+            "leaf": true
+          }
+        ]
+      },
+      {
+        "name": "环保",
+        "id": "5600",
+        "children": [
+          {
+            "name": "环保工程师",
+            "id": "A0N1",
+            "leaf": true
+          },
+          {
+            "name": "环保检测",
+            "id": "5605",
+            "leaf": true
+          },
+          {
+            "name": "环境影响评价工程师",
+            "id": "5604",
+            "leaf": true
+          },
+          {
+            "name": "碳排放管理员",
+            "id": "5610",
+            "leaf": true
+          }
+        ]
+      },
+      {
+        "name": "能源",
+        "id": "4E00",
+        "children": [
+          {
+            "name": "光伏系统工程师",
+            "id": "0583",
+            "leaf": true
+          },
+          {
+            "name": "石油天然气技术人员",
+            "id": "0578",
+            "leaf": true
+          },
+          {
+            "name": "矿产勘探/地质勘测工程师",
+            "id": "0579",
+            "leaf": true
+          },
+          {
+            "name": "电力工程师",
+            "id": "0569",
+            "leaf": true
+          },
+          {
+            "name": "风电运维工程师",
+            "id": "A0NN",
+            "leaf": true
+          },
+          {
+            "name": "水利/水电工程师",
+            "id": "0577",
+            "leaf": true
+          },
+          {
+            "name": "光伏运维工程师",
+            "id": "A0NK",
+            "leaf": true
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "文化/传媒",
+    "id": "9F21",
+    "children": [
+      {
+        "name": "演员/主播",
+        "id": "6500",
+        "children": [
+          {
+            "name": "主播/主持人",
+            "id": "4405",
+            "leaf": true
+          },
+          {
+            "name": "网络主播",
+            "id": "6512",
+            "leaf": true
+          },
+          {
+            "name": "带货主播",
+            "id": "6514",
+            "leaf": true
+          },
+          {
+            "name": "经纪人/星探",
+            "id": "4404",
+            "leaf": true
+          },
+          {
+            "name": "主播助理",
+            "id": "6513",
+            "leaf": true
+          },
+          {
+            "name": "驻唱/歌手",
+            "id": "6504",
+            "leaf": true
+          },
+          {
+            "name": "模特",
+            "id": "6506",
+            "leaf": true
+          },
+          {
+            "name": "舞蹈演员",
+            "id": "6505",
+            "leaf": true
+          },
+          {
+            "name": "演员/群众演员",
+            "id": "6507",
+            "leaf": true
+          },
+          {
+            "name": "网店模特",
+            "id": "6107",
+            "leaf": true
+          },
+          {
+            "name": "DJ",
+            "id": "6503",
+            "leaf": true
+          }
+        ]
+      },
+      {
+        "name": "影视/媒体",
+        "id": "4400",
+        "children": [
+          {
+            "name": "摄影师/摄像师",
+            "id": "4406",
+            "leaf": true
+          },
+          {
+            "name": "视频剪辑",
+            "id": "4416",
+            "leaf": true
+          },
+          {
+            "name": "后期制作",
+            "id": "4411",
+            "leaf": true
+          },
+          {
+            "name": "导演/编导",
+            "id": "4402",
+            "leaf": true
+          },
+          {
+            "name": "影视策划/制作人员",
+            "id": "4401",
+            "leaf": true
+          },
+          {
+            "name": "配音员",
+            "id": "4408",
+            "leaf": true
+          },
+          {
+            "name": "编剧",
+            "id": "4417",
+            "leaf": true
+          },
+          {
+            "name": "艺术/设计总监",
+            "id": "4403",
+            "leaf": true
+          },
+          {
+            "name": "灯光师",
+            "id": "4415",
+            "leaf": true
+          },
+          {
+            "name": "艺术指导/舞台美术设计",
+            "id": "4414",
+            "leaf": true
+          },
+          {
+            "name": "制片人",
+            "id": "4418",
+            "leaf": true
+          },
+          {
+            "name": "音效师",
+            "id": "4407",
+            "leaf": true
+          },
+          {
+            "name": "放映员",
+            "id": "4413",
+            "leaf": true
+          },
+          {
+            "name": "放映经理/主管",
+            "id": "4412",
+            "leaf": true
+          },
+          {
+            "name": "直播场控",
+            "id": "4419",
+            "leaf": true
+          },
+          {
+            "name": "直播中控",
+            "id": "4420",
+            "leaf": true
+          },
+          {
+            "name": "直播助理",
+            "id": "4421",
+            "leaf": true
+          }
+        ]
+      },
+      {
+        "name": "编辑/出版",
+        "id": "4500",
+        "children": [
+          {
+            "name": "编辑",
+            "id": "4502",
+            "leaf": true
+          },
+          {
+            "name": "排版设计",
+            "id": "4505",
+            "leaf": true
+          },
+          {
+            "name": "作家/撰稿人",
+            "id": "4517",
+            "leaf": true
+          },
+          {
+            "name": "记者",
+            "id": "4503",
+            "leaf": true
+          },
+          {
+            "name": "出版/发行",
+            "id": "4507",
+            "leaf": true
+          },
+          {
+            "name": "美术编辑",
+            "id": "4504",
+            "leaf": true
+          },
+          {
+            "name": "总编/副总编",
+            "id": "4501",
+            "leaf": true
+          },
+          {
+            "name": "电话采编",
+            "id": "4516",
+            "leaf": true
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "高级管理",
+    "id": "9F22",
+    "children": [
+      {
+        "name": "高级管理",
+        "id": "0700",
+        "children": [
+          {
+            "name": "首席产品官CPO",
+            "id": "8801",
+            "leaf": true
+          },
+          {
+            "name": "总裁助理/总经理助理",
+            "id": "0703",
+            "leaf": true
+          },
+          {
+            "name": "首席执行官CEO/总裁",
+            "id": "0701",
+            "leaf": true
+          },
+          {
+            "name": "董事会秘书",
+            "id": "0711",
+            "leaf": true
+          },
+          {
+            "name": "办事处/分公司/分支机构经理",
+            "id": "0709",
+            "leaf": true
+          },
+          {
+            "name": "首席运营官COO",
+            "id": "0707",
+            "leaf": true
+          },
+          {
+            "name": "首席财务官CFO",
+            "id": "0444",
+            "leaf": true
+          },
+          {
+            "name": "首席技术执行官CTO",
+            "id": "2611",
+            "leaf": true
+          },
+          {
+            "name": "办事处首席代表",
+            "id": "0708",
+            "leaf": true
+          },
+          {
+            "name": "首席信息官CIO",
+            "id": "2612",
+            "leaf": true
+          },
+          {
+            "name": "首席营销官CMO",
+            "id": "9401",
+            "leaf": true
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "咨询/法律/翻译",
+    "id": "9F23",
+    "children": [
+      {
+        "name": "咨询/顾问",
+        "id": "1400",
+        "children": [
+          {
+            "name": "专业顾问",
+            "id": "1401",
+            "leaf": true
+          },
+          {
+            "name": "猎头/人才中介",
+            "id": "1408",
+            "leaf": true
+          },
+          {
+            "name": "咨询员",
+            "id": "1404",
+            "leaf": true
+          },
+          {
+            "name": "咨询经理",
+            "id": "1403",
+            "leaf": true
+          },
+          {
+            "name": "行业研究员",
+            "id": "1411",
+            "leaf": true
+          },
+          {
+            "name": "管理咨询师",
+            "id": "1410",
+            "leaf": true
+          },
+          {
+            "name": "咨询总监",
+            "id": "1402",
+            "leaf": true
+          },
+          {
+            "name": "专业培训师",
+            "id": "1406",
+            "leaf": true
+          },
+          {
+            "name": "调研员",
+            "id": "1409",
+            "leaf": true
+          },
+          {
+            "name": "情报信息分析人员",
+            "id": "1407",
+            "leaf": true
+          }
+        ]
+      },
+      {
+        "name": "翻译",
+        "id": "2000",
+        "children": [
+          {
+            "name": "英语翻译",
+            "id": "2001",
+            "leaf": true
+          },
+          {
+            "name": "日语翻译",
+            "id": "2002",
+            "leaf": true
+          },
+          {
+            "name": "韩语/朝鲜语翻译",
+            "id": "2007",
+            "leaf": true
+          },
+          {
+            "name": "俄语翻译",
+            "id": "2005",
+            "leaf": true
+          },
+          {
+            "name": "德语翻译",
+            "id": "2003",
+            "leaf": true
+          },
+          {
+            "name": "西班牙语翻译",
+            "id": "2006",
+            "leaf": true
+          },
+          {
+            "name": "法语翻译",
+            "id": "2004",
+            "leaf": true
+          },
+          {
+            "name": "泰语翻译",
+            "id": "2012",
+            "leaf": true
+          },
+          {
+            "name": "葡萄牙语翻译",
+            "id": "2011",
+            "leaf": true
+          },
+          {
+            "name": "阿拉伯语翻译",
+            "id": "2009",
+            "leaf": true
+          },
+          {
+            "name": "中国方言翻译",
+            "id": "2013",
+            "leaf": true
+          },
+          {
+            "name": "意大利语翻译",
+            "id": "2010",
+            "leaf": true
+          },
+          {
+            "name": "其他语种翻译",
+            "id": "2008",
+            "leaf": true
+          },
+          {
+            "name": "录入校对员",
+            "id": "2014",
+            "leaf": true
+          }
+        ]
+      },
+      {
+        "name": "律师",
+        "id": "5C00",
+        "children": [
+          {
+            "name": "事务所律师",
+            "id": "5C02",
+            "leaf": true
+          },
+          {
+            "name": "诉讼律师",
+            "id": "5C03",
+            "leaf": true
+          },
+          {
+            "name": "民事律师",
+            "id": "5C04",
+            "leaf": true
+          },
+          {
+            "name": "专利律师",
+            "id": "5C05",
+            "leaf": true
+          },
+          {
+            "name": "知识产权律师",
+            "id": "5C06",
+            "leaf": true
+          },
+          {
+            "name": "律师助理",
+            "id": "1103",
+            "leaf": true
+          },
+          {
+            "name": "律师合伙人",
+            "id": "5C01",
+            "leaf": true
+          },
+          {
+            "name": "书记员",
+            "id": "5C07",
+            "leaf": true
+          },
+          {
+            "name": "检察官助理",
+            "id": "5C08",
+            "leaf": true
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "酒店/旅游",
+    "id": "9F24",
+    "children": [
+      {
+        "name": "酒店",
+        "id": "4900",
+        "children": [
+          {
+            "name": "酒店经理",
+            "id": "A0M9",
+            "leaf": true
+          },
+          {
+            "name": "旅游顾问",
+            "id": "4924",
+            "leaf": true
+          },
+          {
+            "name": "酒店大堂经理",
+            "id": "4903",
+            "leaf": true
+          },
+          {
+            "name": "宴会管理",
+            "id": "4912",
+            "leaf": true
+          }
+        ]
+      },
+      {
+        "name": "旅游",
+        "id": "9200",
+        "children": [
+          {
+            "name": "票务",
+            "id": "4910",
+            "leaf": true
+          },
+          {
+            "name": "旅游顾问",
+            "id": "4924",
+            "leaf": true
+          },
+          {
+            "name": "计调",
+            "id": "4920",
+            "leaf": true
+          },
+          {
+            "name": "签证",
+            "id": "4921",
+            "leaf": true
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "政府机构/农业",
+    "id": "9F25",
+    "children": [
+      {
+        "name": "农林牧渔",
+        "id": "5800",
+        "children": [
+          {
+            "name": "农业技术员",
+            "id": "5808",
+            "leaf": true
+          },
+          {
+            "name": "饲养员",
+            "id": "5805",
+            "leaf": true
+          },
+          {
+            "name": "畜牧师",
+            "id": "5804",
+            "leaf": true
+          },
+          {
+            "name": "农艺师",
+            "id": "5803",
+            "leaf": true
+          },
+          {
+            "name": "场长(农/林/牧/渔业)",
+            "id": "5802",
+            "leaf": true
+          },
+          {
+            "name": "动物营养/饲料研发",
+            "id": "5806",
+            "leaf": true
+          },
+          {
+            "name": "养殖部主管",
+            "id": "5801",
+            "leaf": true
+          },
+          {
+            "name": "兽医",
+            "id": "1315",
+            "leaf": true
+          }
+        ]
+      },
+      {
+        "name": "政府/非盈利机构",
+        "id": "1500",
+        "children": [
+          {
+            "name": "志愿者/社会工作者",
+            "id": "1502",
+            "leaf": true
+          }
+        ]
+      }
+    ]
+  }
+]

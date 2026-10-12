@@ -19,39 +19,39 @@
         <el-form-item label="职能关键词">
           <el-button :loading="loadingKeywords" @click="loadKeywordSuggestions">按职能加载 51job 推荐词</el-button>
         </el-form-item>
+        <div v-if="functionPickerOpen" class="function-panel">
+          <p>51job 全部职能 · 逐级选择至末级</p>
+          <div class="function-status" :class="{ error: functionError }">
+            <span>{{ functionMessage }}</span>
+            <div v-if="functionError" class="function-actions">
+              <el-button v-if="needsFunctionLogin" size="small" :loading="openingPage" @click="openFunctionLogin">打开并登录 51job</el-button>
+              <el-button size="small" :disabled="openingPage" @click="retryFunctionOptions">重试加载</el-button>
+            </div>
+          </div>
+          <div class="function-columns">
+            <div v-for="level in 3" :key="level" class="function-column">
+              <span class="function-heading">{{ ['一级职能', '二级职能', '具体职能'][level - 1] }}</span>
+              <span v-if="loadingFunctions && functionSelection.length === level - 1 && !functionColumns[level - 1]" class="function-placeholder">正在读取 51job 职能…</span>
+              <span v-else-if="!functionColumns[level - 1]" class="function-placeholder">{{ loginRecovering && functionSelection.length === level - 1 ? '等待登录后自动加载…' : functionError && functionSelection.length === level - 1 ? '加载失败，请点击上方重试' : '请先选择上一级' }}</span>
+              <button v-for="option in functionColumns[level - 1] || []" :key="option.name" type="button" class="function-option" :class="{ selected: functionSelection[level - 1] === option.name }" :disabled="loadingFunctions" @click="selectFunction(level - 1, option)">{{ option.name }}<span v-if="!option.leaf">›</span></button>
+            </div>
+          </div>
+        </div>
+        <div v-if="keywordGroups.length" class="keyword-panel">
+          <p>按“{{ loadedFunctionPath }}”选择关键词（含自定义已选 {{ keywordCount }} / 10）</p>
+          <div v-for="group in keywordGroups" :key="group.name" class="keyword-group">
+            <strong>{{ group.name }}</strong>
+            <div class="keyword-options"><button v-for="word in group.keywords" :key="word" type="button" class="keyword-option" :class="{ selected: selectedKeywords.includes(word) }" @click="toggleKeyword(word)">{{ word }}</button></div>
+          </div>
+        </div>
         <el-form-item label="最低月薪（元）"><el-input-number v-model="form.minSalary" :min="1" :max="99999999" :step="1000" style="width: 100%" /></el-form-item>
         <el-form-item label="最高月薪（元）"><el-input-number v-model="form.maxSalary" :min="1" :max="99999999" :step="1000" style="width: 100%" /></el-form-item>
         <el-form-item label="年薪发放月数"><el-select v-model="form.salaryMonths" placeholder="请选择" style="width: 100%"><el-option v-for="month in 13" :key="month" :label="`${month + 11}薪`" :value="month + 11" /></el-select></el-form-item>
         <el-form-item label="招聘人数"><el-input-number v-model="form.headcount" :min="1" :max="9999" style="width: 100%" /></el-form-item>
-        <el-form-item v-if="form.jobType === '社会招聘'" label="最低工作经验（年）"><el-input-number v-model="form.experienceYears" :min="0" :max="10" style="width: 100%" /></el-form-item>
-        <el-form-item label="最低学历"><el-select v-model="form.education" style="width: 100%"><el-option v-for="item in educationOptions" :key="item" :label="item" :value="item" /></el-select></el-form-item>
-      </div>
-      <div v-if="functionPickerOpen" class="function-panel">
-        <p>51job 全部职能 · 逐级选择至末级</p>
-        <div class="function-status" :class="{ error: functionError }">
-          <span>{{ functionMessage }}</span>
-          <div v-if="functionError" class="function-actions">
-            <el-button v-if="needsFunctionLogin" size="small" :loading="openingPage" @click="openFunctionLogin">打开并登录 51job</el-button>
-            <el-button size="small" :disabled="openingPage" @click="retryFunctionOptions">重试加载</el-button>
-          </div>
-        </div>
-        <div class="function-columns">
-          <div v-for="level in 3" :key="level" class="function-column">
-            <span class="function-heading">{{ ['一级职能', '二级职能', '具体职能'][level - 1] }}</span>
-            <span v-if="loadingFunctions && functionSelection.length === level - 1 && !functionColumns[level - 1]" class="function-placeholder">正在读取 51job 职能…</span>
-            <span v-else-if="!functionColumns[level - 1]" class="function-placeholder">{{ loginRecovering && functionSelection.length === level - 1 ? '等待登录后自动加载…' : functionError && functionSelection.length === level - 1 ? '加载失败，请点击上方重试' : '请先选择上一级' }}</span>
-            <button v-for="option in functionColumns[level - 1] || []" :key="option.name" type="button" class="function-option" :class="{ selected: functionSelection[level - 1] === option.name }" :disabled="loadingFunctions" @click="selectFunction(level - 1, option)">{{ option.name }}<span v-if="!option.leaf">›</span></button>
-          </div>
-        </div>
+        <el-form-item v-if="form.jobType === '社会招聘'" label="工作经验（年）"><el-input-number v-model="form.experienceYears" :min="0" :max="10" style="width: 100%" /></el-form-item>
+        <el-form-item label="学历"><el-select v-model="form.education" style="width: 100%"><el-option v-for="item in educationOptions" :key="item" :label="item" :value="item" /></el-select></el-form-item>
       </div>
       <p v-if="form.jobType === '校园招聘'" class="location-note">校招按 51job 的应届生条件填写，可能同步到应届生求职网并消耗职位配额；请以平台页面显示的实时规则为准。</p>
-      <div v-if="keywordGroups.length" class="keyword-panel">
-        <p>按“{{ loadedFunctionPath }}”选择关键词（含自定义已选 {{ keywordCount }} / 10）</p>
-        <div v-for="group in keywordGroups" :key="group.name" class="keyword-group">
-          <strong>{{ group.name }}</strong>
-          <div class="keyword-options"><button v-for="word in group.keywords" :key="word" type="button" class="keyword-option" :class="{ selected: selectedKeywords.includes(word) }" @click="toggleKeyword(word)">{{ word }}</button></div>
-        </div>
-      </div>
       <el-form-item label="补充自定义关键词（可选，逗号分隔）"><el-input v-model="form.keywords" placeholder="例如：接口测试,Postman；与上方勾选词合计不超过 10 个" /></el-form-item>
       <p v-if="project?.job_config?.required_skills?.length" class="skill-hint">项目技能参考：{{ project.job_config.required_skills.slice(0, 5).join('、') }}</p>
       <el-alert v-if="keywordMessage" :closable="false" :title="keywordMessage" type="info" />
@@ -62,11 +62,12 @@
           <span v-if="currentAddress" class="field-hint">平台当前地址：{{ currentAddress }}；发布城市：{{ currentCity || '请在平台核对' }}</span>
         </el-form-item>
         <el-form-item label="语言及熟练程度（可选）">
-          <div class="posting-inline"><el-select v-model="form.language" clearable placeholder="选择语言" style="width: 100%" @change="changeLanguage"><el-option v-for="item in languageOptions" :key="item" :label="item" :value="item" /></el-select><el-select v-model="form.languageLevel" clearable :disabled="!form.language || loadingPostingOptions.language" placeholder="熟练程度" style="width: 100%"><el-option v-for="item in languageLevels" :key="item" :label="item" :value="item" /></el-select><el-button :loading="loadingPostingOptions.language" @click="loadPostingOptions('language')">加载语言</el-button></div>
+          <div class="posting-inline"><el-select v-model="form.language" clearable placeholder="选择语言" style="width: 100%" @change="changeLanguage"><el-option v-for="item in languageOptions" :key="item" :label="item" :value="item" /></el-select><el-select v-model="form.languageLevel" clearable :disabled="!form.language" placeholder="熟练程度" style="width: 100%"><el-option v-for="item in languageLevels" :key="item" :label="item" :value="item" /></el-select></div>
         </el-form-item>
         <el-form-item label="证书（可选，最多 10 项）">
-          <div class="posting-inline"><el-select v-model="certificateCategory" placeholder="证书分类" style="width: 100%" @change="changeCertificateCategory"><el-option v-for="item in certificateCategories" :key="item" :label="item" :value="item" /></el-select><el-select v-model="certificateName" :disabled="!certificateCategory" placeholder="选择证书" style="width: 100%"><el-option v-for="item in certificateOptions" :key="item" :label="item" :value="item" /></el-select><el-button :loading="loadingPostingOptions.certificate" @click="loadPostingOptions('certificate')">加载证书</el-button><el-button :disabled="!certificateName || form.certificates.length >= 10" @click="addCertificate">添加</el-button></div>
+          <div class="posting-inline"><el-select v-model="certificateCategory" placeholder="证书分类" style="width: 100%" @change="changeCertificateCategory"><el-option v-for="item in certificateCategories" :key="item" :label="item" :value="item" /></el-select><el-select v-model="certificateName" :disabled="!certificateCategory" placeholder="选择证书" style="width: 100%"><el-option v-for="item in certificateOptions" :key="item" :label="item" :value="item" /></el-select><el-button :disabled="!certificateName || form.certificates.length >= 10" @click="addCertificate">添加</el-button></div>
           <div v-if="form.certificates.length" class="selected-certificates"><el-tag v-for="item in form.certificates" :key="item.name" closable @close="removeCertificate(item.name)">{{ item.name }}</el-tag></div>
+          <span class="field-hint">语言和证书目录已内置（{{ localPostingOptions.capturedAt.slice(0, 10) }} 从 51job 抓取）；提交时仍按平台当前选项核对。</span>
         </el-form-item>
         <el-alert v-if="postingOptionsMessage" :closable="false" :type="postingOptionsError ? 'warning' : 'info'" :title="postingOptionsMessage" />
       </div>
@@ -94,6 +95,50 @@
 import { computed, reactive, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import type { Project } from '../composables/useProjectStore'
+import local51JobFunctions from '../data/51job_functions.json'
+import localPostingOptions from '../data/51job_posting_options.json'
+import { runWith51JobBrowser } from '../composables/51jobBrowserRecovery'
+
+interface FuncNode {
+  name: string
+  id?: string
+  leaf?: boolean
+  children?: FuncNode[]
+}
+
+function getLocalFunctionOptions(path: string[]): Array<{ name: string, leaf: boolean }> | null {
+  const tree = local51JobFunctions as FuncNode[]
+  if (!Array.isArray(tree) || !tree.length) return null
+
+  if (path.length === 0) {
+    return tree.map(node => ({
+      name: node.name,
+      leaf: Boolean(node.leaf || !node.children || !node.children.length)
+    }))
+  }
+
+  const l1 = tree.find(node => node.name === path[0])
+  if (!l1 || !l1.children) return null
+
+  if (path.length === 1) {
+    return l1.children.map(node => ({
+      name: node.name,
+      leaf: Boolean(node.leaf || !node.children || !node.children.length)
+    }))
+  }
+
+  const l2 = l1.children.find(node => node.name === path[1])
+  if (!l2 || !l2.children) return null
+
+  if (path.length === 2) {
+    return l2.children.map(node => ({
+      name: node.name,
+      leaf: true
+    }))
+  }
+
+  return null
+}
 
 const props = defineProps<{ modelValue: boolean, project: Project | null }>()
 const emit = defineEmits<{ 'update:modelValue': [value: boolean] }>()
@@ -121,13 +166,11 @@ const addressQuery = ref('')
 const addressOptions = ref<string[]>([])
 const currentAddress = ref('')
 const currentCity = ref('')
-const languageOptions = ref<string[]>([])
-const languageLevels = ref<string[]>([])
-const certificateCategories = ref<string[]>([])
-const certificateOptions = ref<string[]>([])
+const languageOptions = localPostingOptions.languages
+const certificateCategories = localPostingOptions.certificateCategories
 const certificateCategory = ref('')
 const certificateName = ref('')
-const loadingPostingOptions = reactive({ address: false, language: false, certificate: false })
+const loadingPostingOptions = reactive({ address: false })
 const postingOptionsMessage = ref('')
 const postingOptionsError = ref(false)
 const completed = computed(() => ['saved', 'published', 'uncertain'].includes(result.value?.status || ''))
@@ -135,6 +178,8 @@ const currentKeywords = () => [...new Set([...selectedKeywords.value, ...form.ke
 const keywordCount = computed(() => currentKeywords().length)
 const educationOptions = ['本科', '大专', '硕士', '博士', '中技/中专', '高中', '初中及以下', '无学历要求']
 const form = reactive({ jobType: '社会招聘', title: '', description: '', functionPath: '', keywords: '', minSalary: 0, maxSalary: 0, salaryMonths: 0, headcount: 1, experienceYears: 0, education: '本科', address: '', language: '', languageLevel: '', certificates: [] as Array<{ category: string, name: string }> })
+const languageLevels = computed(() => (localPostingOptions.languageLevels as Record<string, string[]>)[form.language] || [])
+const certificateOptions = computed(() => (localPostingOptions.certificates as Record<string, string[]>)[certificateCategory.value] || [])
 
 watch(() => props.modelValue, value => { opened.value = value })
 watch(opened, value => {
@@ -162,10 +207,6 @@ watch(() => props.project, project => {
   addressOptions.value = []
   currentAddress.value = ''
   currentCity.value = ''
-  languageOptions.value = []
-  languageLevels.value = []
-  certificateCategories.value = []
-  certificateOptions.value = []
   certificateCategory.value = ''
   certificateName.value = ''
   postingOptionsMessage.value = ''
@@ -194,14 +235,17 @@ watch(() => form.functionPath, () => {
   keywordMessage.value = ''
 })
 
-async function loadPostingOptions(kind: 'address' | 'language' | 'certificate', category = certificateCategory.value) {
-  if (loadingPostingOptions[kind]) return
-  loadingPostingOptions[kind] = true
+async function loadPostingOptions(kind: 'address') {
+  if (loadingPostingOptions.address) return
+  loadingPostingOptions.address = true
   postingOptionsMessage.value = ''
   postingOptionsError.value = false
   try {
     const app: any = await import('../../wailsjs/go/main/App')
-    const response = await app.Get51JobPostingOptions(kind, kind === 'address' ? addressQuery.value.trim() : '', kind === 'certificate' ? category : kind === 'language' ? form.language : '')
+    const response = await runWith51JobBrowser(app, () => app.Get51JobPostingOptions(kind, addressQuery.value.trim(), ''), {
+      isActive: () => opened.value,
+      onWaiting: message => { postingOptionsMessage.value = message }
+    })
     if (response.status !== 'ready') {
       postingOptionsError.value = true
       postingOptionsMessage.value = response.message || '51job 选项加载失败'
@@ -209,26 +253,16 @@ async function loadPostingOptions(kind: 'address' | 'language' | 'certificate', 
     }
     currentAddress.value = response.currentAddress || ''
     currentCity.value = response.currentCity || ''
-    if (kind === 'address') {
-      addressOptions.value = [...new Set([...(response.options || []), form.address, currentAddress.value].filter(Boolean))]
-    } else if (kind === 'language') {
-      languageOptions.value = response.options || []
-      languageLevels.value = response.levels || []
-    } else {
-      certificateCategories.value = response.categories || []
-      certificateOptions.value = response.options || []
-    }
+    addressOptions.value = [...new Set([...(response.options || []), form.address, currentAddress.value].filter(Boolean))]
     postingOptionsMessage.value = response.message || '选项已加载'
   } catch (error: any) {
     postingOptionsError.value = true
     postingOptionsMessage.value = `无法读取 51job 选项：${error.message || error}`
-  } finally { loadingPostingOptions[kind] = false }
+  } finally { loadingPostingOptions.address = false }
 }
 
-async function changeCertificateCategory() {
+function changeCertificateCategory() {
   certificateName.value = ''
-  certificateOptions.value = []
-  if (certificateCategory.value) await loadPostingOptions('certificate', certificateCategory.value)
 }
 
 function addCertificate() {
@@ -239,10 +273,8 @@ function addCertificate() {
   certificateName.value = ''
 }
 
-async function changeLanguage() {
+function changeLanguage() {
   form.languageLevel = ''
-  languageLevels.value = []
-  if (form.language) await loadPostingOptions('language')
 }
 
 function removeCertificate(name: string) { form.certificates = form.certificates.filter(item => item.name !== name) }
@@ -251,6 +283,18 @@ async function fetchFunctionOptions(path: string[], requestID: number, recoverOn
   loadingFunctions.value = true
   functionError.value = false
   needsFunctionLogin.value = false
+
+  // 1. 优先从本地职能字典秒级加载（0ms 响应，完全不阻塞）
+  const localOptions = getLocalFunctionOptions(path)
+  if (localOptions && localOptions.length > 0) {
+    if (requestID !== functionRequestID) return
+    functionColumns.value = [...functionColumns.value.slice(0, path.length), localOptions]
+    functionMessage.value = `已从本地职能库加载 ${localOptions.length} 项，请继续选择${path.length === 2 ? '具体职能' : '下一级职能'}`
+    loadingFunctions.value = false
+    return
+  }
+
+  // 2. 本地字典未命中时，优雅降级走后台实时抓取
   functionMessage.value = `正在读取 51job ${path.length + 1} 级职能，请稍候…`
   try {
     const app: any = await import('../../wailsjs/go/main/App')
@@ -386,7 +430,10 @@ async function loadKeywordSuggestions() {
   keywordMessage.value = ''
   try {
     const app: any = await import('../../wailsjs/go/main/App')
-    const response = await app.Get51JobKeywordSuggestions(path)
+    const response = await runWith51JobBrowser(app, () => app.Get51JobKeywordSuggestions(path), {
+      isActive: () => opened.value && path === form.functionPath.trim(),
+      onWaiting: message => { keywordMessage.value = message }
+    })
     if (path !== form.functionPath.trim()) return
     if (response.status !== 'ready') { keywordMessage.value = response.message; return }
     keywordGroups.value = response.groups || []
@@ -427,7 +474,9 @@ async function submit(action: 'draft' | 'publish') {
       headcount: form.headcount, experienceYears: form.jobType === '校园招聘' ? 0 : form.experienceYears, education: form.education,
       address: form.address, language: form.language, languageLevel: form.languageLevel, certificates: form.certificates
     }
-    result.value = action === 'publish' ? await app.Publish51Job(request) : await app.Save51JobDraft(request)
+    result.value = await runWith51JobBrowser(app,
+      () => action === 'publish' ? app.Publish51Job(request) : app.Save51JobDraft(request),
+      { isActive: () => opened.value, onWaiting: message => { result.value = { status: 'waiting', message } } })
     if (['saved', 'published'].includes(result.value?.status || '')) ElMessage.success(result.value!.message)
   } catch (error: any) {
     result.value = { status: 'error', message: `无法调用职位发布引擎：${error.message || error}` }
@@ -465,6 +514,7 @@ async function openLogin(): Promise<boolean> {
 .platform span { font-size: 12px; }
 .posting-form { max-height: 55vh; overflow-y: auto; padding-right: 8px; }
 .form-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 16px; }
+.form-grid > .function-panel, .form-grid > .keyword-panel { grid-column: 1 / -1; }
 .function-panel { border: 1px solid #cbd5e1; border-radius: 8px; margin: 0 0 14px; padding: 10px; }
 .function-panel p { margin: 0 0 8px; color: #334155; font-weight: 600; }
 .function-columns { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }

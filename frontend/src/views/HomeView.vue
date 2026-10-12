@@ -737,6 +737,7 @@ import BossSearchDialog from '../components/BossSearchDialog.vue'
 import AIInterviewDialog from '../components/AIInterviewDialog.vue'
 import { useResumeStore } from '../composables/useResumeStore'
 import { useProjectStore } from '../composables/useProjectStore'
+import { runWith51JobBrowser } from '../composables/51jobBrowserRecovery'
 
 const { t } = useI18n()
 const router = useRouter()
@@ -942,7 +943,10 @@ async function load51JobOptions() {
   const requestedResumeID = jobPickerResumeID.value
   try {
     const App = await import('../../wailsjs/go/main/App')
-    const result = await App.List51JobCommunicationJobs(requestedResumeID, requestedKeyword)
+    const result = await runWith51JobBrowser(App,
+      () => App.List51JobCommunicationJobs(requestedResumeID, requestedKeyword),
+      { isActive: () => jobPickerVisible.value && jobPickerResumeID.value === requestedResumeID,
+        onWaiting: message => { jobPickerError.value = message } })
     if (!jobPickerVisible.value || jobPickerResumeID.value !== requestedResumeID || jobPickerKeyword.value !== requestedKeyword) return
     if (result.status !== 'jobs') {
       jobPickerError.value = result.message || '无法读取 51job 沟通职位'
@@ -968,7 +972,10 @@ async function confirm51JobSelectedJob() {
   contactBusy.value = true
   try {
     const App = await import('../../wailsjs/go/main/App')
-    const preview = await App.Prepare51JobHiChatForJob(resume.id, job.id, job.title)
+    const preview = await runWith51JobBrowser(App,
+      () => App.Prepare51JobHiChatForJob(resume.id, job.id, job.title),
+      { isActive: () => resumeStore.selectedResume?.id === resume.id,
+        onWaiting: message => { ElMessage.info(message) } })
     if (preview.status !== 'needs_confirmation' || !preview.quoteId) {
       ElMessage.warning({ message: preview.message || '无法核实 51job 职位和点数，未发起Hi聊', duration: 10000, showClose: true })
       return
@@ -1010,7 +1017,10 @@ async function handle51JobContact() {
   contactBusy.value = true
   try {
     const App = await import('../../wailsjs/go/main/App')
-    const result = await App.Start51JobConversation(resume.id, 'ask_resume', message)
+    const result = await runWith51JobBrowser(App,
+      () => App.Start51JobConversation(resume.id, 'ask_resume', message),
+      { isActive: () => resumeStore.selectedResume?.id === resume.id,
+        onWaiting: status => { ElMessage.info(status) } })
     if (result.status === 'needs_confirmation' || result.status === 'needs_job_selection') {
       ElMessage.warning({ message: result.message, duration: 10000, showClose: true })
       return
@@ -1027,7 +1037,10 @@ async function check51JobReply(resumeId: string, interactive = false) {
   contactBusy.value = true
   try {
     const App = await import('../../wailsjs/go/main/App')
-    const result = await App.Check51JobResumeReply(resumeId)
+    const result = interactive
+      ? await runWith51JobBrowser(App, () => App.Check51JobResumeReply(resumeId),
+        { onWaiting: message => { ElMessage.info(message) } })
+      : await App.Check51JobResumeReply(resumeId)
     if (result.status === 'downloaded') {
       if (projectId.value) await resumeStore.loadProjectResumes(projectId.value)
       ElMessage.success(result.message)
