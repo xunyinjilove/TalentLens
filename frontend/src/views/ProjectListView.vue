@@ -10,105 +10,113 @@
     </TitleBar>
 
     <main class="project-main">
-      <!-- 顶部：岗位需求与快速选择模板看板 -->
-      <section class="job-dashboard-section">
-        <div class="section-top-bar">
-          <div class="section-title-wrap">
-            <h2 class="section-title">
-              <el-icon class="title-icon"><Briefcase /></el-icon>
-              {{ $t('project.jobPanelTitle') }}
-            </h2>
-            <span class="section-subtitle">{{ $t('project.jobPanelDesc') }}</span>
+      <!-- 顶部：岗位配置快捷状态条（可折叠预设看板） -->
+      <section class="job-dashboard-section" :class="{ 'is-expanded': isPresetExpanded }">
+        <!-- 紧凑常驻条 (Ribbon) -->
+        <div class="job-ribbon-bar">
+          <div class="ribbon-left">
+            <div class="job-badge">
+              <el-icon class="job-icon"><Briefcase /></el-icon>
+              <span class="job-title">{{ currentJobConfig.title || '自定义岗位' }}</span>
+              <span class="job-meta">
+                {{ currentJobConfig.experienceYears }}{{ $t('common.year') }}经验 · {{ currentJobConfig.educationLevel || '学历不限' }}
+              </span>
+            </div>
+
+            <!-- 核心技能微标签 -->
+            <div class="skills-summary">
+              <span
+                v-for="skill in (currentJobConfig.requiredSkills || []).slice(0, 4)"
+                :key="skill"
+                class="skill-chip"
+              >
+                {{ skill }}
+              </span>
+              <el-tooltip
+                v-if="(currentJobConfig.requiredSkills || []).length > 4"
+                :content="(currentJobConfig.requiredSkills || []).slice(4).join('、')"
+                placement="top"
+              >
+                <span class="skill-more">+{{ (currentJobConfig.requiredSkills || []).length - 4 }}</span>
+              </el-tooltip>
+            </div>
+
+            <!-- 红线与加分微徽章（若有） -->
+            <div class="criteria-badges" v-if="(currentJobConfig.redLines || []).length || (currentJobConfig.bonusPoints || []).length">
+              <span v-if="(currentJobConfig.redLines || []).length" class="badge-item danger" :title="(currentJobConfig.redLines || []).join('\n')">
+                <span class="badge-dot"></span>
+                {{ (currentJobConfig.redLines || []).length }}条红线
+              </span>
+              <span v-if="(currentJobConfig.bonusPoints || []).length" class="badge-item warning" :title="(currentJobConfig.bonusPoints || []).join('\n')">
+                <span class="badge-dot"></span>
+                {{ (currentJobConfig.bonusPoints || []).length }}项加分
+              </span>
+            </div>
           </div>
-          <div class="section-actions">
+
+          <div class="ribbon-right">
+            <el-button
+              size="small"
+              class="btn-toggle-drawer"
+              :class="{ 'is-active': isPresetExpanded }"
+              @click="isPresetExpanded = !isPresetExpanded"
+              round
+            >
+              <el-icon><Operation /></el-icon>
+              <span>{{ isPresetExpanded ? '收起模板库' : '切换模板与要求' }}</span>
+              <el-icon class="arrow-indicator" :class="{ 'is-rotated': isPresetExpanded }"><ArrowDown /></el-icon>
+            </el-button>
+
+            <el-button
+              size="small"
+              class="btn-edit-config"
+              @click="showJobDetails = true"
+              round
+            >
+              <el-icon><Edit /></el-icon>
+              <span>微调要求</span>
+            </el-button>
+
             <el-button
               type="primary"
               size="small"
-              id="job-details-toggle"
-              class="btn-toggle-config"
-              :icon="showJobDetails ? ArrowUp : ArrowDown"
-              @click="showJobDetails = !showJobDetails"
+              class="btn-new-project-ribbon"
+              @click="openCreateDialogWithCurrentJob"
               round
             >
-              {{ showJobDetails ? '收起配置详情' : '查看/编辑岗位要求' }}
-            </el-button>
-            <el-button size="small" type="primary" plain @click="router.push('/settings')" round>
-              <el-icon><Setting /></el-icon>
-              更多配置
-            </el-button>
-          </div>
-        </div>
-
-        <!-- 快速选择模板组件 -->
-        <JobPresetPicker ref="presetPickerRef" :selected-id="selectedPresetId" @select="handlePresetSelect" />
-
-        <!-- 当前选中岗位信息概览条 -->
-        <div class="current-job-strip">
-          <div class="strip-left">
-            <div class="job-badge-title">
-              <span class="tag-title">{{ currentJobConfig.title || '自定义岗位' }}</span>
-              <el-tag size="small" type="info" effect="plain" class="exp-tag">
-                {{ currentJobConfig.experienceYears }}{{ $t('common.year') }}经验 · {{ currentJobConfig.educationLevel || '学历不限' }}
-              </el-tag>
-            </div>
-            <div class="skills-wrap">
-              <span class="skill-label">核心技能:</span>
-              <el-tag
-                v-for="skill in (currentJobConfig.requiredSkills || []).slice(0, 8)"
-                :key="skill"
-                size="small"
-                type="primary"
-                effect="light"
-                class="skill-tag"
-              >
-                {{ skill }}
-              </el-tag>
-              <span v-if="(currentJobConfig.requiredSkills || []).length > 8" class="more-skills">
-                +{{ (currentJobConfig.requiredSkills || []).length - 8 }}项
-              </span>
-            </div>
-            <div v-if="(currentJobConfig.redLines || []).length" class="skills-wrap redlines-wrap">
-              <span class="skill-label text-danger">🚫 红线:</span>
-              <el-tag
-                v-for="rl in (currentJobConfig.redLines || []).slice(0, 2)"
-                :key="rl"
-                size="small"
-                type="danger"
-                effect="plain"
-                class="skill-tag"
-              >
-                {{ rl }}
-              </el-tag>
-              <span v-if="(currentJobConfig.redLines || []).length > 2" class="more-skills text-danger">
-                +{{ (currentJobConfig.redLines || []).length - 2 }}条
-              </span>
-            </div>
-            <div v-if="(currentJobConfig.bonusPoints || []).length" class="skills-wrap bonus-wrap">
-              <span class="skill-label text-warning">⭐ 加分:</span>
-              <el-tag
-                v-for="bp in (currentJobConfig.bonusPoints || []).slice(0, 2)"
-                :key="bp"
-                size="small"
-                type="warning"
-                effect="plain"
-                class="skill-tag"
-              >
-                {{ bp }}
-              </el-tag>
-            </div>
-          </div>
-
-          <div class="strip-right">
-            <el-button type="success" size="small" plain @click="saveCurrentAsNewTemplate" round>
-              <el-icon><DocumentAdd /></el-icon>
-              存为新模板
-            </el-button>
-            <el-button type="primary" size="small" @click="openCreateDialogWithCurrentJob" round>
               <el-icon><Plus /></el-icon>
-              以当前岗位新建项目
+              <span>以此岗位新建项目</span>
             </el-button>
           </div>
         </div>
+
+        <!-- 折叠面板内容：模板选择器与快捷保存 -->
+        <Transition name="expand-slide">
+          <div v-show="isPresetExpanded" class="preset-drawer-content">
+            <div class="drawer-header">
+              <div class="drawer-title-wrap">
+                <span class="drawer-title">岗位预设模板库</span>
+                <span class="drawer-subtitle">选择行业预设模板可一键填入岗位要求与职责详情</span>
+              </div>
+              <div class="drawer-actions">
+                <el-button type="success" size="small" plain @click="saveCurrentAsNewTemplate" round>
+                  <el-icon><DocumentAdd /></el-icon>
+                  存为新模板
+                </el-button>
+                <el-button size="small" type="primary" plain @click="router.push('/settings')" round>
+                  <el-icon><Setting /></el-icon>
+                  系统设置
+                </el-button>
+                <el-button size="small" text @click="isPresetExpanded = false">
+                  收起
+                </el-button>
+              </div>
+            </div>
+
+            <!-- 快速选择模板组件 -->
+            <JobPresetPicker ref="presetPickerRef" :selected-id="selectedPresetId" @select="handlePresetSelect" />
+          </div>
+        </Transition>
 
         <!-- 居中弹窗常驻排版；仅切换可见性，避免点击时重新计算整张表单。 -->
         <Teleport to="body">
@@ -230,7 +238,7 @@
             <span class="project-count-badge">{{ projectStore.projects.length }} 个项目</span>
           </div>
           <button class="create-btn" @click="openCreateDialogWithCurrentJob">
-            <svg viewBox="0 0 16 16" fill="currentColor"><path d="M8 2a.5.5 0 0 1 .5.5v5h5a.5.5 0 0 1 0 1h-5v5a.5.5 0 0 1-1 0v-5h-5a.5.5 0 0 1 0-1h5v-5A.5.5 0 0 1 8 2z"/></svg>
+            <el-icon><Plus /></el-icon>
             {{ $t('project.create') }}
           </button>
         </div>
@@ -243,55 +251,96 @@
             class="project-card"
             @click="openProject(project.id)"
           >
-            <div class="card-top">
-              <h3 class="card-title" :title="project.name">{{ project.name }}</h3>
-              <button class="card-menu" @click.stop="handleDelete(project.id)" title="删除项目">
-                <svg viewBox="0 0 16 16" fill="currentColor"><path d="M5.5 5.5A.5.5 0 0 1 6 6v6a.5.5 0 0 1-1 0V6a.5.5 0 0 1 .5-.5zm2.5 0a.5.5 0 0 1 .5.5v6a.5.5 0 0 1-1 0V6a.5.5 0 0 1 .5-.5zm3 .5a.5.5 0 0 0-1 0v6a.5.5 0 0 0 1 0V6z"/><path fill-rule="evenodd" d="M14.5 3a1 1 0 0 1-1 1H13v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V4h-.5a1 1 0 0 1-1-1V2a1 1 0 0 1 1-1H6a1 1 0 0 1 1-1h2a1 1 0 0 1 1 1h3.5a1 1 0 0 1 1 1v1zM4.118 4L4 4.059V13a1 1 0 0 0 1 1h6a1 1 0 0 0 1-1V4.059L11.882 4H4.118z"/></svg>
+            <!-- 卡片头部：标题、状态胶囊、删除 -->
+            <div class="card-header">
+              <div class="card-title-group">
+                <h3 class="card-title" :title="project.name">{{ project.name }}</h3>
+                <span class="status-pill" :class="project.status">
+                  <span class="status-dot"></span>
+                  {{ statusText(project.status) }}
+                </span>
+              </div>
+              <button class="card-delete-btn" @click.stop="handleDelete(project.id)" title="删除项目">
+                <el-icon><Delete /></el-icon>
               </button>
             </div>
 
-            <!-- 部门与岗位标签 -->
-            <div class="card-tags-row">
-              <span v-if="project.department" class="dept-tag">
-                🏢 {{ project.department }}
+            <!-- 岗位与部门标签栏 -->
+            <div class="card-meta-tags">
+              <span class="meta-tag job-tag" :title="project.job_config?.title || '未设置岗位'">
+                <el-icon><Briefcase /></el-icon>
+                <span>{{ project.job_config?.title || '未设置岗位' }}</span>
               </span>
-              <span class="job-tag">
-                💼 {{ project.job_config?.title || '未设置岗位' }}
-              </span>
-            </div>
-
-            <!-- 招聘人数与负责人 -->
-            <div class="card-info-row">
-              <span class="info-cell">
-                👥 招聘 <strong>{{ project.headcount || 1 }}</strong> 人
-              </span>
-              <span class="info-cell" v-if="project.recruiter">
-                👤 HR: <strong>{{ project.recruiter }}</strong>
+              <span v-if="project.department" class="meta-tag dept-tag" :title="project.department">
+                <el-icon><OfficeBuilding /></el-icon>
+                <span>{{ project.department }}</span>
               </span>
             </div>
 
-            <!-- 备注说明 -->
-            <div v-if="project.remark" class="card-remark-row" :title="project.remark">
-              <span class="remark-text">📝 {{ project.remark }}</span>
+            <!-- 核心招聘指标行：人数、HR负责人、时间 -->
+            <div class="card-info-grid">
+              <div class="info-item">
+                <el-icon><User /></el-icon>
+                <span class="info-label">需求:</span>
+                <span class="info-val"><strong>{{ project.headcount || 1 }}</strong> 人</span>
+              </div>
+              <div class="info-item" v-if="project.recruiter">
+                <el-icon><UserFilled /></el-icon>
+                <span class="info-label">HR:</span>
+                <span class="info-val">{{ project.recruiter }}</span>
+              </div>
+              <div class="info-item date-item">
+                <el-icon><Calendar /></el-icon>
+                <span class="info-val">{{ formatDate(project.created_at) }}</span>
+              </div>
             </div>
 
-            <!-- 统计指标与状态 -->
-            <div class="card-stats">
-              <span class="stat">📄 {{ project.resume_ids?.length || 0 }} 份简历</span>
-              <span class="stat" v-if="projectStats[project.id]">已分析 {{ projectStats[project.id].analyzed }}/{{ projectStats[project.id].total }}</span>
-              <span class="stat max-score" v-if="projectStats[project.id]?.maxScore">最高分 {{ projectStats[project.id].maxScore }}</span>
-              <span class="stat-badge" :class="project.status">{{ statusText(project.status) }}</span>
+            <!-- 备注说明（若有） -->
+            <div v-if="project.remark" class="card-remark" :title="project.remark">
+              <span class="remark-text">{{ project.remark }}</span>
             </div>
 
-            <!-- 创建时间 -->
-            <div class="card-time">📅 {{ formatDate(project.created_at) }}</div>
-            <button class="post-job-btn" @click.stop="openJobPosting(project)">＋ 发布招聘（四平台）</button>
+            <!-- 简历分析进度与最高分卡条 -->
+            <div class="card-progress-bar-wrap">
+              <div class="progress-labels">
+                <span class="resume-count">
+                  <el-icon><Document /></el-icon>
+                  {{ project.resume_ids?.length || 0 }} 份简历
+                </span>
+                <span class="analyzed-ratio" v-if="projectStats[project.id]">
+                  已分析 {{ projectStats[project.id].analyzed }}/{{ projectStats[project.id].total }}
+                </span>
+                <span class="max-score-badge" v-if="projectStats[project.id]?.maxScore">
+                  <el-icon><Trophy /></el-icon> 最高 {{ projectStats[project.id].maxScore }}分
+                </span>
+              </div>
+              <div class="progress-track" v-if="projectStats[project.id]?.total">
+                <div
+                  class="progress-fill"
+                  :style="{
+                    width: Math.min(100, Math.round(((projectStats[project.id].analyzed || 0) / (projectStats[project.id].total || 1)) * 100)) + '%'
+                  }"
+                ></div>
+              </div>
+            </div>
+
+            <!-- 底部快捷动作：发布招聘与进入详情 -->
+            <div class="card-footer-actions">
+              <button class="post-job-btn" @click.stop="openJobPosting(project)">
+                <el-icon><Promotion /></el-icon>
+                <span>四平台发布</span>
+              </button>
+              <div class="card-enter-link">
+                <span>进入项目</span>
+                <el-icon><ArrowRight /></el-icon>
+              </div>
+            </div>
           </div>
 
           <!-- 空状态 -->
           <div v-if="projectStore.projects.length === 0 && !projectStore.loading" class="empty-state">
             <div class="empty-icon">
-              <svg viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="6" y="10" width="36" height="28" rx="4"/><path d="M6 18h36"/><circle cx="14" cy="14" r="1.5" fill="currentColor"/><circle cx="20" cy="14" r="1.5" fill="currentColor"/></svg>
+              <el-icon :size="48"><Document /></el-icon>
             </div>
             <p>{{ $t('project.empty') }}</p>
             <button class="create-btn" @click="openCreateDialogWithCurrentJob">
@@ -388,7 +437,18 @@ import {
   ArrowDown,
   ArrowUp,
   DocumentAdd,
-  Check
+  Check,
+  OfficeBuilding,
+  User,
+  UserFilled,
+  Calendar,
+  Document,
+  Delete,
+  Trophy,
+  Promotion,
+  ArrowRight,
+  Edit,
+  Operation
 } from '@element-plus/icons-vue'
 import TitleBar from '../components/TitleBar.vue'
 import LanguageSwitcher from '../components/LanguageSwitcher.vue'
@@ -426,6 +486,12 @@ watch(showJobDetails, async open => {
 const selectedPresetId = ref<string>('')
 const presetPickerRef = ref<InstanceType<typeof JobPresetPicker> | null>(null)
 const projectStats = ref<Record<string, any>>({})
+
+// 顶部岗位预设抽屉展开状态（默认收起以突出招聘项目，记忆用户偏好）
+const isPresetExpanded = ref(localStorage.getItem('talentlens_preset_expanded') === 'true')
+watch(isPresetExpanded, val => {
+  localStorage.setItem('talentlens_preset_expanded', String(val))
+})
 
 // 当前主界面活跃的岗位配置
 const currentJobConfig = reactive({
@@ -723,131 +789,222 @@ $text-muted: #86868b;
   padding: 24px 36px 48px;
 }
 
-/* 顶部岗位看板样式 */
+/* 顶部岗位快捷看板样式 */
 .job-dashboard-section {
   background: $bg-primary;
   border: 1px solid $separator;
   border-radius: $radius-lg;
-  padding: 18px 22px;
+  padding: 10px 16px;
   margin-bottom: 24px;
-  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.03);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.03);
+  transition: all 0.25s ease;
 
-  .section-top-bar {
+  &.is-expanded {
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.06);
+    border-color: #cbd5e1;
+    padding-bottom: 16px;
+  }
+
+  .job-ribbon-bar {
     display: flex;
     justify-content: space-between;
     align-items: center;
-    margin-bottom: 14px;
+    flex-wrap: wrap;
+    gap: 12px;
+    min-height: 40px;
   }
 
-  .section-title-wrap {
+  .ribbon-left {
     display: flex;
-    align-items: baseline;
-    gap: 10px;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 12px;
+  }
 
-    .section-title {
-      margin: 0;
-      font-size: 16px;
+  .job-badge {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+
+    .job-icon {
+      color: #0284c7;
+      font-size: 15px;
+    }
+
+    .job-title {
+      font-size: 14.5px;
       font-weight: 700;
-      color: $text-primary;
-      display: flex;
-      align-items: center;
-      gap: 6px;
+      color: #0f172a;
+    }
 
-      .title-icon {
-        color: $system-blue;
+    .job-meta {
+      font-size: 11.5px;
+      color: #64748b;
+      background: #f1f5f9;
+      padding: 2px 8px;
+      border-radius: 10px;
+      font-weight: 500;
+    }
+  }
+
+  .skills-summary {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    flex-wrap: wrap;
+
+    .skill-chip {
+      font-size: 11.5px;
+      color: #0369a1;
+      background: #e0f2fe;
+      padding: 2px 7px;
+      border-radius: 4px;
+      font-weight: 500;
+    }
+
+    .skill-more {
+      font-size: 11px;
+      color: #64748b;
+      cursor: pointer;
+      padding: 2px 6px;
+      background: #f1f5f9;
+      border-radius: 4px;
+      font-weight: 500;
+      transition: background 0.15s ease;
+
+      &:hover {
+        background: #e2e8f0;
+      }
+    }
+  }
+
+  .criteria-badges {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+
+    .badge-item {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      font-size: 11px;
+      font-weight: 600;
+      padding: 2px 8px;
+      border-radius: 10px;
+
+      &.danger {
+        background: #fef2f2;
+        color: #dc2626;
+        border: 1px solid #fecaca;
+        .badge-dot { background: #ef4444; }
+      }
+
+      &.warning {
+        background: #fffbeb;
+        color: #d97706;
+        border: 1px solid #fde68a;
+        .badge-dot { background: #f59e0b; }
+      }
+
+      .badge-dot {
+        width: 5px;
+        height: 5px;
+        border-radius: 50%;
+      }
+    }
+  }
+
+  .ribbon-right {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-left: auto;
+
+    .btn-toggle-drawer {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      transition: all 0.2s ease;
+
+      .arrow-indicator {
+        transition: transform 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+        font-size: 11px;
+
+        &.is-rotated {
+          transform: rotate(180deg);
+        }
+      }
+
+      &.is-active {
+        background: #f1f5f9;
+        color: #0284c7;
+        border-color: #cbd5e1;
       }
     }
 
-    .section-subtitle {
-      font-size: 12px;
-      color: $text-muted;
+    .btn-edit-config {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+    }
+
+    .btn-new-project-ribbon {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      font-weight: 600;
     }
   }
 
-  .section-actions {
-    display: flex;
-    gap: 8px;
+  .preset-drawer-content {
+    margin-top: 14px;
+    padding-top: 14px;
+    border-top: 1px solid $separator;
 
-    .btn-toggle-config {
-      background: #007aff !important;
-      border-color: #007aff !important;
-      color: #ffffff !important;
-      font-weight: 600 !important;
-      box-shadow: 0 2px 8px rgba(0, 122, 255, 0.28) !important;
-      transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+    .drawer-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 12px;
+      flex-wrap: wrap;
+      gap: 8px;
 
-      &:hover {
-        background: #0062cc !important;
-        border-color: #0062cc !important;
-        transform: translateY(-1px);
-        box-shadow: 0 4px 12px rgba(0, 122, 255, 0.35) !important;
+      .drawer-title-wrap {
+        display: flex;
+        align-items: baseline;
+        gap: 8px;
+
+        .drawer-title {
+          font-size: 14px;
+          font-weight: 700;
+          color: #1e293b;
+        }
+
+        .drawer-subtitle {
+          font-size: 12px;
+          color: $text-muted;
+        }
+      }
+
+      .drawer-actions {
+        display: flex;
+        align-items: center;
+        gap: 8px;
       }
     }
   }
 }
 
-.current-job-strip {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 16px;
-  padding: 12px 16px;
-  background: #f4f7fb;
-  border: 1px solid #e2e8f0;
-  border-radius: $radius-md;
-  margin-top: 10px;
-
-  .strip-left {
-    display: flex;
-    align-items: center;
-    flex-wrap: wrap;
-    gap: 14px;
-  }
-
-  .job-badge-title {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-
-    .tag-title {
-      font-size: 14.5px;
-      font-weight: 700;
-      color: #1e3a5f;
-    }
-
-    .exp-tag {
-      font-weight: 500;
-    }
-  }
-
-  .skills-wrap {
-    display: flex;
-    align-items: center;
-    flex-wrap: wrap;
-    gap: 5px;
-
-    .skill-label {
-      font-size: 12px;
-      color: $text-muted;
-      margin-right: 2px;
-    }
-
-    .skill-tag {
-      font-size: 11px;
-      border-radius: 4px;
-    }
-
-    .more-skills {
-      font-size: 11px;
-      color: $text-muted;
-    }
-  }
-
-  .strip-right {
-    display: flex;
-    gap: 8px;
-    flex-shrink: 0;
-  }
+/* 抽屉平滑展开动画 */
+.expand-slide-enter-active,
+.expand-slide-leave-active {
+  transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+  overflow: hidden;
+}
+.expand-slide-enter-from,
+.expand-slide-leave-to {
+  opacity: 0;
+  transform: translateY(-8px);
 }
 
 .job-details-backdrop {
@@ -1037,181 +1194,300 @@ $text-muted: #86868b;
   font-weight: 500;
   cursor: pointer;
   font-family: $font-family;
-  transition: background $transition-fast;
+  transition: all $transition-fast;
 
-  svg { width: 14px; height: 14px; }
-
-  &:hover { background: $system-blue-hover; }
+  &:hover {
+    background: $system-blue-hover;
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(0, 122, 255, 0.25);
+  }
   &:active { transform: scale(0.97); }
 }
 
 .project-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(330px, 1fr));
-  gap: 18px;
+  grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
+  gap: 20px;
 }
 
 .project-card {
   background: $bg-primary;
-  border: 1px solid $separator;
-  border-radius: $radius-lg;
+  border: 1px solid #e2e8f0;
+  border-radius: 14px;
   padding: 18px 20px;
   cursor: pointer;
-  transition: all $transition-normal;
+  transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 12px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
+  position: relative;
 
   &:hover {
-    border-color: $system-blue;
-    box-shadow: 0 6px 20px rgba(0, 122, 255, 0.12);
-    transform: translateY(-2px);
-  }
+    border-color: #38bdf8;
+    box-shadow: 0 10px 24px -4px rgba(2, 132, 199, 0.12), 0 4px 8px -2px rgba(0, 0, 0, 0.04);
+    transform: translateY(-3px);
 
-  .card-top {
-    display: flex;
-    justify-content: space-between;
-    align-items: flex-start;
-  }
+    .card-enter-link {
+      color: $system-blue;
+      transform: translateX(2px);
+    }
 
-  .card-title {
-    margin: 0;
-    font-size: 16px;
-    font-weight: 700;
-    color: $text-primary;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-    max-width: 260px;
-  }
-
-  .card-menu {
-    width: 28px;
-    height: 28px;
-    border: none;
-    border-radius: $radius-sm;
-    background: transparent;
-    color: $text-muted;
-    cursor: pointer;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    transition: all $transition-fast;
-
-    svg { width: 14px; height: 14px; }
-
-    &:hover {
-      background: rgba(255, 59, 48, 0.1);
-      color: $system-red;
+    .card-delete-btn {
+      opacity: 1;
     }
   }
 
-  .card-tags-row {
+  .card-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 10px;
+
+    .card-title-group {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex: 1;
+      min-width: 0;
+
+      .card-title {
+        margin: 0;
+        font-size: 16px;
+        font-weight: 700;
+        color: #0f172a;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .status-pill {
+        display: inline-flex;
+        align-items: center;
+        gap: 5px;
+        font-size: 11px;
+        font-weight: 600;
+        padding: 2px 8px;
+        border-radius: 12px;
+        flex-shrink: 0;
+
+        &.draft {
+          background: #f1f5f9;
+          color: #64748b;
+          .status-dot { background: #94a3b8; }
+        }
+        &.analyzing {
+          background: #e0f2fe;
+          color: #0284c7;
+          .status-dot {
+            background: #0284c7;
+            animation: pulse-dot 1.5s infinite;
+          }
+        }
+        &.completed {
+          background: #dcfce7;
+          color: #15803d;
+          .status-dot { background: #16a34a; }
+        }
+
+        .status-dot {
+          width: 6px;
+          height: 6px;
+          border-radius: 50%;
+        }
+      }
+    }
+
+    .card-delete-btn {
+      width: 26px;
+      height: 26px;
+      border: none;
+      border-radius: 6px;
+      background: transparent;
+      color: #94a3b8;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      opacity: 0.5;
+      transition: all $transition-fast;
+      flex-shrink: 0;
+
+      &:hover {
+        background: #fee2e2;
+        color: #dc2626;
+      }
+    }
+  }
+
+  .card-meta-tags {
     display: flex;
     align-items: center;
     flex-wrap: wrap;
     gap: 6px;
 
-    .dept-tag {
-      font-size: 11.5px;
-      font-weight: 600;
-      color: #0284c7;
-      background: #e0f2fe;
-      padding: 2px 7px;
-      border-radius: 4px;
-    }
-
-    .job-tag {
-      font-size: 11.5px;
+    .meta-tag {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      font-size: 12px;
       font-weight: 500;
-      color: #334155;
-      background: #f1f5f9;
-      padding: 2px 7px;
-      border-radius: 4px;
+      padding: 3px 8px;
+      border-radius: 6px;
+
+      &.job-tag {
+        background: #f8fafc;
+        color: #334155;
+        border: 1px solid #e2e8f0;
+      }
+
+      &.dept-tag {
+        background: #f0fdf4;
+        color: #166534;
+        border: 1px solid #bbf7d0;
+      }
     }
   }
 
-  .card-info-row {
+  .card-info-grid {
     display: flex;
     align-items: center;
     gap: 14px;
     font-size: 12px;
-    color: $text-secondary;
+    color: #64748b;
 
-    .info-cell strong {
-      color: $text-primary;
+    .info-item {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+
+      .info-label {
+        color: #94a3b8;
+      }
+
+      .info-val strong {
+        color: #0f172a;
+      }
+
+      &.date-item {
+        margin-left: auto;
+        font-size: 11.5px;
+      }
     }
   }
 
-  .card-remark-row {
+  .card-remark {
     font-size: 11.5px;
-    color: $text-muted;
+    color: #64748b;
     background: #f8fafc;
-    padding: 4px 8px;
-    border-radius: 4px;
+    padding: 5px 8px;
+    border-radius: 6px;
+    border-left: 3px solid #cbd5e1;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
   }
 
-  .card-stats {
+  .card-progress-bar-wrap {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    padding: 8px 10px;
+    background: #f8fafc;
+    border-radius: 8px;
+    border: 1px solid #f1f5f9;
+
+    .progress-labels {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      font-size: 12px;
+
+      .resume-count {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        font-weight: 600;
+        color: #334155;
+      }
+
+      .analyzed-ratio {
+        font-size: 11.5px;
+        color: #64748b;
+      }
+
+      .max-score-badge {
+        display: inline-flex;
+        align-items: center;
+        gap: 3px;
+        font-size: 11px;
+        font-weight: 700;
+        color: #d97706;
+        background: #fef3c7;
+        padding: 1px 6px;
+        border-radius: 4px;
+      }
+    }
+
+    .progress-track {
+      height: 4px;
+      background: #e2e8f0;
+      border-radius: 2px;
+      overflow: hidden;
+
+      .progress-fill {
+        height: 100%;
+        background: linear-gradient(90deg, #38bdf8, #0284c7);
+        border-radius: 2px;
+        transition: width 0.4s ease;
+      }
+    }
+  }
+
+  .card-footer-actions {
     display: flex;
     align-items: center;
-    flex-wrap: wrap;
-    gap: 8px;
+    justify-content: space-between;
     padding-top: 6px;
-    border-top: 1px solid $separator;
+    border-top: 1px solid #f1f5f9;
 
-    .stat {
-      font-size: 12px;
-      color: $text-muted;
-
-      &.max-score {
-        color: #d97706;
-        font-weight: 600;
-      }
-    }
-
-    .stat-badge {
-      font-size: 11px;
-      padding: 2px 8px;
-      border-radius: 10px;
+    .post-job-btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      border: 1px solid #bae6fd;
+      border-radius: 6px;
+      background: #f0f9ff;
+      color: #0284c7;
+      font-size: 11.5px;
       font-weight: 600;
-      margin-left: auto;
+      padding: 5px 10px;
+      cursor: pointer;
+      transition: all 0.2s ease;
 
-      &.draft {
-        background: rgba(142, 142, 147, 0.12);
-        color: $text-secondary;
-      }
-      &.analyzing {
-        background: rgba(0, 122, 255, 0.12);
-        color: $system-blue;
-      }
-      &.completed {
-        background: rgba(52, 199, 89, 0.12);
-        color: $system-green;
+      &:hover {
+        background: #e0f2fe;
+        border-color: #7dd3fc;
       }
     }
-  }
 
-  .card-time {
-    font-size: 11px;
-    color: $text-muted;
+    .card-enter-link {
+      display: inline-flex;
+      align-items: center;
+      gap: 3px;
+      font-size: 12px;
+      font-weight: 500;
+      color: #94a3b8;
+      transition: all 0.2s ease;
+    }
   }
 }
 
-.post-job-btn {
-  align-self: flex-start;
-  border: 1px solid #93c5fd;
-  border-radius: 8px;
-  background: #eff6ff;
-  color: #1d4ed8;
-  font-size: 12px;
-  font-weight: 600;
-  padding: 7px 10px;
-  cursor: pointer;
+@keyframes pulse-dot {
+  0% { transform: scale(0.95); opacity: 0.8; }
+  50% { transform: scale(1.2); opacity: 1; }
+  100% { transform: scale(0.95); opacity: 0.8; }
 }
-.post-job-btn:hover { background: #dbeafe; }
 
 /* 对话框内样式 */
 .create-form {
