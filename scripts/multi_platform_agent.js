@@ -3,9 +3,11 @@
  */
 
 const fs = require('fs');
+const os = require('os');
 const path = require('path');
 const { spawn, execSync } = require('child_process');
 const puppeteer = require('puppeteer-core');
+const agentStartedAt = Date.now();
 
 // 命令行参数解析
 const args = process.argv.slice(2);
@@ -23,6 +25,9 @@ const options = {
   message: '',
   excludeFile: '',       // 跨批次排重凭据文件
   quotaMatrix: null,     // 全网同义词与配额调度矩阵
+  activeDays: 0,         // 0 不按活跃度过滤；1 今日；3 三日内
+  channelStrategy: 'balanced', // balanced 均衡补缺；priority 按 HR 勾选顺序优先
+  stopFile: '',          // Go 写入此标记后，脚本在当前安全边界完成并上报已保存人数
   autoAnalyze: true,
   dataDir: path.join(process.cwd(), 'data', 'candidates_multi')
 };
@@ -60,6 +65,13 @@ for (let i = 0; i < args.length; i++) {
     }
   } else if (args[i] === '--auto-analyze' && args[i + 1]) {
     options.autoAnalyze = args[++i] === 'true';
+  } else if (args[i] === '--active-days' && args[i + 1]) {
+    const days = parseInt(args[++i], 10);
+    options.activeDays = [0, 1, 3].includes(days) ? days : 0;
+  } else if (args[i] === '--channel-strategy' && args[i + 1]) {
+    options.channelStrategy = args[++i] === 'priority' ? 'priority' : 'balanced';
+  } else if (args[i] === '--stop-file' && args[i + 1]) {
+    options.stopFile = args[++i];
   } else if (args[i] === '--data-dir' && args[i + 1]) {
     options.dataDir = args[++i];
   }
@@ -69,6 +81,10 @@ for (let i = 0; i < args.length; i++) {
 function sendMsg(type, payload = {}) {
   const json = JSON.stringify({ type, timestamp: Date.now(), ...payload });
   process.stdout.write(json + '\n');
+}
+
+function stopRequested() {
+  return !!options.stopFile && fs.existsSync(options.stopFile);
 }
 
 // 寻找系统 Edge 或 Chrome
@@ -421,19 +437,46 @@ function allocateQuota(total, items) {
   return counts;
 }
 
+function planChannelQuota(remaining, channelsLeft, strategy) {
+  if (remaining <= 0 || channelsLeft <= 0) return 0;
+  return strategy === 'priority' ? remaining : Math.ceil(remaining / channelsLeft);
+}
+
 // 设置浏览器窗口状态（'minimized' 最小化至任务栏沙盒 | 'normal' 正常还原窗口 | 'maximized' 最大化）
-async function setBrowserWindowState(browserOrPage, state = 'minimized') {
+function manualViewFileForPage(page) {
+  const pageURL = typeof page?.url === 'function' ? page.url() : '';
+  let host = '';
+  try { host = new URL(pageURL).hostname.toLowerCase(); } catch { return ''; }
+  const matches = domain => host === domain || host.endsWith(`.${domain}`);
+  const platform = matches('51job.com') ? '51job'
+    : matches('zhipin.com') ? 'boss'
+    : matches('zhaopin.com') ? 'zhaopin'
+    : matches('liepin.com') ? 'liepin' : '';
+  const markerDir = args.includes('--data-dir') ? options.dataDir : path.join(os.homedir(), 'Documents', 'TalentLens', 'candidates_multi');
+  return platform ? path.join(markerDir, `manual_view_${platform}.flag`) : '';
+}
+
+async function setBrowserWindowState(browserOrPage, state = 'minimized', manualContext = null) {
   for (let attempt = 0; attempt < 3; attempt++) {
     let session = null;
     try {
       let target = null;
+      let pageForWindow = browserOrPage;
       if (browserOrPage && typeof browserOrPage.pages === 'function') {
         const pages = await browserOrPage.pages();
-        if (pages && pages.length > 0) target = pages[0].target();
+        pageForWindow = pages.find(page => manualViewFileForPage(page)) || pages[0];
+        if (pageForWindow) target = pageForWindow.target();
       } else if (browserOrPage && typeof browserOrPage.target === 'function') {
         target = browserOrPage.target();
       }
       if (!target) return false;
+      if (state === 'minimized') {
+        const context = manualContext || { manualViewFile: manualViewFileForPage(pageForWindow), searchStartedAt: agentStartedAt };
+        if (context.manualViewFile && fs.existsSync(context.manualViewFile) &&
+            fs.statSync(context.manualViewFile).mtimeMs >= context.searchStartedAt) {
+          return true; // HR 在本次任务中主动查看候选人；不抢回窗口控制权。
+        }
+      }
       session = await target.createCDPSession();
       const { windowId } = await session.send('Browser.getWindowForTarget');
       if (windowId !== undefined) {
@@ -473,9 +516,9 @@ async function createBackgroundPage(browser, sourcePage, url) {
   }
 }
 
-// 前程无忧用 window.open 打开详情。仅在本次卡片点击的同步调用中截取 URL，不真正弹出前台标签页。
-async function capture51jobDetailUrl(page, candidate) {
-  const result = await page.evaluate((name, expectedText) => {
+// 前程无忧可能先请求详情权限，再异步 window.open；拦截必须覆盖请求完成后的回调。
+async function capture51jobDetailUrl(page, candidate, timeoutMs = 8000) {
+  const result = await page.evaluate(async (name, expectedText, waitMs) => {
     const cards = Array.from(document.querySelectorAll('.talent-search-container .card'));
     const sameName = cards.filter(card => {
       const nameEl = card.querySelector('.firstline .name, span.name, .name');
@@ -486,15 +529,21 @@ async function capture51jobDetailUrl(page, candidate) {
     if (!card) return { clicked: false, url: '' };
     const clickTarget = card.querySelector('.firstline .name, span.name, .name') || card;
     const originalOpen = window.open;
-    let openedUrl = '';
+    let timer;
+    let captureOpen;
+    const opened = new Promise(resolve => {
+      captureOpen = function(url) { resolve(String(url || '')); return null; };
+      timer = setTimeout(() => resolve(''), waitMs);
+    });
     try {
-      window.open = function(url) { openedUrl = String(url || ''); return null; };
+      window.open = captureOpen;
       clickTarget.click();
+      return { clicked: true, url: await opened };
     } finally {
-      window.open = originalOpen;
+      clearTimeout(timer);
+      if (window.open === captureOpen) window.open = originalOpen;
     }
-    return { clicked: true, url: openedUrl };
-  }, candidate.name, candidate.rawCardText || '');
+  }, candidate.name, candidate.rawCardText || '', timeoutMs);
   if (!result.clicked || !result.url) return { ...result, url: '' };
   try {
     const url = new URL(result.url, page.url());
@@ -589,6 +638,7 @@ async function waitForCaptchaResolved(page, platformKey, cfg) {
   const maxWaitMs = 180000; // 最长等待3分钟
 
   while (Date.now() - startWait < maxWaitMs) {
+    if (stopRequested()) return false;
     await new Promise(r => setTimeout(r, 1200));
     try {
       if (!page.browser().isConnected()) { safetyStopped = true; return false; }
@@ -599,7 +649,7 @@ async function waitForCaptchaResolved(page, platformKey, cfg) {
       sendMsg('captcha_resolved', {
         platform: platformKey,
         platformName: cfg.name,
-        message: `🎉 【${cfg.name}】安全验证已通过！自动化引擎已自动无缝恢复运转！`
+        message: `【${cfg.name}】安全验证已通过，正在检查页面状态并继续检索。`
       });
       // 验证通过，重新将浏览器缩入后台静默任务栏沙盒
       await setBrowserWindowState(page, 'minimized');
@@ -647,21 +697,30 @@ async function extractCandidatesAcrossFrames(page, targetCount, keyword, platfor
       if (el.offsetParent === null && el.getClientRects().length === 0) continue;
       const text = el.innerText || '';
       if (text.length < 20) continue;
-      // 平台页面的筛选控件不统一，以卡片中可验证的字段做最终准入。
-      // 未披露的城市、年限或学历一律跳过，避免把未知当作满足。
+      // 优先从画像区域而非整张卡片判断，避免把项目工作年限或学校所在地当成候选人条件。
+      const profileEl = el.querySelector('.userinfo, .firstline, .base-info.join-text-wrap, .base-info, .exp-edu, .user-desc, .info-labels, td.exp, td.edu');
+      const profileText = profileEl ? profileEl.innerText : text.split('\n').slice(0, 3).join(' ');
+      // 平台未披露的字段保持未知；启用过滤时不把未知推断成满足。
       const city = (activeFilters.city || '').trim();
-      if (city && city !== '不限' && city !== '全国' && !text.includes(city)) continue;
+      if (city && city !== '不限' && city !== '全国' && !profileText.includes(city)) continue;
       const minYears = parseInt(activeFilters.exp, 10) || 0;
       if (minYears > 0) {
-        const years = Array.from(text.matchAll(/(\d+(?:\.\d+)?)\s*年(?:以上|工作经验|经验|及以上|以内|-\d+年)?/g))
+        const years = Array.from(profileText.matchAll(/(\d+(?:\.\d+)?)\s*年(?:以上|工作经验|经验|及以上|以内|-\d+年)?/g))
           .map(m => Number(m[1]));
         if (!years.some(y => y >= minYears)) continue;
       }
       const educationRank = { '中专': 1, '高中': 1, '大专': 2, '专科': 2, '本科': 3, '学士': 3, '硕士': 4, '研究生': 4, '博士': 5 };
       const requiredRank = educationRank[activeFilters.edu] || 0;
       if (requiredRank > 0) {
-        const foundRanks = Object.entries(educationRank).filter(([label]) => text.includes(label)).map(([, rank]) => rank);
+        const foundRanks = Object.entries(educationRank).filter(([label]) => profileText.includes(label)).map(([, rank]) => rank);
         if (!foundRanks.some(rank => rank >= requiredRank)) continue;
+      }
+      const activityLabel = (text.match(/刚刚活跃|今日活跃|今天活跃|24小时内活跃|3日内活跃|三日内活跃|半年前活跃/) || [])[0] || '';
+      const activeDays = Number(activeFilters.activeDays) || 0;
+      if (activeDays > 0) {
+        const freshToday = /刚刚活跃|今日活跃|今天活跃|24小时内活跃/.test(activityLabel);
+        const freshThreeDays = freshToday || /3日内活跃|三日内活跃/.test(activityLabel);
+        if (activeDays === 1 ? !freshToday : !freshThreeDays) continue;
       }
 
       // 提取姓名（兼容 51job .firstline .name, span.name 等）
@@ -726,6 +785,7 @@ async function extractCandidatesAcrossFrames(page, targetCount, keyword, platfor
         workText,
         skills: tags,
         url: candUrl,
+        activityLabel,
         rawCardText: text
       });
     }
@@ -903,7 +963,7 @@ async function enrichCandidatesWithFullDetail(page, browser, candidates, platfor
         }
       }
 
-      // 2. 前程无忧卡片会同步调用 window.open；截取详情 URL 后再用后台标签页加载。
+      // 2. 等待前程无忧卡片同步或异步返回详情 URL，再用后台标签页加载。
       if (platformKey === '51job' && (!fullDetailText || fullDetailText.length < 200)) {
         const captured = await capture51jobDetailUrl(page, cand);
         if (captured.url) {
@@ -1355,7 +1415,7 @@ async function scrapePlatform(platformKey, browserPath, targetCount, keywordPlan
 
     const startTime = Date.now();
     let pageRecoveries = 0;
-    while (Date.now() - startTime < 300000) { // 5分钟等待
+    while (Date.now() - startTime < 300000 && !stopRequested()) { // 最多 5 分钟；人工停止可提前结束
       await new Promise(r => setTimeout(r, 2000));
       try {
         if (!browser.isConnected()) {
@@ -1383,6 +1443,8 @@ async function scrapePlatform(platformKey, browserPath, targetCount, keywordPlan
       }
     }
   }
+
+  if (stopRequested()) return outcome([], 'HR 已停止检索');
 
   if (!authResult.logged) {
     sendMsg('error', {
@@ -1489,7 +1551,7 @@ async function autoNavigateAndSearch(page, platformKey, cfg, searchKeyword) {
   let batchIdx = 0;
   let emptyBatches = 0;
 
-  while (allPlatformSavedList.length < targetCount && batchIdx < maxBatches) {
+  while (allPlatformSavedList.length < targetCount && batchIdx < maxBatches && !stopRequested()) {
     const batchStartCount = allPlatformSavedList.length;
     const currentBatchQuota = Math.min(MAX_BATCH_SIZE, targetCount - batchStartCount);
 
@@ -1528,7 +1590,7 @@ async function autoNavigateAndSearch(page, platformKey, cfg, searchKeyword) {
 
     // 按当前子批次的配额矩阵依次执行多维度词条轮转检索
     for (let taskIdx = 0; taskIdx < quotaTasks.length; taskIdx++) {
-      if (allPlatformSavedList.length >= targetCount) break;
+      if (allPlatformSavedList.length >= targetCount || stopRequested()) break;
 
       const task = quotaTasks[taskIdx];
       if (task.targetCount <= 0 || exhaustedKeywords.has(task.keyword)) continue;
@@ -1556,7 +1618,7 @@ async function autoNavigateAndSearch(page, platformKey, cfg, searchKeyword) {
       }
 
       // 已读或已收录的卡片不占新增配额；不足时继续翻页/滚动补抓。
-      while (allPlatformSavedList.length - taskStartCount < currentTarget && pageAttempts <= maxPageAttempts) {
+      while (allPlatformSavedList.length - taskStartCount < currentTarget && pageAttempts <= maxPageAttempts && !stopRequested()) {
         const remainingForTask = currentTarget - (allPlatformSavedList.length - taskStartCount);
 
       // 2. 动态弹性轮询（最长 35 秒，每 1.5 秒微步滚轮并检测候选人卡片）
@@ -1565,7 +1627,7 @@ async function autoNavigateAndSearch(page, platformKey, cfg, searchKeyword) {
       const maxPollMs = quotaTasks.length > 1 ? 30000 : 45000;
       let pollAttempts = 0;
 
-      while (Date.now() - pollStart < maxPollMs) {
+      while (Date.now() - pollStart < maxPollMs && !stopRequested()) {
         pollAttempts++;
         try {
           if (!browser.isConnected()) {
@@ -1590,7 +1652,7 @@ async function autoNavigateAndSearch(page, platformKey, cfg, searchKeyword) {
             cfg.name,
             Array.from(projectExcludedNames),
             Array.from(projectExcludedUrls),
-            { city: options.city, exp: options.exp, edu: options.edu }
+            { city: options.city, exp: options.exp, edu: options.edu, activeDays: options.activeDays }
           );
           scraped = selectFreshCandidates(scraped, remainingForTask, projectExcludedUrls, seenCandidateKeys);
 
@@ -1656,10 +1718,11 @@ async function autoNavigateAndSearch(page, platformKey, cfg, searchKeyword) {
       if (!await waitForCaptchaResolved(page, platformKey, cfg)) return outcome(allPlatformSavedList, '安全验证未完成');
       scraped = await enrichCandidatesWithFullDetail(page, browser, scraped, platformKey, cfg);
       if (scraped === null) return outcome(allPlatformSavedList, '详情页安全验证未完成');
+      if (stopRequested()) return outcome(allPlatformSavedList, 'HR 已停止');
 
       // 整理并存储
       for (let i = 0; i < scraped.length; i++) {
-        if (allPlatformSavedList.length >= targetCount) break;
+        if (allPlatformSavedList.length >= targetCount || stopRequested()) break;
 
         const item = scraped[i];
         item.sourceKeyword = currentKeyword;
@@ -1695,6 +1758,7 @@ async function autoNavigateAndSearch(page, platformKey, cfg, searchKeyword) {
 来源渠道：${cfg.name}
 检索岗位：${options.keyword}
 分流同义词：${currentKeyword}（${task.categoryName}）
+平台活跃标记：${item.activityLabel || '未披露'}
 目标城市：${options.city}
 基本画像：${item.infoText || '详见卡片信息'}
 任职履历快照：${cleanedWorkText || '详见卡片完整信息'}
@@ -1723,6 +1787,7 @@ ${cleanedRawText}
           email: candidateEmail,
           jobTitle: options.keyword,
           sourceKeyword: currentKeyword,
+          activityLabel: item.activityLabel || '',
           experience: item.infoText || '在线经验',
           education: '详见微简历',
           company: cleanedWorkText || '行业企业',
@@ -1775,7 +1840,7 @@ ${cleanedRawText}
     if (quotaTasks.every(task => task.targetCount <= 0 || exhaustedKeywords.has(task.keyword))) break;
 
     // 子批次间短暂停顿；缺额由下一批继续搜索。
-    if (batchIdx < maxBatches && allPlatformSavedList.length < targetCount) {
+    if (batchIdx < maxBatches && allPlatformSavedList.length < targetCount && !stopRequested()) {
       if (!await waitForCaptchaResolved(page, platformKey, cfg)) return outcome(allPlatformSavedList, '安全验证未完成');
       const pauseMs = gaussianRandom(2500, 800, 1500, 4500);
       sendMsg('status', {
@@ -1791,7 +1856,8 @@ ${cleanedRawText}
     }
   }
 
-  const stopReason = allPlatformSavedList.length >= targetCount ? ''
+  const stopReason = stopRequested() ? 'HR 已停止检索'
+    : allPlatformSavedList.length >= targetCount ? ''
     : exhaustedKeywords.size > 0 ? '列表与滚动位置均未变化，可能已到结果末尾'
     : batchIdx >= maxBatches ? `已达到本次安全批次数上限（连续 ${emptyBatches} 批无新增）`
     : '当前筛选条件下没有更多可确认的新候选人';
@@ -1998,21 +2064,22 @@ async function main() {
   }
 
   sendMsg('status', {
-    message: `🚀 启动全渠道聚合检索引擎，计划并发调度平台：${options.platforms.map(p => PLATFORM_CONFIGS[p]?.name || p).join('、')}，目标岗位「${options.keyword}」...`
+    message: `启动全渠道检索，依次访问平台：${options.platforms.map(p => PLATFORM_CONFIGS[p]?.name || p).join('、')}；全渠道总目标 ${options.count} 人，岗位「${options.keyword}」。`
   });
 
   let allResults = [];
   let errorCount = 0;
   let connectedPlatforms = [];
   let shortfallReasons = [];
+  const channelProgress = [];
   const globalKeywordTargets = Array.isArray(options.quotaMatrix) && options.quotaMatrix.length
     ? allocateQuota(options.count, options.quotaMatrix) : null;
 
   // 全渠道共用一个总额。串行分配可依据前一平台实际产出补足后续额度。
-  for (let i = 0; i < options.platforms.length && allResults.length < options.count && !safetyStopped; i++) {
+  for (let i = 0; i < options.platforms.length && allResults.length < options.count && !safetyStopped && !stopRequested(); i++) {
     const plat = options.platforms[i];
     const remaining = options.count - allResults.length;
-    const planned = Math.ceil(remaining / (options.platforms.length - i));
+    const planned = planChannelQuota(remaining, options.platforms.length - i, options.channelStrategy);
     const remainingKeywords = globalKeywordTargets && globalKeywordTargets.map((quota, idx) =>
       Math.max(0, quota - allResults.filter(item => item.sourceKeyword === options.quotaMatrix[idx].keyword).length));
     const keywordPlan = remainingKeywords && allocateQuota(planned, remainingKeywords.map(ratio => ({ ratio })));
@@ -2020,14 +2087,22 @@ async function main() {
     if (res === null) {
       // 该平台启动/连接失败
       errorCount++;
+      channelProgress.push({ platform: plat, planned, actual: 0, failed: true });
     } else {
       connectedPlatforms.push(plat);
       allResults = allResults.concat(res.candidates.slice(0, remaining));
+      channelProgress.push({ platform: plat, planned, actual: res.candidates.length, failed: false, reason: res.reason || '' });
       if (res.reason) shortfallReasons.push(`${PLATFORM_CONFIGS[plat]?.name || plat}：${res.reason}`);
     }
   }
 
-  if (safetyStopped) {
+  if (stopRequested()) {
+    const keywordProgress = globalKeywordTargets
+      ? options.quotaMatrix.map((item, index) => ({ keyword: item.keyword, planned: globalKeywordTargets[index], actual: allResults.filter(candidate => candidate.sourceKeyword === item.keyword).length }))
+      : [{ keyword: options.keyword, planned: options.count, actual: allResults.length }];
+    sendMsg('done', { total: allResults.length, stopped: true, channelProgress, keywordProgress,
+      message: `HR 已停止检索；本次已采集并上报 ${allResults.length} 人，等待保存确认。` });
+  } else if (safetyStopped) {
     sendMsg('error', { message: '安全验证未完成，检索已暂停。已采集的候选人保留，请处理验证后重新搜索。' });
   } else if (errorCount > 0 && connectedPlatforms.length === 0) {
     // 所有平台都失败了 → 不发 done，发 error
@@ -2036,8 +2111,13 @@ async function main() {
     });
   } else {
     const shortfallReason = allResults.length < options.count ? shortfallReasons.join('；') : '';
+    const keywordProgress = globalKeywordTargets
+      ? options.quotaMatrix.map((item, index) => ({ keyword: item.keyword, planned: globalKeywordTargets[index], actual: allResults.filter(candidate => candidate.sourceKeyword === item.keyword).length }))
+      : [{ keyword: options.keyword, planned: options.count, actual: allResults.length }];
     sendMsg('done', {
       total: allResults.length,
+      channelProgress,
+      keywordProgress,
       connectedPlatforms: connectedPlatforms.length,
       errorPlatforms: errorCount,
       shortfallReason,
@@ -2054,4 +2134,4 @@ if (require.main === module) {
   });
 }
 
-module.exports = { allocateQuota, smoothScroll, keepPageActiveInBackground, setBrowserWindowState, createBackgroundPage, capture51jobDetailUrl, isBrowserStartPage, browserLaunchArgs, closeUnusedStartPages, isPlatformPageUrl, ensurePlatformPage, submit51jobSearch, detectCaptcha, extractCandidatesAcrossFrames, selectFreshCandidates, advanceSearchResults, main };
+module.exports = { allocateQuota, planChannelQuota, smoothScroll, keepPageActiveInBackground, setBrowserWindowState, createBackgroundPage, capture51jobDetailUrl, isBrowserStartPage, browserLaunchArgs, closeUnusedStartPages, isPlatformPageUrl, ensurePlatformPage, submit51jobSearch, detectCaptcha, extractCandidatesAcrossFrames, selectFreshCandidates, advanceSearchResults, main };

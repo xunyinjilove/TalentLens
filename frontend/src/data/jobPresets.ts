@@ -11,6 +11,7 @@ export interface JobPreset {
   description?: string
   redLines?: string[]
   bonusPoints?: string[]
+  coreCriteria?: string[]
 }
 
 export interface JobCategory {

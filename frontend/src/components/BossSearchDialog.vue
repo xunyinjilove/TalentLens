@@ -14,6 +14,7 @@
           <span class="context-label">目标招聘项目:</span>
           <span class="context-project">{{ projectName || '当前项目' }}</span>
         </div>
+
         <div class="context-job">
           <el-tag size="small" type="success" effect="dark" class="job-tag">
             💼 {{ jobTitle || '未指定岗位' }}
@@ -38,7 +39,7 @@
         <!-- 4 大平台矩阵选择与独立登录管理面板 -->
         <div class="platform-grid-section">
           <div class="section-title-row">
-            <label class="form-label">选择调度招聘渠道（支持多选并发）</label>
+            <label class="form-label">选择招聘渠道（多选后依次检索）</label>
             <span class="channel-hint">已勾选 {{ selectedPlatformCodes.length }} / 4 个渠道</span>
           </div>
 
@@ -69,6 +70,18 @@
                 </button>
               </div>
             </div>
+          </div>
+        </div>
+
+        <div class="form-row" style="margin-top: 12px;">
+          <div class="form-item flex-1">
+            <label class="form-label">关键词检索方案（HR 选择）</label>
+            <el-radio-group v-model="form.keywordStrategy" @change="selectKeywordStrategy">
+              <el-radio label="precise">原词精准</el-radio>
+              <el-radio label="balanced">AI 拓词均衡</el-radio>
+              <el-radio label="matrix">HR 自定配额</el-radio>
+            </el-radio-group>
+            <span class="reservoir-hint">均衡方案给原词约一半名额；自定方案按下方词条比例执行，三种方案均可自行选择渠道。</span>
           </div>
         </div>
 
@@ -103,7 +116,7 @@
             <div class="quota-title-wrap">
               <span class="quota-title">🧬 全网人才拓扑与配额调度矩阵 (Quota Matrix)</span>
               <span class="quota-subtitle">
-                自动派生多维度行业同义词，按比例动态分配寻才配额，全局排重归集
+                AI 推荐同义词供 HR 选择，按全渠道总目标分配名额并排重
               </span>
             </div>
             <div class="quota-actions">
@@ -197,6 +210,17 @@
 
         <div class="form-row" style="margin-top: 8px;">
           <div class="form-item flex-1">
+            <label class="form-label">渠道调度方案</label>
+            <el-radio-group v-model="form.channelStrategy"><el-radio label="balanced">均衡补缺</el-radio><el-radio label="priority">按平台列表顺序优先</el-radio></el-radio-group>
+          </div>
+          <div class="form-item flex-1">
+            <label class="form-label">平台活跃度</label>
+            <el-select v-model="form.activeDays" style="width: 100%"><el-option label="不限（保留未披露）" :value="0" /><el-option label="仅今日/刚刚活跃" :value="1" /><el-option label="仅 3 日内活跃" :value="3" /></el-select>
+            <span class="reservoir-hint">选近期活跃时，未显示活跃标签的卡片不会被推断为符合。</span>
+          </div>
+        </div>
+        <div class="form-row" style="margin-top: 8px;">
+          <div class="form-item flex-1">
             <div class="label-with-badge">
               <label class="form-label">全渠道新增目标人数</label>
               <span class="safe-badge">🛡️ 水库保护</span>
@@ -205,7 +229,7 @@
               <el-option v-for="n in [5, 10, 15, 20, 30, 50]" :key="n" :label="`${n} 人 / 全渠道`" :value="n" />
             </el-select>
             <span class="reservoir-hint" v-if="form.countPerPlatform > 10">
-              🛡️ 自动阶梯拆解：单批上限锁定 10 人，批次间注入高斯拟人微步呼吸停顿 (2.5s ± 800ms) 防风控
+              单平台每批最多采集 10 人，批次间短暂停顿；平台安全验证出现时需要人工处理。
             </span>
           </div>
           <div class="form-item flex-1">
@@ -322,13 +346,13 @@
             :disabled="!form.keyword.trim() || selectedPlatformCodes.length === 0"
           >
             <el-icon><component :is="isContinue ? Plus : Search" /></el-icon>
-            {{ isContinue ? `立即启动继续寻才 (已选 ${selectedPlatformCodes.length} 个平台 · 自动排重)` : `启动矩阵并发检索 (已选 ${selectedPlatformCodes.length} 个平台)` }}
+            {{ isContinue ? `立即启动继续寻才 (已选 ${selectedPlatformCodes.length} 个平台 · 自动排重)` : `启动多渠道检索 (已选 ${selectedPlatformCodes.length} 个平台)` }}
           </el-button>
         </template>
 
         <!-- 阶段二：检索进行中或已完成阶段 -->
         <template v-else>
-          <el-button v-if="searching" type="danger" plain @click="handleStop">停止检索</el-button>
+          <el-button v-if="searching" type="danger" plain :loading="stopPending" :disabled="stopPending" @click="handleStop">{{ stopPending ? '正在保存已抓取的人选' : '停止检索' }}</el-button>
           <el-button v-if="!searching && !isFinished" @click="handleBackToForm">
             <el-icon><Back /></el-icon> 返回修改配置
           </el-button>
@@ -423,13 +447,32 @@ function getCategoryTagType(cat: string): '' | 'success' | 'warning' | 'danger' 
 
 async function handleToggleQuotaMatrix() {
   isQuotaMatrixActive.value = !isQuotaMatrixActive.value
+  if (isQuotaMatrixActive.value) form.keywordStrategy = 'matrix'
+  else form.keywordStrategy = 'precise'
   if (isQuotaMatrixActive.value && synonymList.value.length === 0) {
     await handleGenerateSynonyms()
   }
 }
 
+async function selectKeywordStrategy() {
+  isQuotaMatrixActive.value = form.keywordStrategy !== 'precise'
+  if (isQuotaMatrixActive.value && synonymList.value.length === 0) await handleGenerateSynonyms()
+}
+
+function buildKeywordPlan() {
+  if (form.keywordStrategy === 'precise') return []
+  const selected = activeQuotaList.value.map(item => ({ keyword: item.keyword.trim(), category: item.category, category_name: item.category_name, ratio: item.ratio }))
+  if (form.keywordStrategy === 'matrix') return selected
+  const original = form.keyword.trim() || props.jobTitle || ''
+  const alternatives = selected.filter(item => item.keyword !== original)
+  if (!alternatives.length) return []
+  const share = Math.floor(50 / alternatives.length)
+  return [{ keyword: original, category: 'standard', category_name: '岗位原词', ratio: 50 }, ...alternatives.map((item, index) => ({ ...item, ratio: index === alternatives.length - 1 ? 50 - share * (alternatives.length - 1) : share }))]
+}
+
 async function handleGenerateSynonyms() {
   const kw = form.keyword.trim() || props.jobTitle || '临床项目经理'
+  if (form.keywordStrategy === 'precise') form.keywordStrategy = 'matrix'
   isGeneratingSynonyms.value = true
   isQuotaMatrixActive.value = true
   try {
@@ -438,29 +481,34 @@ async function handleGenerateSynonyms() {
     if (WailsApp && WailsApp.GenerateJobSynonyms) {
       const items = await WailsApp.GenerateJobSynonyms(kw, props.jobDescription || '')
       if (Array.isArray(items) && items.length > 0) {
-        synonymList.value = items.map((it: any, idx: number) => ({
+        const unique = items.filter((it: any, idx: number) => !!String(it.keyword || '').trim() &&
+          items.findIndex((other: any) => String(other.keyword || '').trim() === String(it.keyword || '').trim()) === idx)
+        if (!unique.some((it: any) => String(it.keyword).trim() === kw)) {
+          unique.unshift({ keyword: kw, category: 'standard', category_name: '岗位原词', description: 'HR 输入的岗位词', ratio: 50 })
+        }
+        synonymList.value = unique.map((it: any, idx: number) => ({
           id: `syn_${Date.now()}_${idx}`,
-          keyword: it.keyword,
+          keyword: String(it.keyword).trim(),
           category: it.category || 'standard',
           category_name: it.category_name || '维度词',
           description: it.description || '',
           ratio: it.ratio || (idx === 0 ? 40 : 30),
-          selected: true
+          selected: String(it.keyword).trim() === kw
         }))
         normalizeRatios()
-        ElMessage.success(`AI 成功派生 ${items.length} 个行业同义词维度！`)
+        ElMessage.success(`AI 提供 ${unique.length} 个词条；请由 HR 核对并勾选要检索的词`)
         return
       }
     }
-    // 回退默认派生
+    // AI 不可用时只保留岗位原词，避免凭字符串拼接出错误的职级同义词。
     synonymList.value = [
-      { id: 'syn_1', keyword: kw, category: 'standard', category_name: '标准称谓', description: '行业通用标准岗位称呼', ratio: 40, selected: true },
-      { id: 'syn_2', keyword: `${kw}总监`, category: 'high_level', category_name: '高阶下探', description: '资深高职级从业者', ratio: 30, selected: true },
-      { id: 'syn_3', keyword: `${kw}主管`, category: 'derived', category_name: '业务衍生', description: '具备一线攻坚能力的业务骨干', ratio: 30, selected: true }
+      { id: 'syn_1', keyword: kw, category: 'standard', category_name: '岗位原词', description: 'AI 未返回同义词；请由 HR 添加并核对其他词条', ratio: 100, selected: true }
     ]
     normalizeRatios()
+    ElMessage.warning('AI 未返回可用同义词，已保留岗位原词；可手动添加词条')
   } catch (err: any) {
-    ElMessage.error(`AI 拓词失败: ${err.message || err}`)
+    synonymList.value = [{ id: 'syn_1', keyword: kw, category: 'standard', category_name: '岗位原词', description: 'AI 拓词失败；请由 HR 添加并核对其他词条', ratio: 100, selected: true }]
+    ElMessage.warning(`AI 拓词失败，已保留岗位原词：${err.message || err}`)
   } finally {
     isGeneratingSynonyms.value = false
   }
@@ -554,6 +602,7 @@ const currentStatusText = ref('正在就绪...')
 const candidateCount = ref(0)
 const activePlatformCode = ref<string>('')
 const platformCounts = ref<Record<string, number>>({})
+const stopPending = ref(false)
 const logBoxRef = ref<HTMLElement | null>(null)
 
 // 验证码安全拦截与声光唤醒状态
@@ -666,7 +715,10 @@ const form = reactive({
   keyword: '',
   city: '上海',
   countPerPlatform: 30,
-  autoAnalyze: true
+  autoAnalyze: true,
+  keywordStrategy: 'precise',
+  channelStrategy: 'balanced',
+  activeDays: 0
 })
 
 const expectedTotalCount = computed(() => {
@@ -755,7 +807,7 @@ async function handleTestPlatform(platformCode: string, platformName: string) {
   }
 }
 
-// 启动多平台并发搜索
+// 启动多平台顺序检索，共享全局目标人数
 async function handleStartSearch() {
   let WailsApp: any = null
   try { WailsApp = await import('../../wailsjs/go/main/App') } catch {
@@ -767,13 +819,27 @@ async function handleStartSearch() {
     ElMessage.warning('请至少勾选一个招聘平台！')
     return
   }
-  if (isQuotaMatrixActive.value && activeQuotaList.value.length > 0 && totalRatio.value <= 0) {
-    ElMessage.warning('请给至少一个同义词设置大于 0 的配额比例')
+  const selectedKeywords = activeQuotaList.value.map(item => item.keyword.trim()).filter(Boolean)
+  if (form.keywordStrategy !== 'precise' && selectedKeywords.length !== activeQuotaList.value.length) {
+    ElMessage.warning('请填写所有已勾选词条的关键词')
+    return
+  }
+  if (form.keywordStrategy !== 'precise' && new Set(selectedKeywords).size !== selectedKeywords.length) {
+    ElMessage.warning('同一个关键词只能分配一次配额')
+    return
+  }
+  if (form.keywordStrategy === 'balanced' && !selectedKeywords.some(word => word !== form.keyword.trim())) {
+    ElMessage.warning('AI 拓词均衡方案需要至少一个经过 HR 核对的不同词条；也可选择“原词精准”')
+    return
+  }
+  if (form.keywordStrategy === 'matrix' && (selectedKeywords.length === 0 || totalRatio.value <= 0)) {
+    ElMessage.warning('请给至少一个词条设置大于 0 的配额比例')
     return
   }
 
   isSearchingStarted.value = true
   searching.value = true
+  stopPending.value = false
   isFinished.value = false
   candidateCount.value = 0
   activePlatformCode.value = ''
@@ -785,17 +851,14 @@ async function handleStartSearch() {
   searchLogs.value = []
   currentStatusText.value = '正在启动矩阵式检索引擎...'
 
-  if (WailsApp?.StartSearchWithOptions) {
-    const matrixPayload = isQuotaMatrixActive.value ? activeQuotaList.value.map(item => ({
-      keyword: item.keyword.trim(), category: item.category,
-      category_name: item.category_name, ratio: item.ratio
-    })) : []
-    addLog('status', `全渠道总目标 ${form.countPerPlatform} 人；城市 ${form.city}；筛选信息不明的卡片将跳过。`)
+  if (WailsApp?.StartSearchWithPolicy) {
+    const matrixPayload = buildKeywordPlan()
+    addLog('status', `全渠道总目标 ${form.countPerPlatform} 人；关键词方案 ${form.keywordStrategy}；渠道 ${form.channelStrategy}；活跃度 ${form.activeDays || '不限'} 天。`)
     try {
-      const started = await WailsApp.StartSearchWithOptions(
+      const started = await WailsApp.StartSearchWithPolicy(
         props.projectId, form.keyword.trim(), form.city,
           props.expYears ?? 0, props.eduLevel || '不限', form.countPerPlatform,
-        plats, JSON.stringify(matrixPayload), form.autoAnalyze
+        plats, JSON.stringify(matrixPayload), form.autoAnalyze, form.activeDays, form.channelStrategy
       )
       if (!started) throw new Error('搜索进程未启动')
     } catch (err: any) {
@@ -807,13 +870,7 @@ async function handleStartSearch() {
   }
 
   if (isQuotaMatrixActive.value && activeQuotaList.value.length > 0) {
-    const matrixPayload = activeQuotaList.value.map(item => ({
-      keyword: item.keyword.trim(),
-      category: item.category,
-      category_name: item.category_name,
-      description: item.description,
-      ratio: item.ratio
-    }))
+    const matrixPayload = buildKeywordPlan()
 
     addLog('status', `🧬 启用同义词拓扑与配额调度矩阵：${quotaFormulaText.value}`)
     addLog('status', `🚀 启动多平台配额寻才：[${form.city}]，调度平台：${plats.join('、')}，单平台总配额 ${form.countPerPlatform} 人`)
@@ -880,14 +937,19 @@ async function handleStartSearch() {
 
 // 停止搜索
 async function handleStop() {
+  if (stopPending.value) return
   let WailsApp: any = null
   try { WailsApp = await import('../../wailsjs/go/main/App') } catch {}
   if (WailsApp && WailsApp.StopBossSearch) {
-    await WailsApp.StopBossSearch()
+    try {
+      const accepted = await WailsApp.StopBossSearch()
+      if (accepted) {
+        stopPending.value = true
+        currentStatusText.value = '正在停止并保存已抓取的人选…'
+        addLog('status', '已发送停止请求，等待当前候选人处理完并核对保存数量')
+      }
+    } catch (err: any) { addLog('error', `停止失败：${err.message || err}`) }
   }
-  searching.value = false
-  currentStatusText.value = '已停止搜寻'
-  addLog('status', '⏹️ 已手动停止搜寻任务')
 }
 
 // 返回修改平台与参数配置
@@ -959,15 +1021,27 @@ onMounted(async () => {
     if (doneTriggered) return
     doneTriggered = true
     captchaAlert.active = false
+    stopPending.value = false
     searching.value = false
     isFinished.value = true
-    const reachedTarget = candidateCount.value >= expectedTotalCount.value
+    const stopped = evt?.stopped === true
+    const reachedTarget = !stopped && candidateCount.value >= expectedTotalCount.value
     const shortfallReason = String(evt?.shortfallReason || '').trim()
-    currentStatusText.value = reachedTarget
+    currentStatusText.value = stopped
+      ? `已停止，已保存 ${candidateCount.value} 人`
+      : reachedTarget
       ? (form.autoAnalyze ? '全渠道检索完成，正在启动 AI 分析' : '全渠道检索完成')
       : `检索结束，已导入 ${candidateCount.value}/${expectedTotalCount.value} 人${shortfallReason ? `；${shortfallReason}` : ''}`
     addLog(reachedTarget ? 'done' : 'status', evt.message || currentStatusText.value)
-    if (reachedTarget) {
+    if (Array.isArray(evt?.keywordProgress)) {
+      addLog('status', `关键词实际/计划：${evt.keywordProgress.map((item: any) => `${item.keyword} ${item.actual}/${item.planned}`).join('；')}`)
+    }
+    if (Array.isArray(evt?.channelProgress)) {
+      addLog('status', `渠道实际/计划：${evt.channelProgress.map((item: any) => `${item.platform} ${item.actual}/${item.planned}${item.failed ? '（连接失败）' : ''}`).join('；')}`)
+    }
+    if (stopped) {
+      ElMessage.info(`已停止，本次保存 ${candidateCount.value} 位人选`)
+    } else if (reachedTarget) {
       ElMessage.success(`多平台候选人采集完成 (共 ${candidateCount.value} 人)${form.autoAnalyze ? '，正在进行 AI 智能打分' : ''}`)
     } else {
       ElMessage.warning(`本次找到 ${candidateCount.value}/${expectedTotalCount.value} 位人选。${shortfallReason || '可调整关键词或平台继续搜索'}`)
@@ -977,6 +1051,7 @@ onMounted(async () => {
 
   const handleError = (evt: any) => {
     if (!evt?.platform) searching.value = false
+    if (!evt?.platform) stopPending.value = false
     currentStatusText.value = '检索提示'
     addLog('error', evt.message || '检索过程中发生提示')
     ElMessage.error(evt.message || '操作未完成')

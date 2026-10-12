@@ -190,7 +190,7 @@
             <!-- ⭐ 核心优先加分项 -->
             <div class="expand-full" style="margin-top: 14px;">
               <label class="expand-label text-warning" style="margin-bottom: 8px; display: block;">
-                ⭐ 用人部门核心优先加分项 (Bonus Points / 优质候选人特质)
+                ⭐ 优先加分项（HR 确认后仅用于同档排序）
               </label>
               <TagInput
                 v-model="currentJobConfig.bonusPoints"
@@ -202,6 +202,13 @@
                 add-prompt-title="新增优先加分项快捷项"
                 @change="saveJobConfigToStorage"
               />
+              <p class="save-hint">AI 线索标为待确认；未填写人工核实依据前，不计入已确认优势。</p>
+            </div>
+
+            <div class="expand-full" style="margin-top: 14px;">
+              <label class="expand-label" style="margin-bottom: 8px; display: block;">核心能力评分卡（逐项 0–4 级，等权汇总）</label>
+              <TagInput v-model="currentJobConfig.coreCriteria" placeholder="输入需要评估的岗位核心能力" @change="saveJobConfigToStorage" />
+              <p class="save-hint">0 未体现、1 了解、2 参与、3 独立完成、4 主导并可复盘；为空时使用上方核心技能。</p>
             </div>
 
             <div class="expand-footer">
@@ -428,7 +435,8 @@ const currentJobConfig = reactive({
   educationLevel: '本科',
   jobDescription: '岗位职责：\n1. 制定项目管理计划，按计划完成所负责的项目启动、开展及结束工作，确保通过药监部门核查；\n2. 根据项目研发资料、指导原则、行业标准等要求，设计临床试验方案；\n3. 对所负责的临床试验项目进行全面的质量控制与管理，确保所有试验严格按照临床试验方案、标准操作程序和相关法规进行；\n4. 根据临床试验相关规范要求，完成临床研究的各阶段报批文件包括但不限于临床报告；\n5. 作为公司对外代表，建立并保持与机构的良好关系。\n\n任职要求：\n1. 生物学、检验学、医学或药学等相关专业背景，本科及以上学历；\n2. 高度责任心和抗压能力，可适应出差；\n3. 优秀的沟通表达能力、发现和解决问题的能力。',
   redLines: ['具备临床试验项目落地经验，并能说明本人负责的关键环节'] as string[],
-  bonusPoints: ['有可核验的多中心临床试验统筹成果', '具备与岗位相关的项目管理认证'] as string[]
+  bonusPoints: ['有可核验的多中心临床试验统筹成果', '具备与岗位相关的项目管理认证'] as string[],
+  coreCriteria: [] as string[]
 })
 
 const departmentOptions = [
@@ -503,6 +511,7 @@ function loadJobConfigFromStorage() {
         currentJobConfig.jobDescription = s.job.jobDescription || currentJobConfig.jobDescription
         currentJobConfig.redLines = s.job.redLines || currentJobConfig.redLines || []
         currentJobConfig.bonusPoints = s.job.bonusPoints || currentJobConfig.bonusPoints || []
+        currentJobConfig.coreCriteria = s.job.coreCriteria || []
       }
     } catch {}
   }
@@ -523,7 +532,8 @@ function saveJobConfigToStorage(showMessage = false) {
       educationLevel: currentJobConfig.educationLevel,
       jobDescription: currentJobConfig.jobDescription,
       redLines: [...(currentJobConfig.redLines || [])],
-      bonusPoints: [...(currentJobConfig.bonusPoints || [])]
+      bonusPoints: [...(currentJobConfig.bonusPoints || [])],
+      coreCriteria: [...currentJobConfig.coreCriteria]
     }
     localStorage.setItem('goresume_settings', JSON.stringify(s))
 
@@ -537,7 +547,8 @@ function saveJobConfigToStorage(showMessage = false) {
         educationLevel: currentJobConfig.educationLevel,
         jobDescription: currentJobConfig.jobDescription,
         redLines: [...(currentJobConfig.redLines || [])],
-        bonusPoints: [...(currentJobConfig.bonusPoints || [])]
+        bonusPoints: [...(currentJobConfig.bonusPoints || [])],
+        coreCriteria: [...currentJobConfig.coreCriteria]
       })
       if (currentJobConfig.title && currentJobConfig.title !== currentKey) {
         savePresetCustomization(currentJobConfig.title, {
@@ -570,6 +581,7 @@ function handlePresetSelect(preset: JobPreset | null) {
     currentJobConfig.jobDescription = merged.jobDescription || merged.description || ''
     currentJobConfig.redLines = merged.redLines ? [...merged.redLines] : []
     currentJobConfig.bonusPoints = merged.bonusPoints ? [...merged.bonusPoints] : []
+    currentJobConfig.coreCriteria = merged.coreCriteria ? [...merged.coreCriteria] : [...merged.requiredSkills]
 
     // 同步到当前的全局设置，但保留各模板已存储的定制数据
     saveJobConfigToStorage(false)
@@ -597,6 +609,7 @@ function saveCurrentAsNewTemplate() {
     description: currentJobConfig.jobDescription ? currentJobConfig.jobDescription.slice(0, 60) + '...' : '',
     redLines: [...(currentJobConfig.redLines || [])],
     bonusPoints: [...(currentJobConfig.bonusPoints || [])],
+    coreCriteria: [...currentJobConfig.coreCriteria],
     isCustom: true
   }
   saveCustomJobPreset(newPreset)
@@ -655,7 +668,8 @@ async function handleCreate() {
     education_level: currentJobConfig.educationLevel,
     job_description: currentJobConfig.jobDescription,
     red_lines: [...(currentJobConfig.redLines || [])],
-    bonus_points: [...(currentJobConfig.bonusPoints || [])]
+    bonus_points: [...(currentJobConfig.bonusPoints || [])],
+    core_criteria: [...currentJobConfig.coreCriteria]
   }
   const result = await projectStore.createProject(
     newProject.name.trim(),

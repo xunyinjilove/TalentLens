@@ -1,4 +1,4 @@
-import { createRouter, createWebHistory } from 'vue-router'
+import { createRouter, createWebHashHistory } from 'vue-router'
 
 // 路由配置
 const routes = [
@@ -24,7 +24,9 @@ const routes = [
 
 // 创建路由器
 const router = createRouter({
-  history: createWebHistory(),
+  // Wails serves local assets without an SPA history fallback. Keep routes in
+  // the fragment so refreshing a project or settings page still loads index.html.
+  history: createWebHashHistory(),
   routes
 })
 
