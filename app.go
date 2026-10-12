@@ -1226,6 +1226,8 @@ func (a *App) TestBossLogin() bool {
 type JobDraftRequest struct {
 	ProjectID       string           `json:"projectId"`
 	JobType         string           `json:"jobType"`
+	EmploymentType  string           `json:"employmentType"`
+	Majors          []JobMajor       `json:"majors"`
 	Action          string           `json:"action"`
 	Title           string           `json:"title"`
 	Description     string           `json:"description"`
@@ -1246,6 +1248,11 @@ type JobDraftRequest struct {
 type JobCertificate struct {
 	Category string `json:"category"`
 	Name     string `json:"name"`
+}
+
+type JobMajor struct {
+	Value string   `json:"value"`
+	Path  []string `json:"path"`
 }
 
 type JobPostingOptionsResult struct {
