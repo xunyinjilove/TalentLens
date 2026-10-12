@@ -28,6 +28,7 @@ type InterviewSession struct {
 
 type InterviewTurn struct {
 	Category       string `json:"category"`
+	Standard       bool   `json:"standard,omitempty"` // 同岗位候选人共用题，便于横向比较
 	RuleID         string `json:"rule_id,omitempty"`
 	Criterion      string `json:"criterion,omitempty"`
 	Question       string `json:"question"`
@@ -114,6 +115,12 @@ func (a *App) StartInterview(resumeID string) (*InterviewSession, error) {
 		return nil, fmt.Errorf("请先完成简历分析，生成初面题目")
 	}
 	turns := make([]InterviewTurn, 0, len(resume.Analysis.InterviewQA)+len(resume.Analysis.RedLineChecks))
+	if project := a.GetProject(resume.ProjectID); project != nil {
+		turns = append(turns,
+			InterviewTurn{Category: "岗位统一题", Standard: true, Question: "请介绍一个与“" + project.JobConfig.Title + "”直接相关的完整项目：说明本人职责、关键行动、结果及可核实依据。"},
+			InterviewTurn{Category: "岗位统一题", Standard: true, Question: "请介绍一次与该岗位核心工作有关的困难或失误：您如何定位原因、采取什么措施、结果如何？"},
+		)
+	}
 	for _, question := range resume.Analysis.InterviewQA {
 		if strings.TrimSpace(question.Question) != "" {
 			turns = append(turns, InterviewTurn{Category: question.Category, Question: question.Question})
@@ -155,7 +162,7 @@ func (a *App) evaluateInterviewTurn(session *InterviewSession, index int, allowF
 	if a.config.AI.APIKey == "" {
 		return fmt.Errorf("请先配置 AI API Key")
 	}
-	prompt := "你是结构化初面评估员。只依据候选人真实回答判断，不把参考答案当作候选人的回答。只返回 JSON: {\"score\":0到100的整数,\"assessment\":\"具体评价\",\"evidence\":\"回答中的原文依据\",\"follow_up_question\":\"如需核实则给一道简短追问，否则为空\"}。\n\n---\n\n" +
+	prompt := "你是结构化初面评估员。只依据候选人真实回答判断，不把参考答案当作候选人的回答。评分锚点：0 无回答、25 泛泛了解、50 参与过、75 独立完成并说明方法、100 主导并复盘结果。红线题只用于核实，不计入能力平均分。只返回 JSON: {\"score\":0到100的整数,\"assessment\":\"具体评价\",\"evidence\":\"回答中的原文依据\",\"follow_up_question\":\"如需核实则给一道简短追问，否则为空\"}。\n\n---\n\n" +
 		fmt.Sprintf("问题：%s\n候选人回答：%s\n", turn.Question, turn.Answer)
 	if turn.FollowUp != "" {
 		prompt += fmt.Sprintf("追问：%s\n追问回答：%s\n", turn.FollowUp, turn.FollowUpAnswer)
@@ -265,16 +272,14 @@ func (a *App) CompleteInterview(resumeID string) (*InterviewSession, error) {
 	if len(session.Turns) == 0 {
 		return nil, fmt.Errorf("初面题目为空")
 	}
-	sum := 0
 	var transcript strings.Builder
 	for _, turn := range session.Turns {
 		if !turn.Evaluated {
 			return nil, fmt.Errorf("仍有题目未完成")
 		}
-		sum += turn.Score
 		fmt.Fprintf(&transcript, "问题：%s\n回答：%s\n追问：%s\n追问回答：%s\n单题评价：%s\n", turn.Question, turn.Answer, turn.FollowUp, turn.FollowUpAnswer, turn.Assessment)
 	}
-	session.OverallScore = int(math.Round(float64(sum) / float64(len(session.Turns))))
+	session.OverallScore = scoreInterviewAbility(session)
 	if a.config.AI.APIKey == "" {
 		return nil, fmt.Errorf("请先配置 AI API Key")
 	}
@@ -294,13 +299,57 @@ func (a *App) CompleteInterview(resumeID string) (*InterviewSession, error) {
 		return nil, fmt.Errorf("AI 未返回初面总结")
 	}
 	session.AISummary, session.AIRecommendation, session.Status = result.Summary, result.Recommendation, "completed"
+	if session.AIRecommendation != "advance" && session.AIRecommendation != "review" && session.AIRecommendation != "decline" {
+		session.AIRecommendation = "review"
+	}
 	for _, turn := range session.Turns {
 		if turn.RuleID != "" && session.AIRecommendation == "advance" {
 			session.AIRecommendation = "review"
 			break
 		}
 	}
+	if data, readErr := os.ReadFile(filepath.Join(a.getDataDir(), "resumes", resumeID+".json")); readErr == nil {
+		var resume Resume
+		if json.Unmarshal(data, &resume) == nil && resume.Analysis != nil {
+			if project := a.GetProject(resume.ProjectID); project != nil {
+				a.prepareResumeDecision(&resume, &project.JobConfig)
+			}
+			if (resume.Analysis.RedLineStatus == "pending" || resume.Analysis.RedLineStatus == "failed") && session.AIRecommendation == "advance" {
+				session.AIRecommendation = "review"
+			}
+		}
+	}
 	return session, a.saveInterview(session)
+}
+
+// scoreInterviewAbility 仅汇总能力题。红线题是资格核实，不属于能力评分。
+func scoreInterviewAbility(session *InterviewSession) int {
+	if session == nil {
+		return 0
+	}
+	standardSum, standardCount, dynamicSum, dynamicCount := 0, 0, 0, 0
+	for _, turn := range session.Turns {
+		if turn.RuleID != "" || !turn.Evaluated {
+			continue
+		}
+		if turn.Standard {
+			standardSum += turn.Score
+			standardCount++
+		} else {
+			dynamicSum += turn.Score
+			dynamicCount++
+		}
+	}
+	if standardCount == 0 && dynamicCount == 0 {
+		return 0
+	}
+	if standardCount == 0 {
+		return int(math.Round(float64(dynamicSum) / float64(dynamicCount)))
+	}
+	if dynamicCount == 0 {
+		return int(math.Round(float64(standardSum) / float64(standardCount)))
+	}
+	return int(math.Round(float64(standardSum)/float64(standardCount)*0.6 + float64(dynamicSum)/float64(dynamicCount)*0.4))
 }
 
 // ReviewInterviewRedLine 将 HR 确认的初面原话关联到具体红线；AI 单题分不参与裁决。
@@ -347,6 +396,9 @@ func (a *App) ReviewInterview(resumeID string, decision string, note string) (*I
 		var resume Resume
 		if err := json.Unmarshal(data, &resume); err != nil {
 			return nil, err
+		}
+		if project := a.GetProject(resume.ProjectID); project != nil {
+			a.prepareResumeDecision(&resume, &project.JobConfig)
 		}
 		if resume.Analysis != nil && (resume.Analysis.RedLineStatus == "pending" || resume.Analysis.RedLineStatus == "failed") {
 			return nil, fmt.Errorf("请先逐项核实岗位红线，再决定是否进入下一轮")

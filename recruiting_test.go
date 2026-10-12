@@ -54,7 +54,7 @@ func TestJobBonusDoesNotOverrideCoreAbility(t *testing.T) {
 	}{
 		{"no bonus configured", 90, 0, nil, 90, "strong_recommend"},
 		{"weak core cannot be rescued", 50, 100, []string{"项目加分"}, 50, "not_recommend"},
-		{"strong core with bonus", 80, 100, []string{"项目加分"}, 90, "strong_recommend"},
+		{"strong core with unconfirmed bonus", 80, 100, []string{"项目加分"}, 80, "recommend"},
 		{"no bonus evidence", 80, 100, nil, 80, "recommend"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

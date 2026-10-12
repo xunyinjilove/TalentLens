@@ -1,6 +1,8 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
 const vm = require('node:vm');
 const agent = require('./multi_platform_agent');
 
@@ -53,6 +55,33 @@ test('browser minimization targets a page window and releases its CDP session', 
     args: { windowId: 17, bounds: { windowState: 'minimized' } }
   });
   assert.equal(detached, true);
+});
+
+test('manual candidate viewing prevents the search worker from minimizing that browser', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'talentlens-view-'));
+  const marker = path.join(dir, 'manual_view_51job.flag');
+  fs.writeFileSync(marker, String(Date.now()));
+  const commands = [];
+  const session = {
+    send: async (command, args) => {
+      commands.push({ command, args });
+      return command === 'Browser.getWindowForTarget' ? { windowId: 17 } : {};
+    },
+    detach: async () => {}
+  };
+  const page = {
+    url: () => 'https://ehire.51job.com/Revision/talent/search',
+    target: () => ({ createCDPSession: async () => session })
+  };
+  try {
+    assert.equal(await agent.setBrowserWindowState(page, 'minimized', {
+      manualViewFile: marker,
+      searchStartedAt: Date.now() - 2000
+    }), true);
+    assert.equal(commands.length, 0);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 test('window minimization retries while a newly opened detail tab has no window ID', async () => {
@@ -114,6 +143,56 @@ test('51job captures the exact candidate detail URL without opening a foreground
   try {
     const result = await agent.capture51jobDetailUrl(page, { name: '陈先生', rawCardText: rightCard.innerText });
     assert.equal(result.url, 'https://ehire.51job.com/Revision/talent/resume/detail?resumeId=2');
+    assert.equal(global.window.open, originalOpen);
+  } finally {
+    delete global.window;
+    delete global.document;
+  }
+});
+
+test('51job delayed detail opening never reaches the foreground popup API', async () => {
+  let foregroundOpens = 0;
+  const originalOpen = () => { foregroundOpens++; return null; };
+  const url = 'https://ehire.51job.com/Revision/talent/resume/detail?resumeId=42';
+  let popupFinished;
+  const popup = new Promise(resolve => { popupFinished = resolve; });
+  const name = { innerText: '测试候选人', click() {
+    setTimeout(() => { global.window.open(url, '_blank'); popupFinished(); }, 20);
+  } };
+  const card = { innerText: '测试候选人\n5年经验', querySelector: () => name };
+  global.window = { open: originalOpen };
+  global.document = { querySelectorAll: () => [card] };
+  const page = {
+    url: () => 'https://ehire.51job.com/Revision/talent/search',
+    evaluate: async (fn, ...args) => fn(...args)
+  };
+  try {
+    const result = await agent.capture51jobDetailUrl(page, { name: name.innerText, rawCardText: card.innerText });
+    await popup;
+    assert.equal(foregroundOpens, 0, 'delayed window.open must not activate a native browser tab');
+    assert.equal(result.url, url);
+    assert.equal(global.window.open, originalOpen);
+  } finally {
+    delete global.window;
+    delete global.document;
+  }
+});
+
+test('51job detail capture releases its hook on timeout or click failure', async () => {
+  const originalOpen = () => null;
+  const name = { innerText: '测试候选人', click() {} };
+  const card = { innerText: '测试候选人', querySelector: () => name };
+  global.window = { open: originalOpen };
+  global.document = { querySelectorAll: () => [card] };
+  const page = {
+    url: () => 'https://ehire.51job.com/Revision/talent/search',
+    evaluate: async (fn, ...args) => fn(...args)
+  };
+  try {
+    assert.deepEqual(await agent.capture51jobDetailUrl(page, { name: name.innerText }, 10), { clicked: true, url: '' });
+    assert.equal(global.window.open, originalOpen);
+    name.click = () => { throw Error('click failed'); };
+    await assert.rejects(agent.capture51jobDetailUrl(page, { name: name.innerText }, 10), /click failed/);
     assert.equal(global.window.open, originalOpen);
   } finally {
     delete global.window;

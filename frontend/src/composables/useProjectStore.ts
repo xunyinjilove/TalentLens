@@ -19,6 +19,7 @@ export interface Project {
     job_description?: string
     red_lines?: string[]
     bonus_points?: string[]
+    core_criteria?: string[]
   }
   resume_ids: string[]
   status: 'draft' | 'analyzing' | 'completed'

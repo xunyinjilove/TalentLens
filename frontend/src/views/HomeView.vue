@@ -175,6 +175,7 @@
                     <span v-if="resumeStore.selectedResume.source_keyword" class="candidate-source-kw-badge" title="配额调度派生词条">
                       <el-icon><Filter /></el-icon> 来源词: {{ resumeStore.selectedResume.source_keyword }}
                     </span>
+                    <span v-if="resumeStore.selectedResume.activity_label" class="candidate-source-kw-badge">平台活跃：{{ resumeStore.selectedResume.activity_label }}</span>
                     <span v-if="resumeStore.selectedResume.email" class="candidate-email-badge" title="点击复制候选人联系邮箱" @click="copyCandidateEmail">
                       <el-icon><Message /></el-icon> {{ resumeStore.selectedResume.email }}
                       <el-icon class="copy-icon"><DocumentCopy /></el-icon>
@@ -186,25 +187,24 @@
                       <el-icon><Link /></el-icon> 在线直达主页
                       <el-icon class="copy-icon"><DocumentCopy /></el-icon>
                     </span>
-                    <a v-if="resumeStore.selectedResume.url" :href="resumeStore.selectedResume.url" target="_blank" class="candidate-link-btn" title="在浏览器中直接打开候选人在线页面">
-                      <el-icon><TopRight /></el-icon> 直达联系
-                    </a>
                   </div>
                 </div>
 
-                <!-- 🚫 触碰用人部门一票否决红线警告 -->
-                 <div v-if="resumeStore.selectedResume.analysis?.redLineChecks?.length" class="redline-alert-card">
+                <!-- 岗位红线始终显示；旧项目可由 HR 在这里补录核验条件。 -->
+                <div v-if="resumeStore.selectedResume.analysis" class="redline-alert-card">
                   <div class="redline-alert-header">
                     <div class="redline-title-group">
                       <div class="redline-badge-icon">
                         <el-icon><CircleClose /></el-icon>
                       </div>
                       <div class="redline-title-text">
-                         <span class="redline-title">岗位红线逐项核验：{{ resumeStore.selectedResume.analysis.redLineStatus === 'failed' ? '不满足' : resumeStore.selectedResume.analysis.redLineStatus === 'pending' ? '待核实' : '满足' }}</span>
+                         <span class="redline-title">岗位红线逐项核验：{{ !resumeStore.selectedResume.analysis.redLineChecks?.length ? '尚未配置' : resumeStore.selectedResume.analysis.redLineStatus === 'failed' ? '不满足' : resumeStore.selectedResume.analysis.redLineStatus === 'pending' ? '待核实' : '满足' }}</span>
                          <span class="redline-sub">AI 线索不能直接淘汰；HR 确认不满足时不推荐，能力原始分仍保留。</span>
                       </div>
                     </div>
+                    <el-button size="small" @click="handleAddProjectReviewCriterion('redline')">添加项目红线</el-button>
                   </div>
+                  <p v-if="!resumeStore.selectedResume.analysis.redLineChecks?.length" class="empty-review-help">本项目尚未设置红线。添加后，该项目的候选人会先标记为待 HR 核实。</p>
                   <ul class="redline-violations-list">
                      <li v-for="(check, vIdx) in resumeStore.selectedResume.analysis.redLineChecks" :key="vIdx" class="redline-violation-item">
                       <el-icon><Warning /></el-icon>
@@ -216,23 +216,28 @@
                   </ul>
                 </div>
 
-                <!-- ⭐ 达成用人部门优先加分项 -->
-                <div v-if="resumeStore.selectedResume.analysis?.bonusMatches && resumeStore.selectedResume.analysis.bonusMatches.length > 0" class="bonus-match-card">
+                <!-- ⭐ 优先加分项需 HR 逐条确认 -->
+                <div v-if="resumeStore.selectedResume.analysis" class="bonus-match-card">
                   <div class="bonus-header">
                     <div class="bonus-title-group">
                       <div class="bonus-badge-icon">
                         <el-icon><Check /></el-icon>
                       </div>
                       <div class="bonus-title-text">
-                        <span class="bonus-title">⭐ 达成用人部门优先加分项 (Bonus Points)</span>
-                        <span class="bonus-sub">该候选人具备用人部门高优先级青睐特征，建议重点推介与优先安排面试</span>
+                        <span class="bonus-title">⭐ 优先加分项：{{ !resumeStore.selectedResume.analysis.bonusChecks?.length ? '尚未配置' : `${resumeStore.selectedResume.analysis.confirmedBonusCount || 0} 项已确认` }}</span>
+                        <span class="bonus-sub">待确认项不计入排序；已确认项只在同一能力档内比较，不改变能力分。</span>
                       </div>
                     </div>
+                    <el-button size="small" @click="handleAddProjectReviewCriterion('bonus')">添加项目加分项</el-button>
                   </div>
+                  <p v-if="!resumeStore.selectedResume.analysis.bonusChecks?.length" class="empty-review-help">本项目尚未设置加分项。添加后，由 HR 逐人选择待确认、确认满足或确认不满足。</p>
                   <ul class="bonus-matches-list">
-                    <li v-for="(bonus, bIdx) in resumeStore.selectedResume.analysis.bonusMatches" :key="bIdx" class="bonus-match-item">
+                    <li v-for="(bonus, bIdx) in resumeStore.selectedResume.analysis.bonusChecks" :key="bIdx" class="bonus-match-item">
                       <el-icon><Check /></el-icon>
-                      <span>{{ bonus }}</span>
+                      <span>{{ bonus.status === 'met' ? 'HR 已确认' : bonus.status === 'violated' ? 'HR 确认不满足' : '待 HR 确认' }} · {{ bonus.criterion }}{{ bonus.suggested_status && bonus.status === 'unknown' ? `（AI 线索：${bonus.suggested_status === 'met' ? '可能满足' : '可能不满足'}）` : '' }}{{ bonus.evidence ? `（依据：${bonus.evidence}）` : '' }}</span>
+                      <el-button size="small" text type="success" @click="handleReviewBonus(bonus.criterion, 'met')">确认满足</el-button>
+                      <el-button size="small" text type="danger" @click="handleReviewBonus(bonus.criterion, 'violated')">确认不满足</el-button>
+                      <el-button size="small" text @click="handleReviewBonus(bonus.criterion, 'unknown')">待确认</el-button>
                     </li>
                   </ul>
                 </div>
@@ -403,6 +408,12 @@
                     >
                       <el-icon><DocumentCopy /></el-icon> 复制直达网址
                     </button>
+                    <template v-if="is51JobCandidate">
+                      <button class="portal-act-btn secondary" :disabled="contactBusy || jobPickerVisible || !!resumeStore.selectedResume.contact_status" @click="handle51JobGreeting">51job 一键打招呼</button>
+                      <button class="portal-act-btn secondary" :disabled="contactBusy || resumeStore.selectedResume.contact_status !== 'greeted'" @click="handle51JobContact">对话索要简历</button>
+                      <button class="portal-act-btn secondary" :disabled="contactBusy || resumeStore.selectedResume.contact_status !== 'resume_requested'" @click="check51JobReply(resumeStore.selectedResume.id, true)">检查回复并导入</button>
+                      <span class="portal-empty-tip">{{ contactStatusText }}</span>
+                    </template>
                     <span v-if="!resumeStore.selectedResume.url" class="portal-empty-tip">
                       （本地导入简历，暂无在线直达链接）
                     </span>
@@ -418,9 +429,13 @@
                   <div class="score-breakdown">
                     <p v-if="resumeStore.selectedResume.analysis.abilityScore !== undefined" class="score-explanation">
                       核心能力 {{ resumeStore.selectedResume.analysis.abilityScore }} 分
-                      <span v-if="resumeStore.selectedResume.analysis.bonusScore"> · 附加优势 +{{ resumeStore.selectedResume.analysis.bonusScore }} 分</span>
-                      · 红线结论单独显示
+                      · 红线与加分结论另列；加分不抬高能力分
                     </p>
+                    <p v-if="resumeStore.selectedResume.analysis.scoreBasis === 'provisional'" class="score-explanation">⚠️ 暂估分：AI 未提供足够可定位的逐项原文，系统改用技能与经验匹配估计；请 HR 核对后再推进。</p>
+                    <p v-for="item in resumeStore.selectedResume.analysis.coreCriterionChecks || []" :key="item.criterion" class="score-explanation">
+                      {{ item.criterion }}：{{ item.level }}/4（{{ item.level === 0 && resumeStore.selectedResume.analysis.scoreBasis === 'provisional' ? '未取得可核对原文' : ['未体现', '了解', '参与', '独立完成', '主导并可复盘'][item.level] || '待核实' }}）{{ item.evidence ? ` · ${item.evidence}` : '' }}
+                    </p>
+                    <p v-if="!resumeStore.selectedResume.analysis.coreCriterionChecks?.length" class="score-explanation">暂无逐项评分卡；当前显示旧版核心匹配估计，建议重新分析以取得可核对的逐项依据。</p>
                     <div class="score-item">
                       <span class="label">{{ $t('analysis.skillMatch') }}</span>
                       <el-progress :percentage="resumeStore.selectedResume.analysis.skillMatch" :color="getProgressColor(resumeStore.selectedResume.analysis.skillMatch)" />
@@ -594,6 +609,7 @@
                 </div>
                 <div class="rank-scores">
                   <span class="rank-score-main" :class="getScoreClass(r.score)">{{ r.score }}</span>
+                  <span>{{ !r.analysis ? '待分析' : r.analysis.redLineStatus === 'failed' ? '必备条件不满足' : r.analysis.redLineStatus === 'pending' ? '必备条件待核实' : r.analysis.redLineStatus === 'not_configured' ? '未配置红线' : '红线已核实' }} · 已确认优势 {{ r.analysis?.confirmedBonusCount || 0 }}</span>
                   <div class="rank-score-detail">
                     <span>技能 {{ r.analysis?.skillMatch || 0 }}</span>
                     <span>经验 {{ r.analysis?.experienceMatch || 0 }}</span>
@@ -628,6 +644,30 @@
       @refresh="handleRefreshProject"
     />
     <AIInterviewDialog v-model="showInterviewDialog" :resume-id="resumeStore.selectedResume?.id || ''" />
+
+    <el-dialog v-model="jobPickerVisible" title="选择 51job 沟通职位" width="640px" destroy-on-close>
+      <p class="job-picker-hint">招聘项目岗位：{{ projectStore.currentProject?.job_config?.title || '未设置' }}。请从当前 51job 企业账号返回的职位中选择；点数会在下一步单独确认。</p>
+      <div class="job-picker-search">
+        <el-input v-model="jobPickerKeyword" clearable placeholder="输入职位名称搜索 51job" @keyup.enter="load51JobOptions" />
+        <el-button :loading="jobPickerLoading" @click="load51JobOptions">搜索</el-button>
+      </div>
+      <el-alert v-if="jobPickerError" :title="jobPickerError" type="warning" :closable="false" show-icon />
+      <div v-loading="jobPickerLoading" class="job-picker-list">
+        <button v-for="job in jobPickerJobs" :key="job.id" type="button" class="job-picker-row"
+          :class="{ selected: jobPickerSelectedID === job.id }" @click="jobPickerSelectedID = job.id">
+          <span class="job-picker-row-main"><strong>{{ job.title }}</strong><small>ID {{ job.id }}</small></span>
+          <span class="job-picker-row-meta">{{ [job.company, job.workArea, job.publishStatus].filter(Boolean).join(' · ') || job.source }}</span>
+          <span v-if="job.title === projectStore.currentProject?.job_config?.title" class="job-picker-match">同名岗位</span>
+        </button>
+        <p v-if="!jobPickerLoading && !jobPickerJobs.length && jobPickerError" class="job-picker-empty">职位列表加载失败，尚不能判断 51job 是否有职位。请点击“搜索”重试。</p>
+        <p v-else-if="!jobPickerLoading && !jobPickerJobs.length" class="job-picker-empty">当前没有返回职位。可输入更短的职位关键词搜索，或检查 51job 企业账号的在招职位。</p>
+      </div>
+      <p v-if="jobPickerHasMore" class="job-picker-more">51job 还有更多职位未列出，请输入职位名称搜索；当前列表不是全部职位。</p>
+      <template #footer>
+        <el-button @click="jobPickerVisible = false">取消</el-button>
+        <el-button type="primary" :disabled="!jobPickerSelectedID || jobPickerLoading" @click="confirm51JobSelectedJob">核对点数并继续</el-button>
+      </template>
+    </el-dialog>
 
     <!-- 业务主管极简推介卡弹窗 -->
     <el-dialog
@@ -683,7 +723,7 @@ import {
   CircleCheck, Warning, ChatLineSquare, Clock, Loading, CircleClose,
   RefreshRight, Download, Tickets, QuestionFilled, DocumentCopy, InfoFilled, Search,
   ChatDotRound, DocumentAdd, Connection, CloseBold, Paperclip, Compass, Check, Message,
-  Link, TopRight, Plus, Share, Aim, Filter
+  Link, Plus, Share, Aim, Filter
 } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import TitleBar from '../components/TitleBar.vue'
@@ -709,6 +749,32 @@ const projectName = computed(() => projectStore.currentProject?.name || '')
 const rightTab = ref<'detail' | 'ranking' | 'content'>('detail')
 const parsedContent = ref('')
 const contentLoading = ref(false)
+const contactBusy = ref(false)
+interface JobCommunicationOption {
+  id: string
+  title: string
+  company?: string
+  workArea?: string
+  source?: string
+  publishStatus?: string
+}
+const jobPickerVisible = ref(false)
+const jobPickerLoading = ref(false)
+const jobPickerResumeID = ref('')
+const jobPickerKeyword = ref('')
+const jobPickerJobs = ref<JobCommunicationOption[]>([])
+const jobPickerSelectedID = ref('')
+const jobPickerHasMore = ref(false)
+const jobPickerError = ref('')
+const is51JobCandidate = computed(() => {
+  try {
+    const u = new URL(resumeStore.selectedResume?.url || '')
+    return u.protocol === 'https:' && u.hostname === 'ehire.51job.com' && u.pathname === '/Revision/talent/resume/detail' && /^\d+$/.test(u.searchParams.get('resumeId') || '')
+  } catch { return false }
+})
+const contactStatusText = computed(() => ({
+  greeted: '已打招呼', resume_requested: '已索要简历；页面打开时后台轮询回复', resume_received: '已收到完整简历'
+}[resumeStore.selectedResume?.contact_status || ''] || '尚未联系'))
 
 const jobTitle = ref('高级Go开发工程师')
 const showConfigGuide = ref(false)
@@ -731,6 +797,44 @@ async function handleReviewRedLine(criterion: string, status: 'met' | 'violated'
     if (projectId.value) await resumeStore.loadProjectResumes(projectId.value)
     ElMessage.success('红线核实结果已保存')
   } catch (err: any) { ElMessage.error(`保存红线复核失败：${err.message || err}`) }
+}
+
+async function handleReviewBonus(criterion: string, status: 'met' | 'violated' | 'unknown') {
+  const resume = resumeStore.selectedResume
+  if (!resume) return
+  let evidence = ''
+  if (status !== 'unknown') {
+    try {
+      const result = await ElMessageBox.prompt(`请输入人工核实「${criterion}」的事实依据`, 'HR 加分项复核', { inputValidator: value => !!value?.trim() || '请填写核实依据' })
+      evidence = result.value.trim()
+    } catch { return }
+  }
+  try {
+    const App = await import('../../wailsjs/go/main/App')
+    await App.SetReviewedBonus(resume.id, criterion, status, evidence)
+    if (projectId.value) await resumeStore.loadProjectResumes(projectId.value)
+    ElMessage.success('加分项人工核实结果已保存')
+  } catch (err: any) { ElMessage.error(`保存加分项复核失败：${err.message || err}`) }
+}
+
+async function handleAddProjectReviewCriterion(kind: 'redline' | 'bonus') {
+  if (!projectId.value) return
+  const label = kind === 'redline' ? '岗位红线' : '加分项'
+  let criterion = ''
+  try {
+    const result = await ElMessageBox.prompt(`填写适用于当前项目所有候选人的${label}，由 HR 逐人核实`, `添加${label}`, {
+      inputPlaceholder: kind === 'redline' ? '例如：独立负责过临床项目' : '例如：有多中心项目管理经验',
+      inputValidator: value => !!value?.trim() && value.trim().length <= 120 || '请填写 1–120 字的具体要求'
+    })
+    criterion = result.value.trim()
+  } catch { return }
+  try {
+    const App = await import('../../wailsjs/go/main/App')
+    await App.AddProjectReviewCriterion(projectId.value, kind, criterion)
+    await projectStore.refreshProject(projectId.value)
+    await resumeStore.loadProjectResumes(projectId.value)
+    ElMessage.success(`${label}已加入当前项目，候选人默认待 HR 核实`)
+  } catch (err: any) { ElMessage.error(`添加${label}失败：${err.message || err}`) }
 }
 const bossDialogContinueMode = ref(false) // true=继续寻才模式（跳过已有候选人）
 const showPitchDialog = ref(false) // 业务主管推介卡弹窗
@@ -800,16 +904,156 @@ async function handleOpenCandidateUrl() {
   if (WailsApp && WailsApp.OpenURL) {
     try {
       await WailsApp.OpenURL(url)
-      ElMessage.success('✅ 已调用默认浏览器打开候选人在线主页！')
+      ElMessage.success('已在招聘专用浏览器中显示候选人主页')
       return
     } catch (e: any) {
       ElMessage.error(`打开浏览器失败: ${e.message || e}`)
+      return
     }
   }
 
   // 开发预览模式回退
   window.open(url, '_blank')
   ElMessage.success('已在新标签页中打开候选人主页！')
+}
+
+async function handle51JobGreeting() {
+  const resume = resumeStore.selectedResume
+  if (!resume || !is51JobCandidate.value || contactBusy.value || jobPickerVisible.value) return
+  jobPickerResumeID.value = resume.id
+  jobPickerKeyword.value = ''
+  jobPickerJobs.value = []
+  jobPickerSelectedID.value = ''
+  jobPickerHasMore.value = false
+  jobPickerError.value = ''
+  jobPickerVisible.value = true
+  await load51JobOptions()
+}
+
+async function load51JobOptions() {
+  if (!jobPickerVisible.value || jobPickerLoading.value || !jobPickerResumeID.value) return
+  jobPickerLoading.value = true
+  jobPickerError.value = ''
+  jobPickerJobs.value = []
+  jobPickerSelectedID.value = ''
+  jobPickerHasMore.value = false
+  const requestedKeyword = jobPickerKeyword.value
+  const requestedResumeID = jobPickerResumeID.value
+  try {
+    const App = await import('../../wailsjs/go/main/App')
+    const result = await App.List51JobCommunicationJobs(requestedResumeID, requestedKeyword)
+    if (!jobPickerVisible.value || jobPickerResumeID.value !== requestedResumeID || jobPickerKeyword.value !== requestedKeyword) return
+    if (result.status !== 'jobs') {
+      jobPickerError.value = result.message || '无法读取 51job 沟通职位'
+      return
+    }
+    jobPickerJobs.value = result.jobs || []
+    jobPickerHasMore.value = !!result.hasMore
+    const title = projectStore.currentProject?.job_config?.title || ''
+    const exact = jobPickerJobs.value.filter(job => job.title === title)
+    if (exact.length === 1) jobPickerSelectedID.value = exact[0].id
+  } catch (err: any) { jobPickerError.value = `读取 51job 职位失败：${err.message || err}` }
+  finally { jobPickerLoading.value = false }
+}
+
+async function confirm51JobSelectedJob() {
+  const resume = resumeStore.selectedResume
+  const job = jobPickerJobs.value.find(item => item.id === jobPickerSelectedID.value)
+  if (!resume || resume.id !== jobPickerResumeID.value || !job || contactBusy.value) {
+    ElMessage.warning('候选人或沟通职位已变化，请重新选择')
+    return
+  }
+  jobPickerVisible.value = false
+  contactBusy.value = true
+  try {
+    const App = await import('../../wailsjs/go/main/App')
+    const preview = await App.Prepare51JobHiChatForJob(resume.id, job.id, job.title)
+    if (preview.status !== 'needs_confirmation' || !preview.quoteId) {
+      ElMessage.warning({ message: preview.message || '无法核实 51job 职位和点数，未发起Hi聊', duration: 10000, showClose: true })
+      return
+    }
+    const name = resume.analysis?.candidateName || resume.fileName
+    try {
+      await ElMessageBox.confirm(
+        `候选人：${name}。招聘项目岗位：${projectStore.currentProject?.job_config?.title || '未设置'}。HR 选择的 51job 沟通职位：${preview.jobTitle}（ID ${job.id}）。51job 显示本次预计消耗 ${preview.points} 个Hi聊数。确认后软件将点击平台“发起Hi聊”，由 51job 发送平台招呼语；软件不会再额外发送一条自定义招呼。`,
+        '确认 51job Hi聊点数',
+        { confirmButtonText: '确认消耗并发起Hi聊', cancelButtonText: '取消', type: 'warning' }
+      )
+    } catch {
+      ElMessage.info('已取消，未点击发起Hi聊')
+      return
+    }
+    const result = await App.Confirm51JobHiChat(resume.id, preview.quoteId)
+    if (result.status !== 'sent') {
+      ElMessage.warning({ message: result.message || '平台未确认发送成功，请先查看聊天记录', duration: 12000, showClose: true })
+      return
+    }
+    if (projectId.value) await resumeStore.loadProjectResumes(projectId.value)
+    ElMessage.success(result.message)
+  } catch (err: any) { ElMessage.error(`51job 打招呼未确认：${err.message || err}`) }
+  finally { contactBusy.value = false }
+}
+
+async function handle51JobContact() {
+  const resume = resumeStore.selectedResume
+  if (!resume || !is51JobCandidate.value || contactBusy.value) return
+  const preset = '您好，方便发一份最新的完整简历（PDF 或 Word）吗？收到后我们会结合岗位要求进一步评估。'
+  let message = ''
+  try {
+    const reply = await ElMessageBox.prompt('请确认发给这位候选人的索要简历内容；发送后将在 51job 聊天记录中核验。', '51job 索要简历', {
+      inputType: 'textarea', inputValue: preset,
+      inputValidator: value => !!value?.trim() && value.trim().length <= 500 || '请输入 1–500 字'
+    })
+    message = reply.value.trim()
+  } catch { return }
+  contactBusy.value = true
+  try {
+    const App = await import('../../wailsjs/go/main/App')
+    const result = await App.Start51JobConversation(resume.id, 'ask_resume', message)
+    if (result.status === 'needs_confirmation' || result.status === 'needs_job_selection') {
+      ElMessage.warning({ message: result.message, duration: 10000, showClose: true })
+      return
+    }
+    if (result.status !== 'sent') throw new Error(result.message || '平台未确认发送成功')
+    if (projectId.value) await resumeStore.loadProjectResumes(projectId.value)
+    ElMessage.success(result.message)
+  } catch (err: any) { ElMessage.error(`51job 沟通未确认：${err.message || err}`) }
+  finally { contactBusy.value = false }
+}
+
+async function check51JobReply(resumeId: string, interactive = false) {
+  if (contactBusy.value) return
+  contactBusy.value = true
+  try {
+    const App = await import('../../wailsjs/go/main/App')
+    const result = await App.Check51JobResumeReply(resumeId)
+    if (result.status === 'downloaded') {
+      if (projectId.value) await resumeStore.loadProjectResumes(projectId.value)
+      ElMessage.success(result.message)
+    } else if (interactive) {
+      if (result.status === 'waiting') ElMessage.info(result.message)
+      else ElMessage.warning(result.message || '尚未取得完整简历')
+    }
+  } catch (err: any) { if (interactive) ElMessage.error(`检查 51job 回复失败：${err.message || err}`) }
+  finally { contactBusy.value = false }
+}
+
+let contactPollTimer: number | null = null
+let contactPollCursor = 0
+let contactPollRunning = false
+async function poll51JobReplies() {
+  if (contactBusy.value || contactPollRunning) return
+  const pending = resumeStore.resumes.filter(r => r.contact_status === 'resume_requested' && r.url?.startsWith('https://ehire.51job.com/'))
+  if (!pending.length) return
+  contactPollRunning = true
+  try {
+    for (let i = 0; i < Math.min(3, pending.length); i++) {
+      if (contactBusy.value) break
+      const next = pending[contactPollCursor % pending.length]
+      contactPollCursor++
+      await check51JobReply(next.id)
+    }
+  } finally { contactPollRunning = false }
 }
 
 function copyCandidateEmail() {
@@ -882,16 +1126,14 @@ function getPitchCardText(resume: any): string {
   const risk = (a?.risks && a.risks[0]) || (a?.weaknesses && a.weaknesses[0]) || '建议初试深入核实项目真实职责与实操深度'
 
   let redLineNotice = ''
-  if (a?.redLineViolations && a.redLineViolations.length > 0) {
-    redLineNotice = `\n🚨 触碰用人红线：${a.redLineViolations.join('；')}`
-  }
+  if (a?.redLineStatus === 'failed') redLineNotice = '\n🚨 HR 已确认红线不满足'
+  else if (a?.redLineStatus === 'pending') redLineNotice = '\n⚠️ 岗位红线待 HR 核实'
 
   let bonusNotice = ''
-  if (a?.bonusMatches && a.bonusMatches.length > 0) {
-    bonusNotice = `\n⭐ 命中优先加分：${a.bonusMatches.join('；')}`
-  }
+  const confirmedBonuses = (a?.bonusChecks || []).filter((check: any) => check.status === 'met' && check.reviewed_at)
+  if (confirmedBonuses.length > 0) bonusNotice = `\n⭐ HR 已确认附加优势：${confirmedBonuses.map((check: any) => check.criterion).join('；')}`
 
-  let text = `【候选人极简推介卡】\n👤 候选人：${candidateName} | 现任：${role}\n📌 背景画像：${exp} | ${edu}\n🎯 综合匹配：${Math.round(score)}分${redLineNotice}${bonusNotice}\n✨ 核心亮点：\n${topStrengths}\n⚠️ 关注提示：\n  - ${risk}`
+  let text = `【候选人极简推介卡】\n👤 候选人：${candidateName} | 现任：${role}\n📌 背景画像：${exp} | ${edu}\n🎯 核心能力：${Math.round(score)}分${redLineNotice}${bonusNotice}\n✨ 核心亮点：\n${topStrengths}\n⚠️ 关注提示：\n  - ${risk}`
   if (resume.url) {
     text += `\n🔗 在线主页：${resume.url}`
   }
@@ -1036,11 +1278,15 @@ const sortedResumes = computed(() => {
   })
 })
 
-// 排名列表（仅已完成分析的，按分数降序）
+// 排名先看准入，再按 5 分能力档、已确认优势、能力原分比较。
 const rankedResumes = computed(() => {
+  const eligibility = (status?: string) => status === 'failed' ? 2 : status === 'pending' ? 1 : 0
   return resumeStore.resumes
     .filter(r => r.status === 'done' && r.score)
-    .sort((a, b) => (b.score || 0) - (a.score || 0))
+    .sort((a, b) => eligibility(a.analysis?.redLineStatus) - eligibility(b.analysis?.redLineStatus)
+      || Math.floor((b.analysis?.abilityScore ?? b.score) / 5) - Math.floor((a.analysis?.abilityScore ?? a.score) / 5)
+      || (b.analysis?.confirmedBonusCount || 0) - (a.analysis?.confirmedBonusCount || 0)
+      || (b.analysis?.abilityScore ?? b.score) - (a.analysis?.abilityScore ?? a.score))
 })
 
 // 导出报告
@@ -1184,15 +1430,34 @@ onMounted(async () => {
     // 加载项目下的简历
     await resumeStore.loadProjectResumes(projectId.value)
   }
+  contactPollTimer = window.setInterval(() => { void poll51JobReplies() }, 120000)
 })
 
 onUnmounted(() => {
+  if (contactPollTimer !== null) window.clearInterval(contactPollTimer)
   resumeStore.cleanupWailsEvents()
 })
 </script>
 
 <style scoped lang="scss">
 @import '../styles/macos-theme.scss';
+
+.job-picker-hint { margin: 0 0 12px; color: #475569; line-height: 1.6; }
+.job-picker-search { display: flex; gap: 10px; margin-bottom: 12px; }
+.job-picker-list { min-height: 110px; max-height: 340px; overflow-y: auto; }
+.job-picker-row {
+  display: block; width: 100%; margin: 0 0 8px; padding: 12px 14px;
+  border: 1px solid #dbe3ee; border-radius: 8px; background: #fff;
+  color: #1e293b; text-align: left; cursor: pointer;
+  &:hover { border-color: #94baf5; background: #f7fbff; }
+  &.selected { border-color: #1677ff; background: #edf5ff; box-shadow: inset 0 0 0 1px #1677ff; }
+}
+.job-picker-row-main { display: flex; justify-content: space-between; gap: 8px; align-items: baseline; }
+.job-picker-row-main small { color: #64748b; white-space: nowrap; }
+.job-picker-row-meta { display: block; margin-top: 5px; color: #64748b; font-size: 12px; }
+.job-picker-match { display: inline-block; margin-top: 6px; color: #0a7e45; font-size: 12px; }
+.job-picker-empty, .job-picker-more { color: #64748b; line-height: 1.5; }
+.job-picker-more { margin: 10px 0 0; color: #a15c00; }
 
 // 主容器
 .app-container {
@@ -2095,6 +2360,10 @@ onUnmounted(() => {
 
   .redline-alert-header {
     margin-bottom: 8px;
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 12px;
 
     .redline-title-group {
       display: flex;
@@ -2131,6 +2400,12 @@ onUnmounted(() => {
         }
       }
     }
+  }
+
+  .empty-review-help {
+    margin: 4px 0 10px;
+    font-size: 12px;
+    color: #64748b;
   }
 
   .redline-violations-list {
@@ -2173,6 +2448,10 @@ onUnmounted(() => {
 
   .bonus-header {
     margin-bottom: 8px;
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 12px;
 
     .bonus-title-group {
       display: flex;
@@ -2209,6 +2488,12 @@ onUnmounted(() => {
         }
       }
     }
+  }
+
+  .empty-review-help {
+    margin: 4px 0 10px;
+    font-size: 12px;
+    color: #64748b;
   }
 
   .bonus-matches-list {
@@ -2492,28 +2777,6 @@ onUnmounted(() => {
   &:hover {
     background: #d1fae5;
     border-color: #6ee7b7;
-    transform: translateY(-1px);
-  }
-}
-
-.candidate-link-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 3px;
-  background: #f8fafc;
-  color: #475569;
-  border: 1px solid #cbd5e1;
-  padding: 2px 8px;
-  border-radius: 4px;
-  font-size: 11.5px;
-  font-weight: 500;
-  text-decoration: none;
-  transition: all 0.2s;
-
-  &:hover {
-    background: #0284c7;
-    color: #ffffff;
-    border-color: #0284c7;
     transform: translateY(-1px);
   }
 }

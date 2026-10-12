@@ -62,3 +62,8 @@ docs/README.md
 
 # Browser profiles and runtime data
 data/
+
+# Isolated browser tests and reports
+.e2e-data/
+playwright-report/
+test-results/

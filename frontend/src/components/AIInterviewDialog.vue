@@ -2,7 +2,7 @@
   <el-dialog :model-value="modelValue" @update:model-value="$emit('update:modelValue', $event)" title="AI 文字初面" width="700px" destroy-on-close>
     <div v-if="loading && !session">正在读取初面会话...</div>
     <div v-else-if="session" class="interview-content">
-      <p class="hint">{{ session.candidate_name }} · 回答会逐题保存。AI 的追问和结论供 HR 复核。</p>
+      <p class="hint">{{ session.candidate_name }} · 回答逐题保存；统一题用于同岗位比较，追问题用于核实个人经历。AI 结论供 HR 复核。</p>
       <el-steps :active="currentIndex" finish-status="success" simple>
         <el-step v-for="(_, i) in session.turns" :key="i" :title="`第 ${i + 1} 题`" />
       </el-steps>
@@ -17,7 +17,7 @@
       </template>
       <template v-else>
         <el-alert title="AI 初面已完成，最终决定由 HR 做出" type="info" :closable="false" />
-        <p><strong>AI 分数：</strong>{{ session.overall_score }}　<strong>建议：</strong>{{ session.ai_recommendation }}</p>
+        <p><strong>能力题分：</strong>{{ session.overall_score }}（有统一题时统一题 60%、针对性题 40%；红线题不计分）　<strong>AI 建议：</strong>{{ session.ai_recommendation }}</p>
         <p>{{ session.ai_summary }}</p>
         <div v-if="redLineTurns.length" class="redline-review">
           <strong>逐条核实岗位红线</strong>
@@ -43,10 +43,11 @@
       <details>
         <summary>查看已提交的问答与单题评价</summary>
         <div v-for="(turn, i) in session.turns" :key="i" class="history">
-          <strong>{{ i + 1 }}. {{ turn.question }}</strong>
+          <strong>{{ i + 1 }}. {{ turn.standard ? '【岗位统一题】' : turn.rule_id ? '【红线核实题】' : '【针对性题】' }}{{ turn.question }}</strong>
           <p>候选人：{{ turn.answer || '未回答' }}</p>
           <p v-if="turn.follow_up">追问：{{ turn.follow_up }}<br />候选人：{{ turn.follow_up_answer || '未回答' }}</p>
           <p v-if="turn.evaluated">AI 评价（{{ turn.score }}）：{{ turn.assessment }}</p>
+          <p v-if="turn.evidence">回答依据：{{ turn.evidence }}</p>
         </div>
       </details>
     </div>

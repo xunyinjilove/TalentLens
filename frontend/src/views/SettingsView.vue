@@ -192,7 +192,7 @@
             <!-- ⭐ 核心优先加分项 -->
             <div class="form-item" style="margin-top: 14px;">
               <label class="text-warning" style="font-weight: 600; margin-bottom: 8px; display: block;">
-                ⭐ 用人部门核心优先加分项 (Bonus Points / 优质候选人特质)
+                ⭐ 优先加分项（待 HR 确认，仅用于同档排序）
               </label>
               <TagInput
                 v-model="jobForm.bonusPoints"
@@ -204,6 +204,7 @@
                 add-prompt-title="新增优先加分项快捷项"
               />
             </div>
+            <div class="form-item" style="margin-top: 14px;"><label>核心能力评分卡（逐项 0–4 级，等权汇总）</label><TagInput v-model="jobForm.coreCriteria" placeholder="输入岗位核心能力；为空时沿用核心技能" /></div>
 
             <div class="form-item actions" style="display: flex; gap: 12px; margin-top: 20px;">
               <el-button type="primary" @click="saveSettings" round>
@@ -376,7 +377,8 @@ const jobForm = reactive({
   educationLevel: '本科',
   jobDescription: '岗位职责：\n1. 制定项目管理计划，按计划完成所负责的项目启动、开展及结束工作，确保通过药监部门核查；\n2. 根据项目研发资料、指导原则、行业标准等要求，设计临床试验方案；\n3. 对所负责的临床试验项目进行全面的质量控制与管理，确保所有试验严格按照临床试验方案、标准操作程序和相关法规进行；\n4. 根据临床试验相关规范要求，完成临床研究的各阶段报批文件包括但不限于临床报告；\n5. 作为公司对外代表，建立并保持与机构的良好关系。\n\n任职要求：\n1. 生物学、检验学、医学或药学等相关专业背景，本科及以上学历；\n2. 高度责任心和抗压能力，可适应出差；\n3. 优秀的沟通表达能力、发现和解决问题的能力。',
   redLines: [] as string[],
-  bonusPoints: [] as string[]
+  bonusPoints: [] as string[],
+  coreCriteria: [] as string[]
 })
 
 const analysisForm = reactive({
@@ -446,6 +448,7 @@ function handlePresetSelect(preset: JobPreset | null) {
     jobForm.jobDescription = merged.jobDescription || merged.description || ''
     jobForm.redLines = merged.redLines ? [...merged.redLines] : []
     jobForm.bonusPoints = merged.bonusPoints ? [...merged.bonusPoints] : []
+    jobForm.coreCriteria = merged.coreCriteria ? [...merged.coreCriteria] : [...merged.requiredSkills]
   } else {
     selectedPresetId.value = 'custom'
   }
@@ -468,6 +471,7 @@ function saveAsCustomPreset() {
     description: jobForm.jobDescription ? jobForm.jobDescription.slice(0, 60) + '...' : '',
     redLines: [...(jobForm.redLines || [])],
     bonusPoints: [...(jobForm.bonusPoints || [])],
+    coreCriteria: [...jobForm.coreCriteria],
     isCustom: true
   }
   saveCustomJobPreset(newPreset)
@@ -513,7 +517,8 @@ function saveSettings() {
       educationLevel: jobForm.educationLevel,
       jobDescription: jobForm.jobDescription,
       redLines: [...(jobForm.redLines || [])],
-      bonusPoints: [...(jobForm.bonusPoints || [])]
+      bonusPoints: [...(jobForm.bonusPoints || [])],
+      coreCriteria: [...jobForm.coreCriteria]
     },
     analysis: { maxConcurrent: analysisForm.maxConcurrent, autoStart: analysisForm.autoStart }
   }
@@ -530,7 +535,8 @@ function saveSettings() {
         educationLevel: jobForm.educationLevel,
         jobDescription: jobForm.jobDescription,
         redLines: [...(jobForm.redLines || [])],
-        bonusPoints: [...(jobForm.bonusPoints || [])]
+        bonusPoints: [...(jobForm.bonusPoints || [])],
+        coreCriteria: [...jobForm.coreCriteria]
       })
       if (jobForm.title && jobForm.title !== currentKey) {
         savePresetCustomization(jobForm.title, {
@@ -559,6 +565,7 @@ function resetSettings() {
   jobForm.jobDescription = ''
   jobForm.redLines = []
   jobForm.bonusPoints = []
+  jobForm.coreCriteria = []
   analysisForm.maxConcurrent = 3
   analysisForm.autoStart = false
   selectedPresetId.value = ''
@@ -635,6 +642,7 @@ onMounted(async () => {
         jobForm.jobDescription = s.job.jobDescription || jobForm.jobDescription
         jobForm.redLines = s.job.redLines || []
         jobForm.bonusPoints = s.job.bonusPoints || []
+        jobForm.coreCriteria = s.job.coreCriteria || []
       }
       if (s.analysis) {
         analysisForm.maxConcurrent = s.analysis.maxConcurrent ?? analysisForm.maxConcurrent

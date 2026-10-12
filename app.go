@@ -36,7 +36,7 @@ import (
 )
 
 // 版本信息
-const AppVersion = "1.6.0"
+const AppVersion = "1.7.0"
 const GitHubRepo = "xunyinjilove/TalentLens"
 
 //go:embed all:frontend/dist
@@ -60,14 +60,17 @@ type AIConfig struct {
 
 // JobConfig 岗位配置
 type JobConfig struct {
-	Title           string   `json:"title"`
-	Requirements    []string `json:"requirements"`
-	RequiredSkills  []string `json:"required_skills"`
-	ExperienceYears int      `json:"experience_years"`
-	EducationLevel  string   `json:"education_level"`
-	JobDescription  string   `json:"job_description,omitempty"`
-	RedLines        []string `json:"red_lines,omitempty"`    // 一票否决红线 (Deal Breakers / 准入底线)
-	BonusPoints     []string `json:"bonus_points,omitempty"` // 优先加分项 (Bonus Points / 优质优选)
+	Title                string   `json:"title"`
+	Requirements         []string `json:"requirements"`
+	RequiredSkills       []string `json:"required_skills"`
+	ExperienceYears      int      `json:"experience_years"`
+	EducationLevel       string   `json:"education_level"`
+	JobDescription       string   `json:"job_description,omitempty"`
+	RedLines             []string `json:"red_lines,omitempty"`             // 一票否决红线 (Deal Breakers / 准入底线)
+	BonusPoints          []string `json:"bonus_points,omitempty"`          // 优先加分项 (Bonus Points / 优质优选)
+	EquivalentExperience []string `json:"equivalent_experience,omitempty"` // 旧项目兼容读取；不再参与配置或评估
+	TrainableSkills      []string `json:"trainable_skills,omitempty"`      // 旧项目兼容读取；不再参与配置或评估
+	CoreCriteria         []string `json:"core_criteria,omitempty"`         // 岗位能力评分卡；为空时使用 RequiredSkills
 }
 
 // Project 招聘项目
@@ -105,28 +108,32 @@ type WaterCheckResult struct {
 
 // Resume 简历结构
 type Resume struct {
-	ID                 string          `json:"id"`
-	ProjectID          string          `json:"project_id"`
-	FileName           string          `json:"file_name"`
-	FilePath           string          `json:"file_path"`
-	FileType           string          `json:"file_type"`
-	FileSize           int64           `json:"file_size"`
-	Content            string          `json:"content"`
-	URL                string          `json:"url,omitempty"`
-	Email              string          `json:"email,omitempty"`
-	Status             string          `json:"status"`
-	Score              int             `json:"score"`
-	InitialScore       int             `json:"initial_score,omitempty"`
-	FinalScore         int             `json:"final_score,omitempty"`
-	HasAttachment      bool            `json:"has_attachment,omitempty"`
-	AttachmentPath     string          `json:"attachment_path,omitempty"`
-	AttachmentFileName string          `json:"attachment_file_name,omitempty"`
-	AttachmentContent  string          `json:"attachment_content,omitempty"`
-	IsMergedAnalysis   bool            `json:"is_merged_analysis,omitempty"`
-	SourceKeyword      string          `json:"source_keyword,omitempty"`
-	ErrorMessage       string          `json:"error_message,omitempty"`
-	Analysis           *AnalysisResult `json:"analysis,omitempty"`
-	CreatedAt          time.Time       `json:"created_at"`
+	ID                        string          `json:"id"`
+	ProjectID                 string          `json:"project_id"`
+	FileName                  string          `json:"file_name"`
+	FilePath                  string          `json:"file_path"`
+	FileType                  string          `json:"file_type"`
+	FileSize                  int64           `json:"file_size"`
+	Content                   string          `json:"content"`
+	URL                       string          `json:"url,omitempty"`
+	Email                     string          `json:"email,omitempty"`
+	Status                    string          `json:"status"`
+	Score                     int             `json:"score"`
+	InitialScore              int             `json:"initial_score,omitempty"`
+	FinalScore                int             `json:"final_score,omitempty"`
+	HasAttachment             bool            `json:"has_attachment,omitempty"`
+	AttachmentPath            string          `json:"attachment_path,omitempty"`
+	AttachmentFileName        string          `json:"attachment_file_name,omitempty"`
+	AttachmentContent         string          `json:"attachment_content,omitempty"`
+	IsMergedAnalysis          bool            `json:"is_merged_analysis,omitempty"`
+	SourceKeyword             string          `json:"source_keyword,omitempty"`
+	ActivityLabel             string          `json:"activity_label,omitempty"` // 平台原始活跃标签；未披露时留空
+	ContactStatus             string          `json:"contact_status,omitempty"` // 51job: greeted | resume_requested | resume_received
+	ContactUpdatedAt          string          `json:"contact_updated_at,omitempty"`
+	ContactAttachmentBaseline []string        `json:"contact_attachment_baseline,omitempty"`
+	ErrorMessage              string          `json:"error_message,omitempty"`
+	Analysis                  *AnalysisResult `json:"analysis,omitempty"`
+	CreatedAt                 time.Time       `json:"created_at"`
 }
 
 // JobSynonymItem 岗位同义词与拓扑维度词条
@@ -175,14 +182,18 @@ type AnalysisResult struct {
 	WaterCheck *WaterCheckResult `json:"water_check,omitempty"`
 
 	// 岗位画像核验：一票否决红线与优先加分项
-	RedLineViolations []string       `json:"red_line_violations,omitempty"` // 触碰的红线列表（若有则一票否决/严重扣分）
-	RedLineChecks     []RedLineCheck `json:"red_line_checks,omitempty"`
-	RedLineStatus     string         `json:"red_line_status,omitempty"` // passed | failed | pending | not_configured
-	CoreMatch         float64        `json:"core_match,omitempty"`
-	BonusMatch        float64        `json:"bonus_match,omitempty"`
-	AbilityScore      int            `json:"ability_score,omitempty"` // 核心能力原始分，不受红线状态影响
-	BonusScore        int            `json:"bonus_score,omitempty"`   // 核心达标后最多加 10 分
-	BonusMatches      []string       `json:"bonus_matches,omitempty"` // 命中的核心加分项列表
+	RedLineViolations   []string             `json:"red_line_violations,omitempty"` // 仅 HR 核实不满足的红线；与能力分分开
+	RedLineChecks       []RedLineCheck       `json:"red_line_checks,omitempty"`
+	RedLineStatus       string               `json:"red_line_status,omitempty"` // passed | failed | pending | not_configured
+	CoreMatch           float64              `json:"core_match,omitempty"`
+	BonusMatch          float64              `json:"bonus_match,omitempty"`
+	AbilityScore        int                  `json:"ability_score,omitempty"` // 核心能力原始分，不受红线状态影响
+	ScoreBasis          string               `json:"score_basis,omitempty"`   // rubric | provisional | legacy；证据不足时明确标记暂估
+	BonusScore          int                  `json:"bonus_score,omitempty"`   // 旧字段，现固定为 0；确认项只用于同档排序
+	BonusMatches        []string             `json:"bonus_matches,omitempty"` // 命中的核心加分项列表
+	BonusChecks         []BonusCheck         `json:"bonus_checks,omitempty"`
+	ConfirmedBonusCount int                  `json:"confirmed_bonus_count,omitempty"`
+	CoreCriterionChecks []CoreCriterionCheck `json:"core_criterion_checks,omitempty"`
 
 	// 面试建议
 	InterviewSuggestions []string `json:"interview_suggestions"`
@@ -208,6 +219,22 @@ type RedLineReviewEvent struct {
 	Evidence   string `json:"evidence"`
 	Source     string `json:"source"` // hr_manual；当前本地软件没有个人身份认证
 	ReviewedAt string `json:"reviewed_at"`
+}
+
+type BonusCheck struct {
+	RuleID          string               `json:"rule_id,omitempty"`
+	Criterion       string               `json:"criterion"`
+	Status          string               `json:"status"` // unknown | met | violated；met 必须由 HR 保存
+	SuggestedStatus string               `json:"suggested_status,omitempty"`
+	Evidence        string               `json:"evidence"`
+	ReviewedAt      string               `json:"reviewed_at,omitempty"`
+	ReviewHistory   []RedLineReviewEvent `json:"review_history,omitempty"`
+}
+
+type CoreCriterionCheck struct {
+	Criterion string `json:"criterion"`
+	Level     int    `json:"level"` // 0 未体现，1 了解，2 参与，3 独立完成，4 主导并可复盘
+	Evidence  string `json:"evidence,omitempty"`
 }
 
 // InterviewQuestion 结构化面试问题及基于简历的参考回答
@@ -246,8 +273,11 @@ type App struct {
 	config          Config
 	activeProjectID string // 当前活跃的项目ID（前端设置）
 	bossCmd         *exec.Cmd
+	bossStopFile    string // 多平台任务的协作停机标记；空值表示旧版任务
 	bossMutex       sync.Mutex
 	interviewMutex  sync.Mutex
+	contactMutex    sync.Mutex
+	contactPending  map[string]pending51JobHiQuote
 	dataDirOverride string // 测试使用的隔离数据目录；生产环境为空
 }
 
@@ -475,6 +505,13 @@ func (a *App) extractText(filePath string) string {
 	ext := strings.ToLower(filepath.Ext(filePath))
 
 	switch ext {
+	case ".docx":
+		content, err := extractDOCXText(filePath)
+		if err != nil {
+			log.Printf("[extractText] DOCX 正文提取失败: %v", err)
+			return ""
+		}
+		return a.truncateContent(content, 50000)
 	case ".txt", ".md":
 		data, err := os.ReadFile(filePath)
 		if err != nil {
@@ -657,7 +694,12 @@ func (a *App) GetResumes() []*Resume {
 		}
 		data, _ := os.ReadFile(filepath.Join(dir, entry.Name()))
 		var r Resume
-		json.Unmarshal(data, &r)
+		if json.Unmarshal(data, &r) != nil {
+			continue
+		}
+		if p := a.GetProject(r.ProjectID); p != nil {
+			a.prepareResumeDecision(&r, &p.JobConfig)
+		}
 		resumes = append(resumes, &r)
 	}
 	return resumes
@@ -778,6 +820,10 @@ func (a *App) AttachResumeFile(resumeID string, attachmentPath string) (*Analysi
 	resume.AttachmentFileName = filepath.Base(attachmentPath)
 	resume.AttachmentContent = attachmentText
 	resume.IsMergedAnalysis = true
+	if resume.ContactStatus == "resume_requested" {
+		resume.ContactStatus = "resume_received"
+		resume.ContactUpdatedAt = time.Now().Format(time.RFC3339)
+	}
 	resume.Status = "pending"
 	a.saveResume(&resume)
 
@@ -917,22 +963,75 @@ func (a *App) GetProjectResumes(projectID string) []*Resume {
 		}
 		var r Resume
 		if json.Unmarshal(data, &r) == nil {
+			a.prepareResumeDecision(&r, &p.JobConfig)
 			resumes = append(resumes, &r)
 		}
 	}
 	return resumes
 }
 
+// prepareResumeDecision 在读取旧数据时将“AI 已满足/不满足”还原为待核验，
+// 并重新计算不含加分项的能力分。此步骤不改写历史文件；HR 保存结论时再落盘。
+func (a *App) prepareResumeDecision(resume *Resume, job *JobConfig) {
+	if resume == nil || resume.Analysis == nil || job == nil {
+		return
+	}
+	a.applyJobDecision(resume.Analysis, job, resume)
+	resume.Score = int(resume.Analysis.OverallScore)
+	resume.Analysis.ManagerPitch = a.buildReviewedManagerPitch(resume.Analysis, resume)
+}
+
 // GetProjectRanking 获取项目排名（按分数降序，同分时按创建时间降序保持顺序稳定）
 func (a *App) GetProjectRanking(projectID string) []*Resume {
 	resumes := a.GetProjectResumes(projectID)
+	sortResumesByDecision(resumes)
+	return resumes
+}
+
+func sortResumesByDecision(resumes []*Resume) {
+	eligibilityRank := func(r *Resume) int {
+		if r.Analysis == nil {
+			return 1
+		}
+		switch r.Analysis.RedLineStatus {
+		case "passed", "not_configured":
+			return 0
+		case "failed":
+			return 2
+		default:
+			return 1
+		}
+	}
+	ability := func(r *Resume) int {
+		if r.Analysis != nil && r.Analysis.AbilityScore > 0 {
+			return r.Analysis.AbilityScore
+		}
+		return r.Score
+	}
 	sort.SliceStable(resumes, func(i, j int) bool {
-		if resumes[i].Score != resumes[j].Score {
-			return resumes[i].Score > resumes[j].Score
+		left, right := resumes[i], resumes[j]
+		if eligibilityRank(left) != eligibilityRank(right) {
+			return eligibilityRank(left) < eligibilityRank(right)
+		}
+		leftScore, rightScore := ability(left), ability(right)
+		if leftScore/5 != rightScore/5 {
+			return leftScore/5 > rightScore/5
+		}
+		leftBonus, rightBonus := 0, 0
+		if left.Analysis != nil {
+			leftBonus = left.Analysis.ConfirmedBonusCount
+		}
+		if right.Analysis != nil {
+			rightBonus = right.Analysis.ConfirmedBonusCount
+		}
+		if leftBonus != rightBonus {
+			return leftBonus > rightBonus
+		}
+		if leftScore != rightScore {
+			return leftScore > rightScore
 		}
 		return resumes[i].CreatedAt.After(resumes[j].CreatedAt)
 	})
-	return resumes
 }
 
 // GetProjectStats 获取项目统计信息
@@ -1393,6 +1492,7 @@ func (a *App) TestPlatformLogin(platform string) bool {
 	if a.bossCmd != nil && a.bossCmd.Process != nil {
 		_ = a.bossCmd.Process.Kill()
 		a.bossCmd = nil
+		a.bossStopFile = ""
 	}
 	a.bossMutex.Unlock()
 
@@ -1426,6 +1526,7 @@ func (a *App) TestPlatformLogin(platform string) bool {
 			if err := cmd.Start(); err == nil {
 				a.bossMutex.Lock()
 				a.bossCmd = cmd
+				a.bossStopFile = ""
 				a.bossMutex.Unlock()
 
 				go func() {
@@ -1779,14 +1880,25 @@ func (a *App) StartMultiPlatformSearch(projectID string, keyword string, city st
 
 // StartQuotaMatrixSearch 启动全网人才拓扑与渠道配额调度矩阵检索任务
 func (a *App) StartQuotaMatrixSearch(projectID string, keyword string, city string, expYears int, eduLevel string, count int, platforms []string, quotaMatrixJSON string) bool {
-	return a.startQuotaMatrixSearch(projectID, keyword, city, expYears, eduLevel, count, platforms, quotaMatrixJSON, true)
+	return a.startQuotaMatrixSearch(projectID, keyword, city, expYears, eduLevel, count, platforms, quotaMatrixJSON, true, 0, "balanced")
 }
 
 func (a *App) StartSearchWithOptions(projectID string, keyword string, city string, expYears int, eduLevel string, count int, platforms []string, quotaMatrixJSON string, autoAnalyze bool) bool {
-	return a.startQuotaMatrixSearch(projectID, keyword, city, expYears, eduLevel, count, platforms, quotaMatrixJSON, autoAnalyze)
+	return a.startQuotaMatrixSearch(projectID, keyword, city, expYears, eduLevel, count, platforms, quotaMatrixJSON, autoAnalyze, 0, "balanced")
 }
 
-func (a *App) startQuotaMatrixSearch(projectID string, keyword string, city string, expYears int, eduLevel string, count int, platforms []string, quotaMatrixJSON string, autoAnalyze bool) bool {
+// StartSearchWithPolicy 为 HR 的活跃度和渠道策略选择提供明确参数；旧入口保持兼容。
+func (a *App) StartSearchWithPolicy(projectID string, keyword string, city string, expYears int, eduLevel string, count int, platforms []string, quotaMatrixJSON string, autoAnalyze bool, activityDays int, channelStrategy string) bool {
+	if activityDays != 0 && activityDays != 1 && activityDays != 3 {
+		activityDays = 0
+	}
+	if channelStrategy != "priority" {
+		channelStrategy = "balanced"
+	}
+	return a.startQuotaMatrixSearch(projectID, keyword, city, expYears, eduLevel, count, platforms, quotaMatrixJSON, autoAnalyze, activityDays, channelStrategy)
+}
+
+func (a *App) startQuotaMatrixSearch(projectID string, keyword string, city string, expYears int, eduLevel string, count int, platforms []string, quotaMatrixJSON string, autoAnalyze bool, activityDays int, channelStrategy string) bool {
 	if !interviewIDPattern.MatchString(projectID) || a.GetProject(projectID) == nil {
 		runtime.EventsEmit(a.ctx, "platform:error", map[string]interface{}{
 			"type": "error", "message": "招聘项目不存在，请重新选择项目后搜索",
@@ -1797,6 +1909,7 @@ func (a *App) startQuotaMatrixSearch(projectID string, keyword string, city stri
 	if a.bossCmd != nil && a.bossCmd.Process != nil {
 		_ = a.bossCmd.Process.Kill()
 		a.bossCmd = nil
+		a.bossStopFile = ""
 	}
 	a.bossMutex.Unlock()
 
@@ -1918,7 +2031,11 @@ func (a *App) startQuotaMatrixSearch(projectID string, keyword string, city stri
 		"--data-dir", dataDir,
 		"--exclude-file", excludeFilePath,
 		"--auto-analyze", fmt.Sprintf("%t", autoAnalyze),
+		"--active-days", fmt.Sprintf("%d", activityDays),
+		"--channel-strategy", channelStrategy,
 	}
+	stopFile := filepath.Join(dataDir, fmt.Sprintf("stop_%d.flag", time.Now().UnixNano()))
+	cmdArgs = append(cmdArgs, "--stop-file", stopFile)
 	if strings.TrimSpace(quotaMatrixJSON) != "" {
 		cmdArgs = append(cmdArgs, "--quota-matrix", strings.TrimSpace(quotaMatrixJSON))
 	}
@@ -1945,6 +2062,7 @@ func (a *App) startQuotaMatrixSearch(projectID string, keyword string, city stri
 
 	a.bossMutex.Lock()
 	a.bossCmd = cmd
+	a.bossStopFile = stopFile
 	a.bossMutex.Unlock()
 
 	go func() {
@@ -1990,6 +2108,7 @@ func (a *App) startQuotaMatrixSearch(projectID string, keyword string, city stri
 					candUrl, _ := candObj["url"].(string)
 					candEmail, _ := candObj["email"].(string)
 					candSourceKeyword, _ := candObj["sourceKeyword"].(string)
+					candActivityLabel, _ := candObj["activityLabel"].(string)
 
 					r := &Resume{
 						ID:            candID,
@@ -2002,6 +2121,7 @@ func (a *App) startQuotaMatrixSearch(projectID string, keyword string, city stri
 						URL:           candUrl,
 						Email:         candEmail,
 						SourceKeyword: candSourceKeyword,
+						ActivityLabel: candActivityLabel,
 						Status:        "pending",
 						CreatedAt:     time.Now(),
 					}
@@ -2032,8 +2152,10 @@ func (a *App) startQuotaMatrixSearch(projectID string, keyword string, city stri
 		wasCurrent := a.bossCmd == cmd
 		if wasCurrent {
 			a.bossCmd = nil
+			a.bossStopFile = ""
 		}
 		a.bossMutex.Unlock()
+		_ = os.Remove(stopFile)
 		if !wasCurrent {
 			return
 		}
@@ -2053,7 +2175,8 @@ func (a *App) startQuotaMatrixSearch(projectID string, keyword string, city stri
 			} else {
 				runtime.EventsEmit(a.ctx, "boss:done", pendingDone)
 				runtime.EventsEmit(a.ctx, "platform:done", pendingDone)
-				if autoAnalyze && persistedCount > 0 && a.config.AI.APIKey != "" {
+				stopped, _ := pendingDone["stopped"].(bool)
+				if autoAnalyze && !stopped && persistedCount > 0 && a.config.AI.APIKey != "" {
 					go a.StartProjectAnalysis(projectID, &a.config.AI)
 				}
 			}
@@ -2072,8 +2195,15 @@ func (a *App) StopBossSearch() bool {
 	a.bossMutex.Lock()
 	defer a.bossMutex.Unlock()
 	if a.bossCmd != nil && a.bossCmd.Process != nil {
+		if a.bossStopFile != "" {
+			if err := os.WriteFile(a.bossStopFile, []byte("stop"), 0600); err == nil {
+				log.Println("[StopBossSearch] 已请求多平台任务在当前操作后保存进度并停止")
+				return true
+			}
+		}
 		_ = a.bossCmd.Process.Kill()
 		a.bossCmd = nil
+		a.bossStopFile = ""
 		log.Println("[StopBossSearch] 已终止 BOSS 搜寻任务")
 		return true
 	}
@@ -2382,16 +2512,8 @@ func (a *App) AnalyzeResume(resumeID string, cfg *AIConfig, jobCfg *JobConfig) (
 	if analysis.WaterCheck == nil {
 		analysis.WaterCheck = a.generateFallbackWaterCheck(analysis)
 	}
-	if strings.TrimSpace(analysis.ManagerPitch) == "" {
-		analysis.ManagerPitch = a.generateFallbackManagerPitch(analysis, &resume)
-	} else if strings.TrimSpace(resume.URL) != "" && !strings.Contains(analysis.ManagerPitch, resume.URL) {
-		analysis.ManagerPitch += fmt.Sprintf("\n🔗 在线主页：%s", resume.URL)
-	}
-	if analysis.RedLineStatus == "failed" {
-		analysis.ManagerPitch = "【HR 已核实未满足岗位必备条件】\n" + analysis.ManagerPitch
-	} else if analysis.RedLineStatus == "pending" {
-		analysis.ManagerPitch = "【岗位红线待核实，暂勿作为通过人选推介】\n" + analysis.ManagerPitch
-	}
+	// 推介卡在人工核验结果产生后重建，不能直接转发 AI 可能写出的“已命中加分/通过红线”。
+	analysis.ManagerPitch = a.buildReviewedManagerPitch(analysis, &resume)
 
 	// 更新简历状态 - 进度 100%
 	runtime.EventsEmit(a.ctx, "analysis:progress", map[string]interface{}{
@@ -2496,8 +2618,13 @@ func (a *App) buildAnalysisPrompt(resume *Resume, jobCfg *JobConfig) string {
 	}
 	bonusBlock := ""
 	if len(jobCfg.BonusPoints) > 0 {
-		bonusBlock = fmt.Sprintf("- ⭐ 用人部门优先加分项 (Bonus Points / 优质加分特质):\n  * %s\n", strings.Join(jobCfg.BonusPoints, "\n  * "))
+		bonusBlock = fmt.Sprintf("- ⭐ 优先加分项（仅提供证据线索，HR 确认后只用于同档排序）:\n  * %s\n", strings.Join(jobCfg.BonusPoints, "\n  * "))
 	}
+	criteria := jobCfg.CoreCriteria
+	if len(criteria) == 0 {
+		criteria = jobCfg.RequiredSkills
+	}
+	tierBlock := fmt.Sprintf("- 核心能力评分卡（每项按 0 未体现、1 了解、2 参与、3 独立完成、4 主导并可复盘评分）：%s\n", strings.Join(criteria, "、"))
 
 	systemPrompt := "你是一位拥有15年经验的资深人力资源专家和猎头顾问。你的专长是精准评估候选人与岗位的匹配度。\n" +
 		"你必须基于简历中的客观事实进行分析，不得凭空臆造简历中没有的信息。\n" +
@@ -2534,6 +2661,7 @@ func (a *App) buildAnalysisPrompt(resume *Resume, jobCfg *JobConfig) string {
 			"%s"+
 			"%s"+
 			"%s"+
+			"%s"+
 			"- 补充要求:\n- %s\n\n"+
 			"## 候选人简历材料\n"+
 			"%s\n\n"+
@@ -2556,7 +2684,7 @@ func (a *App) buildAnalysisPrompt(resume *Resume, jobCfg *JobConfig) string {
 			"- 70-89: 学历满足要求，专业相关\n"+
 			"- 50-69: 学历勉强满足，专业有一定偏差\n"+
 			"- 0-49: 学历不满足要求\n\n"+
-			"**核心能力 (core_match)** 为直接相关项目和核心业务能力的 0-100 分；bonus_match 仅反映有证据的额外优势。最终总分、加分上限和推荐等级由系统计算，不能用加分弥补核心能力不足。\n\n"+
+			"**核心能力 (core_match)** 为直接相关项目和核心业务能力的 0-100 分。逐项返回 core_criterion_checks，criterion 必须与评分卡逐字一致，level 为 0-4。最终能力分由系统按各项等级等权计算；加分项经 HR 核实后只用于同档排序，不抬高能力分。\n\n"+
 			"### 推荐等级\n"+
 			"模型只提供参考建议；岗位红线必须由 HR 核实后才可判定通过或不满足。\n\n"+
 			"### 输出要求\n\n"+
@@ -2585,6 +2713,8 @@ func (a *App) buildAnalysisPrompt(resume *Resume, jobCfg *JobConfig) string {
 			"  \"recommendation\": \"recommend\",\n"+
 			"  \"red_line_violations\": [],\n"+
 			"  \"red_line_checks\": [{\"criterion\": \"逐字复制岗位红线\", \"status\": \"met/violated/unknown\", \"evidence\": \"简历中的原文短句；无证据时留空\"}],\n"+
+			"  \"core_criterion_checks\": [{\"criterion\": \"逐字复制评分卡能力\", \"level\": 3, \"evidence\": \"简历原文；无证据时留空并给 0 分\"}],\n"+
+			"  \"bonus_checks\": [{\"criterion\": \"逐字复制优先加分项\", \"status\": \"met/violated/unknown\", \"evidence\": \"简历原文短句；无证据时留空\"}],\n"+
 			"  \"bonus_matches\": [\n"+
 			"    \"符合的优先加分项及具体成果依据（例如：具备日活千万高并发经验，主导过大型系统重构；若未匹配则必须返回空数组 []）\"\n"+
 			"  ],\n"+
@@ -2656,7 +2786,7 @@ func (a *App) buildAnalysisPrompt(resume *Resume, jobCfg *JobConfig) string {
 			"7. 必须生成 water_check（防伪注水雷达）：细致核查工作经历起止时间是否有未填写的断层空窗期，识别假大空缺乏量化的表述，并提供一针见血的初试防伪反问话术\n"+
 			"8. 对用人部门红线只提出待核实的事实线索，不直接作淘汰决定：\n"+
 			"   - 对每条红线返回一条 red_line_checks：criterion 必须逐字复制，status 仅能是 met/violated/unknown；evidence 必须是简历中可核对的原文短句。简历未写明时填 unknown，不能猜测满足或违反。\n"+
-			"   - 逐项对照「优先加分项」，仅在有具体事实依据时填入 bonus_matches；最终加分由系统封顶计算。",
+			"   - 逐项对照「优先加分项」，仅在有具体事实依据时填入 bonus_checks 和 bonus_matches；AI 不确认加分，也不改变能力分。",
 		jobCfg.Title,
 		jobCfg.ExperienceYears,
 		jobCfg.EducationLevel,
@@ -2664,6 +2794,7 @@ func (a *App) buildAnalysisPrompt(resume *Resume, jobCfg *JobConfig) string {
 		jobDescBlock,
 		redLinesBlock,
 		bonusBlock,
+		tierBlock,
 		requirements,
 		resumeBlock,
 		mergedInstruction,
@@ -2874,23 +3005,53 @@ func redLineRuleID(criterion string) string {
 	return fmt.Sprintf("%x", digest[:8])
 }
 
-func scoreCandidate(result *AnalysisResult, hasBonusRules bool) {
-	if result.CoreMatch == 0 && result.BonusMatch == 0 {
+func scoreCandidate(result *AnalysisResult, criteria []string) {
+	if result.CoreMatch == 0 {
 		result.CoreMatch = result.SkillMatch*0.55 + result.ExperienceMatch*0.45
 	}
 	result.CoreMatch = clampFloat(result.CoreMatch, 0, 100)
 	result.BonusMatch = clampFloat(result.BonusMatch, 0, 100)
+	result.ScoreBasis = "legacy"
+	if len(criteria) > 0 && len(result.CoreCriterionChecks) > 0 {
+		levels := make(map[string]int, len(result.CoreCriterionChecks))
+		evidencePresent := make(map[string]bool, len(result.CoreCriterionChecks))
+		verifiedCount := 0
+		for _, check := range result.CoreCriterionChecks {
+			if check.Level >= 0 && check.Level <= 4 {
+				key := strings.TrimSpace(check.Criterion)
+				levels[key] = check.Level
+				evidencePresent[key] = strings.TrimSpace(check.Evidence) != ""
+			}
+		}
+		total := 0
+		for _, criterion := range criteria {
+			key := strings.TrimSpace(criterion)
+			level := levels[key] // 未返回的评分卡项按 0 处理
+			if level > 0 && evidencePresent[key] {
+				verifiedCount++
+			}
+			total += level * 25
+		}
+		if verifiedCount*2 >= len(criteria) {
+			result.CoreMatch = math.Round(float64(total) / float64(len(criteria)))
+			result.ScoreBasis = "rubric"
+		} else {
+			// AI 未给出足够可定位的逐项依据时，保留能力估计，避免把“无法核实”误判为 0 分。
+			result.ScoreBasis = "provisional"
+		}
+	} else if len(criteria) > 0 {
+		result.ScoreBasis = "provisional"
+	}
 	result.AbilityScore = int(math.Round(result.CoreMatch))
 	result.BonusScore = 0
-	if hasBonusRules && len(result.BonusMatches) > 0 && result.AbilityScore >= 70 {
-		result.BonusScore = int(math.Round(result.BonusMatch / 10))
-	}
 	refreshCandidateRecommendation(result)
 }
 
 func refreshCandidateRecommendation(result *AnalysisResult) {
-	result.OverallScore = math.Min(100, float64(result.AbilityScore+result.BonusScore))
+	result.OverallScore = float64(result.AbilityScore)
 	switch {
+	case result.ScoreBasis == "provisional":
+		result.Recommendation = "consider"
 	case result.AbilityScore < 55:
 		result.Recommendation = "not_recommend"
 	case result.AbilityScore < 70:
@@ -2936,7 +3097,23 @@ func (a *App) applyJobDecision(result *AnalysisResult, job *JobConfig, resume *R
 	if result == nil || job == nil {
 		return
 	}
-	scoreCandidate(result, len(job.BonusPoints) > 0)
+	criteria := job.CoreCriteria
+	if len(criteria) == 0 {
+		criteria = job.RequiredSkills
+	}
+	// 评分卡只接受简历材料中能逐字定位的依据；没有证据的高等级回落为“未体现”。
+	if resume != nil {
+		for i := range result.CoreCriterionChecks {
+			check := &result.CoreCriterionChecks[i]
+			evidence := strings.Trim(check.Evidence, " \t\r\n\"“”")
+			if check.Level > 0 && (evidence == "" ||
+				(!strings.Contains(resume.Content, evidence) && !strings.Contains(resume.AttachmentContent, evidence))) {
+				check.Level, check.Evidence = 0, ""
+			}
+		}
+	}
+	scoreCandidate(result, criteria)
+	proposedBonus := result.BonusChecks
 
 	checks := make([]RedLineCheck, 0, len(job.RedLines))
 	for _, criterion := range job.RedLines {
@@ -2963,19 +3140,80 @@ func (a *App) applyJobDecision(result *AnalysisResult, job *JobConfig, resume *R
 				continue
 			}
 			evidence := strings.Trim(proposed.Evidence, " \t\r\n\"“”")
-			if resume != nil && (proposed.Status == "met" || proposed.Status == "violated") && evidence != "" &&
+			suggestion := proposed.Status
+			if suggestion == "unknown" {
+				suggestion = proposed.SuggestedStatus
+			}
+			if resume != nil && (suggestion == "met" || suggestion == "violated") && evidence != "" &&
 				(strings.Contains(resume.Content, evidence) || strings.Contains(resume.AttachmentContent, evidence)) {
-				check.SuggestedStatus, check.Evidence = proposed.Status, evidence
+				check.SuggestedStatus, check.Evidence = suggestion, evidence
 			}
 			break
 		}
 		checks = append(checks, check)
 	}
 	result.RedLineChecks = checks
+	bonusChecks := make([]BonusCheck, 0, len(job.BonusPoints))
+	for _, criterion := range job.BonusPoints {
+		criterion = strings.TrimSpace(criterion)
+		if criterion == "" {
+			continue
+		}
+		check := BonusCheck{RuleID: redLineRuleID(criterion), Criterion: criterion, Status: "unknown"}
+		if resume != nil && resume.Analysis != nil {
+			for _, previous := range resume.Analysis.BonusChecks {
+				if previous.Criterion == criterion && previous.ReviewedAt != "" {
+					check = previous
+					break
+				}
+			}
+		}
+		if check.ReviewedAt == "" {
+			for _, proposed := range proposedBonus {
+				if strings.TrimSpace(proposed.Criterion) != criterion {
+					continue
+				}
+				evidence := strings.Trim(proposed.Evidence, " \t\r\n\"“”")
+				suggestion := proposed.Status
+				if suggestion == "unknown" {
+					suggestion = proposed.SuggestedStatus
+				}
+				if resume != nil && (suggestion == "met" || suggestion == "violated") && evidence != "" &&
+					(strings.Contains(resume.Content, evidence) || strings.Contains(resume.AttachmentContent, evidence)) {
+					check.SuggestedStatus, check.Evidence = suggestion, evidence
+				}
+				break
+			}
+		}
+		bonusChecks = append(bonusChecks, check)
+	}
+	result.BonusChecks = bonusChecks
+	refreshBonusVerdict(result)
 	applyRedLineVerdict(result)
 }
 
+func refreshBonusVerdict(result *AnalysisResult) {
+	result.ConfirmedBonusCount = 0
+	for _, check := range result.BonusChecks {
+		if check.Status == "met" && check.ReviewedAt != "" {
+			result.ConfirmedBonusCount++
+		}
+	}
+}
+
 // generateFallbackManagerPitch 当大模型未返回推介卡时的容错生成器
+func (a *App) buildReviewedManagerPitch(res *AnalysisResult, resume *Resume) string {
+	pitch := a.generateFallbackManagerPitch(res, resume)
+	switch res.RedLineStatus {
+	case "failed":
+		return "【HR 已核实未满足岗位必备条件】\n" + pitch
+	case "pending":
+		return "【岗位红线待核实，暂勿作为通过人选推介】\n" + pitch
+	default:
+		return pitch
+	}
+}
+
 func (a *App) generateFallbackManagerPitch(res *AnalysisResult, resume *Resume) string {
 	candidateName := res.CandidateName
 	if strings.TrimSpace(candidateName) == "" && resume != nil {
@@ -3015,12 +3253,18 @@ func (a *App) generateFallbackManagerPitch(res *AnalysisResult, resume *Resume) 
 	if len(res.RedLineViolations) > 0 {
 		sb.WriteString(fmt.Sprintf("🚨 触碰用人红线：%s\n", strings.Join(res.RedLineViolations, "；")))
 	}
-	if len(res.BonusMatches) > 0 {
-		sb.WriteString(fmt.Sprintf("⭐ 命中优先加分：%s\n", strings.Join(res.BonusMatches, "；")))
+	var confirmedBonus []string
+	for _, check := range res.BonusChecks {
+		if check.Status == "met" && check.ReviewedAt != "" {
+			confirmedBonus = append(confirmedBonus, check.Criterion)
+		}
+	}
+	if len(confirmedBonus) > 0 {
+		sb.WriteString(fmt.Sprintf("⭐ HR 已确认附加优势：%s\n", strings.Join(confirmedBonus, "；")))
 	}
 	sb.WriteString(fmt.Sprintf("👤 候选人：%s | 现任：%s\n", candidateName, role))
 	sb.WriteString(fmt.Sprintf("📌 背景画像：%s | %s\n", exp, edu))
-	sb.WriteString(fmt.Sprintf("🎯 综合匹配：%d分（%s）\n", int(res.OverallScore), recText))
+	sb.WriteString(fmt.Sprintf("🎯 核心能力：%d分（%s）\n", int(res.OverallScore), recText))
 	sb.WriteString("✨ 核心亮点：\n")
 	if len(res.Strengths) > 0 {
 		for i, s := range res.Strengths {
@@ -3292,48 +3536,88 @@ func (a *App) findBrowserExecutable() string {
 	return ""
 }
 
-// OpenURL 智能打开链接：优先在已登录该平台的专用浏览器实例（图二）中新开 Tab 并激活窗口，避免外部浏览器要求重新扫码
-func (a *App) OpenURL(rawURL string) {
+// OpenURL 优先复用已登录的招聘专用浏览器；HR 主动查看候选人时让窗口保持可见。
+func (a *App) OpenURL(rawURL string) error {
 	if strings.TrimSpace(rawURL) == "" {
-		return
+		return fmt.Errorf("候选人主页网址为空")
 	}
+	parsed, err := url.Parse(rawURL)
+	if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Hostname() == "" {
+		return fmt.Errorf("只能打开有效的 HTTP/HTTPS 网址")
+	}
+	host := strings.ToLower(parsed.Hostname())
+	isHost := func(domain string) bool { return host == domain || strings.HasSuffix(host, "."+domain) }
 
 	// 1. 根据 URL 域名精准映射到各平台调试端口与数据目录
 	port := 0
+	platformKey := ""
 	profileDirName := ""
-	low := strings.ToLower(rawURL)
-	if strings.Contains(low, "51job.com") || strings.Contains(low, "ehire") {
+	if isHost("51job.com") {
 		port = 9503
+		platformKey = "51job"
 		profileDirName = "51job_isolated_profile"
-	} else if strings.Contains(low, "zhipin.com") {
+	} else if isHost("zhipin.com") {
 		port = 9501
+		platformKey = "boss"
 		profileDirName = "boss_isolated_profile"
-	} else if strings.Contains(low, "zhaopin.com") {
+	} else if isHost("zhaopin.com") {
 		port = 9502
+		platformKey = "zhaopin"
 		profileDirName = "zhaopin_isolated_profile"
-	} else if strings.Contains(low, "liepin.com") {
+	} else if isHost("liepin.com") {
 		port = 9504
+		platformKey = "liepin"
 		profileDirName = "liepin_isolated_profile"
 	}
 
 	// 2. 若属于招聘平台，优先尝试通过 CDP 协议在已有已登录的专用浏览器（图二）中新开 Tab
 	if port > 0 {
+		markerDir := filepath.Join(a.getDataDir(), "candidates_multi")
+		if err := os.MkdirAll(markerDir, 0755); err != nil {
+			return fmt.Errorf("无法准备浏览器查看状态：%w", err)
+		}
+		if err := os.WriteFile(filepath.Join(markerDir, "manual_view_"+platformKey+".flag"), []byte("visible"), 0600); err != nil {
+			return fmt.Errorf("无法记录浏览器查看状态：%w", err)
+		}
 		client := &http.Client{Timeout: 2 * time.Second}
 		newTabURL := fmt.Sprintf("http://127.0.0.1:%d/json/new?%s", port, url.QueryEscape(rawURL))
 		req, err := http.NewRequest(http.MethodPut, newTabURL, nil)
 		if err == nil {
 			resp, err := client.Do(req)
-			if err == nil && (resp.StatusCode == http.StatusOK || resp.StatusCode == http.StatusCreated) {
+			if err == nil {
 				defer resp.Body.Close()
+			}
+			if err == nil && (resp.StatusCode == http.StatusOK || resp.StatusCode == http.StatusCreated) {
 				var tabInfo struct {
 					ID string `json:"id"`
 				}
 				if err := json.NewDecoder(resp.Body).Decode(&tabInfo); err == nil && tabInfo.ID != "" {
-					// 激活此 Tab 并唤起浏览器窗口到前台
+					// /json/activate 只切换标签；最小化的窗口还需 Browser.setWindowBounds 恢复。
 					activateURL := fmt.Sprintf("http://127.0.0.1:%d/json/activate/%s", port, tabInfo.ID)
-					_, _ = client.Get(activateURL)
-					log.Printf("[OpenURL] 成功在【%s / 端口 %d】已登录专用窗口中直接展示候选人: %s", profileDirName, port, rawURL)
-					return
+					if activated, activateErr := client.Get(activateURL); activateErr == nil {
+						_ = activated.Body.Close()
+					}
+					scriptCandidates := []string{
+						filepath.Join("scripts", "show_candidate_window.js"),
+						filepath.Join(filepath.Dir(os.Args[0]), "scripts", "show_candidate_window.js"),
+						filepath.Join(filepath.Dir(os.Args[0]), "..", "..", "scripts", "show_candidate_window.js"),
+					}
+					for _, scriptPath := range scriptCandidates {
+						if _, statErr := os.Stat(scriptPath); statErr != nil {
+							continue
+						}
+						ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+						cmd := exec.CommandContext(ctx, "node", scriptPath, "--port", fmt.Sprintf("%d", port), "--target", tabInfo.ID)
+						hideConsoleWindow(cmd)
+						output, restoreErr := cmd.CombinedOutput()
+						cancel()
+						if restoreErr != nil {
+							return fmt.Errorf("候选人标签页已打开，但恢复专用浏览器窗口失败：%s", strings.TrimSpace(string(output)))
+						}
+						log.Printf("[OpenURL] 已恢复 %s 专用浏览器窗口", platformKey)
+						return nil
+					}
+					return fmt.Errorf("缺少浏览器窗口恢复脚本，请检查 scripts 目录")
 				}
 			}
 		}
@@ -3352,14 +3636,16 @@ func (a *App) OpenURL(rawURL string) {
 			)
 			hideConsoleWindow(cmd)
 			if err := cmd.Start(); err == nil {
-				log.Printf("[OpenURL] 成功拉起带登录凭据的专用浏览器实例打开候选人: %s", rawURL)
-				return
+				log.Printf("[OpenURL] 已启动 %s 专用浏览器窗口", platformKey)
+				return nil
 			}
 		}
+		return fmt.Errorf("无法打开 %s 专用浏览器，请检查 Edge/Chrome 与登录窗口", platformKey)
 	}
 
 	// 4. 普通链接（如更新检测、外链）或保底兜底：调用系统默认浏览器打开
 	runtime.BrowserOpenURL(a.ctx, rawURL)
+	return nil
 }
 
 // ActivatePlatformBrowser 唤醒指定平台的 Edge 浏览器窗口至前台（处理验证码或查看页面）

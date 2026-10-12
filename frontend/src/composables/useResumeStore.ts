@@ -39,6 +39,9 @@ export interface Resume {
   url?: string   // 在线候选人主页 URL（矩阵寻才抓取时填充）
   email?: string // 候选人邮箱
   source_keyword?: string // 矩阵寻才分流词
+  activity_label?: string // 平台原始活跃标签；缺失表示未披露
+  contact_status?: 'greeted' | 'resume_requested' | 'resume_received'
+  contact_updated_at?: string
   status: 'pending' | 'analyzing' | 'done' | 'error'
   score?: number
   initial_score?: number
@@ -81,8 +84,12 @@ export interface Resume {
     coreMatch?: number
     bonusMatch?: number
     abilityScore?: number
+    scoreBasis?: 'rubric' | 'provisional' | 'legacy'
     bonusScore?: number
     bonusMatches?: string[]
+    bonusChecks?: Array<{ rule_id?: string; criterion: string; status: 'met' | 'violated' | 'unknown'; suggested_status?: string; evidence: string; reviewed_at?: string }>
+    confirmedBonusCount?: number
+    coreCriterionChecks?: Array<{ criterion: string; level: number; evidence?: string }>
     interviewSuggestions: string[]
     interviewQA?: Array<{ category: string; question: string; reference_answer: string }>
     consistency_check?: {
@@ -181,6 +188,10 @@ export const useResumeStore = defineStore('resume', () => {
           content: r.content,
           url: r.url || '',       // 在线候选人主页 URL
           email: r.email || '',   // 候选人邮箱
+          source_keyword: r.source_keyword || '',
+          activity_label: r.activity_label || '',
+          contact_status: r.contact_status || undefined,
+          contact_updated_at: r.contact_updated_at || undefined,
           status: r.status as Resume['status'],
           score: r.score,
           analysis: r.analysis ? (() => {
@@ -242,8 +253,12 @@ export const useResumeStore = defineStore('resume', () => {
               coreMatch: a.core_match,
               bonusMatch: a.bonus_match,
               abilityScore: a.ability_score,
+              scoreBasis: a.score_basis,
               bonusScore: a.bonus_score,
               bonusMatches: a.bonus_matches || [],
+              bonusChecks: a.bonus_checks || [],
+              confirmedBonusCount: a.confirmed_bonus_count || 0,
+              coreCriterionChecks: a.core_criterion_checks || [],
               interviewSuggestions: a.interview_suggestions || [],
               interviewQA: a.interview_qa || [],
               consistency_check: a.consistency_check || undefined,
@@ -450,7 +465,10 @@ export const useResumeStore = defineStore('resume', () => {
         required_skills: settings.job?.requiredSkills || ['开发'],
         experience_years: settings.job?.experienceYears || 3,
         education_level: settings.job?.educationLevel || '本科',
-        job_description: settings.job?.jobDescription || ''
+        job_description: settings.job?.jobDescription || '',
+        red_lines: settings.job?.redLines || [],
+        bonus_points: settings.job?.bonusPoints || [],
+        core_criteria: settings.job?.coreCriteria || []
       }
     } catch {
       return {
@@ -714,8 +732,12 @@ export const useResumeStore = defineStore('resume', () => {
           coreMatch: a.core_match,
           bonusMatch: a.bonus_match,
           abilityScore: a.ability_score,
+          scoreBasis: a.score_basis,
           bonusScore: a.bonus_score,
           bonusMatches: a.bonus_matches || [],
+          bonusChecks: a.bonus_checks || [],
+          confirmedBonusCount: a.confirmed_bonus_count || 0,
+          coreCriterionChecks: a.core_criterion_checks || [],
           interviewSuggestions: a.interview_suggestions || [],
           interviewQA: a.interview_qa || [],
           consistency_check: a.consistency_check || undefined,
