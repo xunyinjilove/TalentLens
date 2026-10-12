@@ -71,10 +71,15 @@ async function click(page, selector, label) {
 }
 
 async function choose(page, root, value, label) {
+  // 学历菜单由 Element UI 挂在 body；先找当前选择器内部菜单，再找唯一已打开的页面菜单。
   const selectOption = () => page.evaluate(({ root, value }) => {
     const target = document.querySelector(root);
     const scope = target?.matches('input') ? target.closest('.el-select') : target;
-    const items = Array.from(scope?.querySelectorAll('.el-select-dropdown__item') || []);
+    const local = Array.from(scope?.querySelectorAll('.el-select-dropdown__item') || []);
+    const openMenus = Array.from(document.querySelectorAll('.el-select-dropdown'))
+      .filter(menu => menu.style.display !== 'none' && !menu.classList.contains('el-zoom-in-top-leave'));
+    const items = local.length ? local : openMenus.length === 1
+      ? Array.from(openMenus[0].querySelectorAll('.el-select-dropdown__item')) : [];
     const item = items.find(el => el.textContent.trim() === value);
     if (item) item.click();
     return Boolean(item);
@@ -89,7 +94,12 @@ async function choose(page, root, value, label) {
     const options = await page.evaluate(root => {
       const target = document.querySelector(root);
       const scope = target?.matches('input') ? target.closest('.el-select') : target;
-      return Array.from(scope?.querySelectorAll('.el-select-dropdown__item') || []).map(el => el.textContent.trim()).slice(0, 12);
+      const local = Array.from(scope?.querySelectorAll('.el-select-dropdown__item') || []);
+      const openMenus = Array.from(document.querySelectorAll('.el-select-dropdown'))
+        .filter(menu => menu.style.display !== 'none' && !menu.classList.contains('el-zoom-in-top-leave'));
+      const items = local.length ? local : openMenus.length === 1
+        ? Array.from(openMenus[0].querySelectorAll('.el-select-dropdown__item')) : [];
+      return items.map(el => el.textContent.trim()).slice(0, 12);
     }, root);
     throw new Error(`51job 的${label}没有“${value}”选项（当前可选：${options.join('、') || '无'}）`);
   }
@@ -786,4 +796,4 @@ if (require.main === module) {
   });
 }
 
-module.exports = { validate, chooseEmploymentType, chooseMajors, getFunctionOptions, getKeywordSuggestions, getPostingOptions, show51JobPage, check51JobLogin, minimize51JobBrowser, run };
+module.exports = { validate, choose, chooseEmploymentType, chooseMajors, getFunctionOptions, getKeywordSuggestions, getPostingOptions, show51JobPage, check51JobLogin, minimize51JobBrowser, run };
