@@ -277,6 +277,9 @@ type App struct {
 	interviewMutex  sync.Mutex
 	contactMutex    sync.Mutex
 	contactPending  map[string]pending51JobHiQuote
+	analysisMutex   sync.Mutex
+	activeAnalyses  map[string]bool
+	activeProjects  map[string]bool
 	dataDirOverride string // 测试使用的隔离数据目录；生产环境为空
 }
 
@@ -721,10 +724,64 @@ func (a *App) ReAnalyzeResume(id string) error {
 	return nil
 }
 
-func (a *App) ClearResumes() error {
-	dir := filepath.Join(a.getDataDir(), "resumes")
-	os.RemoveAll(dir)
-	os.MkdirAll(dir, 0755)
+// ClearProjectResumes 仅清空指定项目的简历记录；原始文件和导出报告不属于应用缓存，不删除。
+func (a *App) ClearProjectResumes(projectID string) error {
+	if !interviewIDPattern.MatchString(projectID) {
+		return fmt.Errorf("项目 ID 无效")
+	}
+
+	// 与分析任务的注册共用一把锁：清空期间不能启动新的分析任务。
+	a.analysisMutex.Lock()
+	defer a.analysisMutex.Unlock()
+	if a.activeProjects[projectID] {
+		return fmt.Errorf("当前项目正在分析，完成后才能清空")
+	}
+	p := a.GetProject(projectID)
+	if p == nil {
+		return fmt.Errorf("招聘项目不存在")
+	}
+
+	// 项目引用可能来自旧版本数据。只删除确实属于当前项目的记录，避免串删。
+	var ownedPaths []string
+	for _, id := range p.ResumeIDs {
+		if id == "" || id == "." || id == ".." || strings.ContainsAny(id, `/\`) || filepath.Base(id) != id {
+			return fmt.Errorf("简历 ID 无效")
+		}
+		if a.activeAnalyses[id] {
+			return fmt.Errorf("当前项目正在分析，完成后才能清空")
+		}
+		path := filepath.Join(a.getDataDir(), "resumes", id+".json")
+		data, err := os.ReadFile(path)
+		if os.IsNotExist(err) {
+			continue
+		}
+		if err != nil {
+			return err
+		}
+		var resume Resume
+		if err := json.Unmarshal(data, &resume); err != nil {
+			return fmt.Errorf("读取简历 %s 失败: %w", id, err)
+		}
+		if resume.ProjectID == projectID {
+			ownedPaths = append(ownedPaths, path)
+		}
+	}
+
+	p.ResumeIDs = []string{}
+	p.Status = "draft"
+	p.UpdatedAt = time.Now()
+	projectData, err := json.MarshalIndent(p, "", "  ")
+	if err != nil {
+		return err
+	}
+	if err := os.WriteFile(filepath.Join(a.getProjectsDir(), projectID+".json"), projectData, 0644); err != nil {
+		return err
+	}
+	for _, path := range ownedPaths {
+		if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+			return err
+		}
+	}
 	return nil
 }
 
@@ -1138,12 +1195,28 @@ func (a *App) StartProjectAnalysis(projectID string, cfg *AIConfig) {
 		})
 		return
 	}
+	a.analysisMutex.Lock()
 	p := a.GetProject(projectID)
 	if p == nil {
+		a.analysisMutex.Unlock()
 		return
 	}
+	if a.activeProjects == nil {
+		a.activeProjects = make(map[string]bool)
+	}
+	if a.activeProjects[projectID] {
+		a.analysisMutex.Unlock()
+		return
+	}
+	a.activeProjects[projectID] = true
+	a.analysisMutex.Unlock()
 
 	go func() {
+		defer func() {
+			a.analysisMutex.Lock()
+			delete(a.activeProjects, projectID)
+			a.analysisMutex.Unlock()
+		}()
 		p.Status = "analyzing"
 		a.saveProject(p)
 
@@ -2423,6 +2496,21 @@ func (a *App) AnalyzeResume(resumeID string, cfg *AIConfig, jobCfg *JobConfig) (
 	if cfg.BaseURL == "" {
 		return nil, fmt.Errorf("AI 未配置: 请先在设置中填写 Base URL")
 	}
+	a.analysisMutex.Lock()
+	if a.activeAnalyses == nil {
+		a.activeAnalyses = make(map[string]bool)
+	}
+	if a.activeAnalyses[resumeID] {
+		a.analysisMutex.Unlock()
+		return nil, fmt.Errorf("简历正在分析")
+	}
+	a.activeAnalyses[resumeID] = true
+	a.analysisMutex.Unlock()
+	defer func() {
+		a.analysisMutex.Lock()
+		delete(a.activeAnalyses, resumeID)
+		a.analysisMutex.Unlock()
+	}()
 
 	// 读取简历
 	path := filepath.Join(a.getDataDir(), "resumes", resumeID+".json")

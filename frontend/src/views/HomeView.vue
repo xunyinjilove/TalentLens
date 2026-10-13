@@ -35,12 +35,36 @@
         <DropZone @select-files="handleSelectFiles" />
 
         <div class="resume-section">
-          <div class="section-bar">
-            <span class="section-label">
-              <el-icon><Document /></el-icon>
-              {{ $t('home.resumeList') }} ({{ resumeStore.resumes.length }})
-            </span>
-            <div class="section-btns">
+          <div class="resume-toolbar">
+            <div class="resume-toolbar-heading">
+              <span class="section-label">
+                <el-icon><Document /></el-icon>
+                {{ $t('home.resumeList') }} {{ resumeStore.resumes.length }}
+              </span>
+              <span v-if="resumeStore.resumes.length" class="pending-summary">
+                {{ $t('home.pendingSummary', { count: resumeStore.pendingCount }) }}
+              </span>
+              <el-dropdown trigger="click" @command="handleResumeMenuCommand">
+                <button class="action-btn more-btn" type="button" :aria-label="$t('home.moreActions')">
+                  <el-icon><MoreFilled /></el-icon>
+                  <span>{{ $t('home.moreActions') }}</span>
+                </button>
+                <template #dropdown>
+                  <el-dropdown-menu>
+                    <el-dropdown-item command="reanalyze" :disabled="resumeStore.isAnalyzing || !hasReanalyzableResumes">
+                      {{ $t('home.reAnalyzeAll') }}
+                    </el-dropdown-item>
+                    <el-dropdown-item command="export" :disabled="resumeStore.doneCount === 0">
+                      {{ $t('home.exportReport') }}
+                    </el-dropdown-item>
+                    <el-dropdown-item command="clear" divided :disabled="!projectId || resumeStore.resumes.length === 0 || isAnalysisBusy || isClearingProject" style="color: var(--color-danger)">
+                      {{ $t('home.clearProject') }}
+                    </el-dropdown-item>
+                  </el-dropdown-menu>
+                </template>
+              </el-dropdown>
+            </div>
+            <div class="resume-toolbar-actions">
               <button
                 class="action-btn boss-btn"
                 @click="openBossDialog(false)"
@@ -58,29 +82,12 @@
                 <el-icon><Plus /></el-icon>
                 <span>继续寻才</span>
               </button>
-              <button class="action-btn primary" @click="handleStartAnalysis" :disabled="resumeStore.isAnalyzing">
+              <button class="action-btn primary analysis-action" @click="handleStartAnalysis" :disabled="resumeStore.isAnalyzing || resumeStore.pendingCount === 0">
                 <el-icon v-if="!resumeStore.isAnalyzing"><VideoPlay /></el-icon>
                 <el-icon v-else class="spin"><Loading /></el-icon>
-                {{ $t('home.startAnalysis') }}
-              </button>
-              <button
-                class="action-btn"
-                @click="handleReAnalyzeAll"
-                :disabled="resumeStore.isAnalyzing || resumeStore.doneCount === 0"
-                :title="$t('home.reAnalyzeAll')"
-              >
-                <el-icon><RefreshRight /></el-icon>
-              </button>
-              <button
-                class="action-btn"
-                @click="handleExport"
-                :disabled="resumeStore.doneCount === 0"
-                :title="$t('home.exportReport')"
-              >
-                <el-icon><Download /></el-icon>
-              </button>
-              <button class="action-btn" @click="handleClearAll" :title="$t('home.clear')">
-                <el-icon><Delete /></el-icon>
+                <span v-if="resumeStore.isAnalyzing">{{ $t('home.analyzing') }}</span>
+                <span v-else-if="resumeStore.pendingCount > 0">{{ $t('home.analyzeCount', { count: resumeStore.pendingCount }) }}</span>
+                <span v-else>{{ $t('home.allAnalyzed') }}</span>
               </button>
             </div>
           </div>
@@ -720,9 +727,9 @@ import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import {
-  Setting, Briefcase, Document, VideoPlay, Delete, View,
+  Setting, Briefcase, Document, VideoPlay, View,
   CircleCheck, Warning, ChatLineSquare, Clock, Loading, CircleClose,
-  RefreshRight, Download, Tickets, QuestionFilled, DocumentCopy, InfoFilled, Search,
+  RefreshRight, MoreFilled, Tickets, QuestionFilled, DocumentCopy, InfoFilled, Search,
   ChatDotRound, DocumentAdd, Connection, CloseBold, Paperclip, Compass, Check, Message,
   Link, Plus, Share, Aim, Filter
 } from '@element-plus/icons-vue'
@@ -782,6 +789,9 @@ const jobTitle = ref('高级Go开发工程师')
 const showConfigGuide = ref(false)
 const showBossDialog = ref(false)
 const showInterviewDialog = ref(false)
+const isClearingProject = ref(false)
+const hasReanalyzableResumes = computed(() => resumeStore.resumes.some(r => r.status === 'done' || r.status === 'error'))
+const isAnalysisBusy = computed(() => resumeStore.isAnalyzing || resumeStore.resumes.some(r => r.status === 'analyzing'))
 
 async function handleReviewRedLine(criterion: string, status: 'met' | 'violated' | 'unknown') {
   const resume = resumeStore.selectedResume
@@ -1389,13 +1399,42 @@ async function handleReAnalyze(id: string) {
 }
 
 async function handleReAnalyzeAll() {
-  if (resumeStore.doneCount === 0) { ElMessage.warning(t('home.noAnalyzedResumes')); return }
+  if (!hasReanalyzableResumes.value) { ElMessage.warning(t('home.noAnalyzedResumes')); return }
   if (!checkAIConfig()) { showConfigGuide.value = true; return }
   const ok = await resumeStore.reAnalyzeAll()
   if (!ok) { ElMessage.warning(t('home.noAnalyzedResumes')) }
 }
 
-function handleClearAll() { resumeStore.clearAll() }
+function handleResumeMenuCommand(command: string) {
+  if (command === 'reanalyze') void handleReAnalyzeAll()
+  if (command === 'export') void handleExport()
+  if (command === 'clear') void handleClearProject()
+}
+
+async function handleClearProject() {
+  const id = projectId.value
+  if (!id || isAnalysisBusy.value || isClearingProject.value || resumeStore.resumes.length === 0) return
+  try {
+    await ElMessageBox.confirm(
+      t('home.clearProjectDescription', { name: projectName.value || id, count: resumeStore.resumes.length }),
+      t('home.clearProjectConfirmTitle'),
+      { type: 'warning', confirmButtonText: t('home.clearProjectConfirm'), cancelButtonText: t('home.cancel'), confirmButtonClass: 'el-button--danger' }
+    )
+  } catch { return }
+  if (isAnalysisBusy.value || projectId.value !== id) return
+  isClearingProject.value = true
+  try {
+    await resumeStore.clearProjectResumes(id)
+    await projectStore.refreshProject(id)
+    ElMessage.success(t('home.clearProjectSuccess'))
+  } catch (err: any) {
+    await resumeStore.loadProjectResumes(id)
+    await projectStore.refreshProject(id)
+    ElMessage.error(t('home.clearProjectFailed', { error: err.message || err }))
+  } finally {
+    isClearingProject.value = false
+  }
+}
 
 function formatFileSize(bytes: number): string {
   if (bytes < 1024) return bytes + ' B'
@@ -1626,6 +1665,76 @@ onUnmounted(() => {
   .section-btns {
     display: flex;
     gap: 6px;
+  }
+}
+
+.resume-toolbar {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 16px;
+  border-bottom: 1px solid $separator;
+  background: rgba(246, 246, 246, 0.5);
+
+  .resume-toolbar-heading {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+  }
+
+  .section-label {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    flex: 0 0 auto;
+    color: $text-primary;
+    font-size: 13px;
+    font-weight: 600;
+    white-space: nowrap;
+    .el-icon { color: $gray-1; font-size: 15px; }
+  }
+
+  .pending-summary {
+    margin-left: auto;
+    color: $text-secondary;
+    font-size: 12px;
+    white-space: nowrap;
+  }
+
+  .resume-toolbar-heading > .el-dropdown { margin-left: auto; }
+  .more-btn { white-space: nowrap; }
+
+  .resume-toolbar-actions {
+    display: flex;
+    gap: 6px;
+    min-width: 0;
+
+    .action-btn {
+      flex: 1 1 0;
+      min-width: 0;
+      min-height: 36px;
+      justify-content: center;
+      padding: 7px 5px;
+      white-space: nowrap;
+      line-height: 1.2;
+    }
+
+    .analysis-action { flex-grow: 1.15; }
+    .boss-btn {
+      background: rgba(0, 185, 107, 0.1);
+      border-color: rgba(0, 185, 107, 0.35);
+      color: $system-green;
+      box-shadow: none;
+      &:hover:not(:disabled) { background: rgba(0, 185, 107, 0.18); box-shadow: none; transform: none; }
+    }
+    .continue-btn {
+      background: $bg-primary;
+      border-color: $gray-4;
+      color: $text-primary;
+      box-shadow: none;
+      &:hover:not(:disabled) { background: $bg-hover; box-shadow: none; transform: none; }
+    }
   }
 }
 
