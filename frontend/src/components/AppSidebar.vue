@@ -134,12 +134,15 @@ const isProjectsActive = computed(() => {
   justify-content: space-between;
   border-bottom: 1px solid var(--sidebar-border);
   cursor: default;
+  -webkit-app-region: drag;
+  --wails-draggable: drag;
 
   .brand-logo-wrap {
     display: flex;
     align-items: center;
     gap: 10px;
-    -webkit-app-region: no-drag;
+    -webkit-app-region: drag;
+    --wails-draggable: drag;
   }
 
   .brand-icon {

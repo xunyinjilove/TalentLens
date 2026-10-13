@@ -144,6 +144,7 @@ async function closeWindow() {
   border-bottom: 1px solid var(--topbar-border);
   user-select: none;
   -webkit-app-region: drag;
+  --wails-draggable: drag;
   position: relative;
   z-index: 90;
   transition: background var(--transition-normal), border-color var(--transition-normal);
@@ -157,6 +158,7 @@ async function closeWindow() {
   gap: 12px;
   padding-left: 16px;
   -webkit-app-region: no-drag;
+  --wails-draggable: no-drag;
 
   .back-btn {
     display: flex;
@@ -208,6 +210,7 @@ async function closeWindow() {
   flex: 1;
   height: 100%;
   -webkit-app-region: drag;
+  --wails-draggable: drag;
 }
 
 // 右侧操作与窗口控制
@@ -216,6 +219,7 @@ async function closeWindow() {
   align-items: center;
   height: 100%;
   -webkit-app-region: no-drag;
+  --wails-draggable: no-drag;
 
   .actions-slot {
     display: flex;

@@ -67,8 +67,12 @@
   top: 0;
   z-index: 15;
   -webkit-app-region: drag;
+  --wails-draggable: drag;
 }
-.wb-header button,.wb-header input,.wb-header .wb-actions { -webkit-app-region:no-drag; }
+.wb-header button, .wb-header input, .wb-header .wb-actions, .wb-header a {
+  -webkit-app-region: no-drag;
+  --wails-draggable: no-drag;
+}
 
 .wb-header h1 { margin: 0; font-size: 21px; font-weight: 750; }
 .wb-crumb { margin-top: 3px; color: var(--wb-muted); font-size: 12px; }
