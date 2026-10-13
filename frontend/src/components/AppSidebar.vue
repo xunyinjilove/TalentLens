@@ -18,14 +18,30 @@
     <nav class="sidebar-nav">
       <div class="nav-group-title">工作台</div>
 
-      <router-link
-        to="/"
-        class="nav-item"
-        :class="{ active: isProjectsActive }"
-      >
+      <router-link to="/" class="nav-item" :class="{ active: route.path === '/' }">
+        <el-icon class="nav-icon"><DataBoard /></el-icon>
+        <span class="nav-label">招聘概览</span>
+      </router-link>
+
+      <router-link to="/jobs" class="nav-item" :class="{ active: isProjectsActive }">
         <el-icon class="nav-icon"><Briefcase /></el-icon>
-        <span class="nav-label">招聘项目</span>
+        <span class="nav-label">职位管理</span>
         <span v-if="projectCount > 0" class="nav-badge">{{ projectCount }}</span>
+      </router-link>
+
+      <router-link to="/talent" class="nav-item" :class="{ active: route.path === '/talent' }">
+        <el-icon class="nav-icon"><Document /></el-icon>
+        <span class="nav-label">简历人才库</span>
+      </router-link>
+
+      <router-link to="/interviews" class="nav-item" :class="{ active: route.path === '/interviews' }">
+        <el-icon class="nav-icon"><Calendar /></el-icon>
+        <span class="nav-label">面试安排</span>
+      </router-link>
+
+      <router-link to="/pipeline" class="nav-item" :class="{ active: route.path === '/pipeline' }">
+        <el-icon class="nav-icon"><Connection /></el-icon>
+        <span class="nav-label">候选人跟进</span>
       </router-link>
 
       <div class="nav-group-title">智能助手</div>
@@ -91,7 +107,7 @@ const projectCount = computed(() => projectStore.projects.length)
 
 // 判断项目列表是否处于激活态（包含详情页）
 const isProjectsActive = computed(() => {
-  return route.path === '/' || route.path.startsWith('/project/')
+  return route.path.startsWith('/jobs') || route.path.startsWith('/project/')
 })
 </script>
 

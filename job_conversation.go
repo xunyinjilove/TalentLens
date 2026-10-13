@@ -73,7 +73,11 @@ func (a *App) save51JobContactResume(resume *Resume) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(filepath.Join(a.getDataDir(), "resumes", resume.ID+".json"), encoded, 0600)
+	if err := os.WriteFile(filepath.Join(a.getDataDir(), "resumes", resume.ID+".json"), encoded, 0600); err != nil {
+		return err
+	}
+	a.syncRecruitmentResume(resume)
+	return nil
 }
 
 func is51JobCandidateDetailURL(raw string) bool {

@@ -6,6 +6,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"crypto/tls"
+	"database/sql"
 	"embed"
 	"encoding/base64"
 	"encoding/json"
@@ -43,8 +44,16 @@ var assets embed.FS
 
 // Config 配置结构
 type Config struct {
-	AI  AIConfig  `json:"ai"`
-	Job JobConfig `json:"job"`
+	AI     AIConfig     `json:"ai"`
+	Job    JobConfig    `json:"job"`
+	Window WindowConfig `json:"window,omitempty"`
+}
+
+// WindowConfig 窗口持久化尺寸与状态
+type WindowConfig struct {
+	Width       int  `json:"width,omitempty"`
+	Height      int  `json:"height,omitempty"`
+	IsMaximized bool `json:"is_maximized,omitempty"`
 }
 
 // AIConfig AI配置
@@ -115,6 +124,8 @@ type Resume struct {
 	FileSize                  int64           `json:"file_size"`
 	Content                   string          `json:"content"`
 	URL                       string          `json:"url,omitempty"`
+	SourcePlatform            string          `json:"source_platform,omitempty"`
+	PlatformCandidateID       string          `json:"platform_candidate_id,omitempty"`
 	Email                     string          `json:"email,omitempty"`
 	Status                    string          `json:"status"`
 	Score                     int             `json:"score"`
@@ -132,6 +143,7 @@ type Resume struct {
 	ContactAttachmentBaseline []string        `json:"contact_attachment_baseline,omitempty"`
 	ErrorMessage              string          `json:"error_message,omitempty"`
 	Analysis                  *AnalysisResult `json:"analysis,omitempty"`
+	AnalysisRuleVersion       int             `json:"analysis_rule_version,omitempty"`
 	CreatedAt                 time.Time       `json:"created_at"`
 }
 
@@ -268,19 +280,24 @@ type ChatResponse struct {
 }
 
 type App struct {
-	ctx             context.Context
-	config          Config
-	activeProjectID string // 当前活跃的项目ID（前端设置）
-	bossCmd         *exec.Cmd
-	bossStopFile    string // 多平台任务的协作停机标记；空值表示旧版任务
-	bossMutex       sync.Mutex
-	interviewMutex  sync.Mutex
-	contactMutex    sync.Mutex
-	contactPending  map[string]pending51JobHiQuote
-	analysisMutex   sync.Mutex
-	activeAnalyses  map[string]bool
-	activeProjects  map[string]bool
-	dataDirOverride string // 测试使用的隔离数据目录；生产环境为空
+	ctx                context.Context
+	config             Config
+	activeProjectID    string // 当前活跃的项目ID（前端设置）
+	bossCmd            *exec.Cmd
+	bossStopFile       string // 多平台任务的协作停机标记；空值表示旧版任务
+	activeSearchTaskID string
+	searchStarting     bool
+	bossMutex          sync.Mutex
+	interviewMutex     sync.Mutex
+	contactMutex       sync.Mutex
+	contactPending     map[string]pending51JobHiQuote
+	analysisMutex      sync.Mutex
+	activeAnalyses     map[string]bool
+	activeProjects     map[string]bool
+	dataDirOverride    string // 测试使用的隔离数据目录；生产环境为空
+	recruitmentDBMu    sync.Mutex
+	recruitmentDB      *sql.DB
+	recruitmentDir     string
 }
 
 func NewApp() *App {
@@ -289,11 +306,21 @@ func NewApp() *App {
 
 func main() {
 	app := NewApp()
+	app.loadConfig()
+
+	initWidth := 1200
+	initHeight := 800
+	if app.config.Window.Width >= 900 {
+		initWidth = app.config.Window.Width
+	}
+	if app.config.Window.Height >= 600 {
+		initHeight = app.config.Window.Height
+	}
 
 	err := wails.Run(&options.App{
 		Title:            "Tellgen",
-		Width:            1200,
-		Height:           800,
+		Width:            initWidth,
+		Height:           initHeight,
 		MinWidth:         900,
 		MinHeight:        600,
 		Frameless:        true,
@@ -303,7 +330,8 @@ func main() {
 		AssetServer: &assetserver.Options{
 			Assets: assets,
 		},
-		OnStartup: app.startup,
+		OnStartup:  app.startup,
+		OnShutdown: func(context.Context) { app.closeRecruitmentDB() },
 		Bind: []interface{}{
 			app,
 		},
@@ -316,22 +344,96 @@ func main() {
 
 // WindowMinimize 最小化窗口
 func (a *App) WindowMinimize() {
-	runtime.WindowMinimise(a.ctx)
+	if a.ctx != nil {
+		runtime.WindowMinimise(a.ctx)
+	}
 }
 
 // WindowMaximize 最大化/还原窗口
 func (a *App) WindowMaximize() {
-	runtime.WindowToggleMaximise(a.ctx)
+	if a.ctx != nil {
+		runtime.WindowToggleMaximise(a.ctx)
+		// 状态变更后异步保存
+		go func() {
+			time.Sleep(150 * time.Millisecond)
+			if a.ctx != nil {
+				w, h := runtime.WindowGetSize(a.ctx)
+				isMax := runtime.WindowIsMaximised(a.ctx)
+				_ = a.SaveWindowSettings(w, h, isMax)
+			}
+		}()
+	}
 }
 
-// WindowClose 关闭窗口
+// WindowClose 关闭窗口并保存最终尺寸与状态
 func (a *App) WindowClose() {
-	runtime.Quit(a.ctx)
+	if a.ctx != nil {
+		w, h := runtime.WindowGetSize(a.ctx)
+		isMax := runtime.WindowIsMaximised(a.ctx)
+		_ = a.SaveWindowSettings(w, h, isMax)
+		runtime.Quit(a.ctx)
+	}
+}
+
+// GetWindowSettings 获取当前窗口记忆配置
+func (a *App) GetWindowSettings() WindowConfig {
+	return a.config.Window
+}
+
+// SaveWindowSettings 保存窗口尺寸与状态到本地配置文件
+func (a *App) SaveWindowSettings(width, height int, isMaximized bool) error {
+	if width < 900 {
+		width = 900
+	}
+	if height < 600 {
+		height = 600
+	}
+	a.config.Window = WindowConfig{
+		Width:       width,
+		Height:      height,
+		IsMaximized: isMaximized,
+	}
+	data, err := json.MarshalIndent(a.config, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(a.getConfigPath(), data, 0644)
+}
+
+// SetWindowSize 动态设置窗口尺寸并居中
+func (a *App) SetWindowSize(width, height int) {
+	if width < 900 {
+		width = 900
+	}
+	if height < 600 {
+		height = 600
+	}
+	if a.ctx != nil {
+		runtime.WindowUnmaximise(a.ctx)
+		runtime.WindowSetSize(a.ctx, width, height)
+		runtime.WindowCenter(a.ctx)
+		_ = a.SaveWindowSettings(width, height, false)
+	}
+}
+
+// CenterWindow 将窗口在当前屏幕居中
+func (a *App) CenterWindow() {
+	if a.ctx != nil {
+		runtime.WindowCenter(a.ctx)
+	}
 }
 
 func (a *App) startup(ctx context.Context) {
 	a.ctx = ctx
 	a.loadConfig()
+	if a.config.Window.IsMaximized {
+		runtime.WindowMaximise(ctx)
+	}
+	if _, err := a.getRecruitmentDB(); err != nil {
+		log.Printf("[RecruitmentStore] SQLite 迁移未完成，保留旧数据入口: %v", err)
+	} else if err := a.interruptUnfinishedSourcingTasks(); err != nil {
+		log.Printf("[RecruitmentStore] 检索任务恢复状态失败: %v", err)
+	}
 
 	// 监听原生文件拖拽（Wails 提供真实文件路径）
 	runtime.OnFileDrop(ctx, func(x, y int, paths []string) {
@@ -604,6 +706,7 @@ func (a *App) saveResume(r *Resume) {
 	os.MkdirAll(dir, 0755)
 	data, _ := json.MarshalIndent(r, "", "  ")
 	os.WriteFile(filepath.Join(dir, r.ID+".json"), data, 0644)
+	a.syncRecruitmentResume(r)
 }
 
 // persistSearchCandidate 仅在简历与所属项目都落盘后确认采集成功。
@@ -637,7 +740,12 @@ func (a *App) persistSearchCandidate(r *Resume) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(filepath.Join(a.getProjectsDir(), p.ID+".json"), projectData, 0644)
+	if err := os.WriteFile(filepath.Join(a.getProjectsDir(), p.ID+".json"), projectData, 0644); err != nil {
+		return err
+	}
+	a.syncRecruitmentProject(p)
+	a.syncRecruitmentResume(r)
+	return nil
 }
 
 // RegisterResume 前端拖入简历后，通知后端注册并保存到磁盘
@@ -697,7 +805,6 @@ func (a *App) SaveAIConfig(cfg *AIConfig) error {
 	return os.WriteFile(a.getConfigPath(), data, 0644)
 }
 
-
 func (a *App) GetResumes() []*Resume {
 	dir := filepath.Join(a.getDataDir(), "resumes")
 	os.MkdirAll(dir, 0755)
@@ -728,12 +835,24 @@ func (a *App) DeleteResume(id string) error {
 
 func (a *App) ReAnalyzeResume(id string) error {
 	path := filepath.Join(a.getDataDir(), "resumes", id+".json")
-	data, _ := os.ReadFile(path)
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return err
+	}
 	var r Resume
-	json.Unmarshal(data, &r)
+	if err := json.Unmarshal(data, &r); err != nil {
+		return err
+	}
 	r.Status = "pending"
-	data, _ = json.MarshalIndent(r, "", "  ")
-	os.WriteFile(path, data, 0644)
+	r.ErrorMessage = ""
+	data, err = json.MarshalIndent(r, "", "  ")
+	if err != nil {
+		return err
+	}
+	if err := os.WriteFile(path, data, 0644); err != nil {
+		return err
+	}
+	a.syncRecruitmentResume(&r)
 	runtime.EventsEmit(a.ctx, "resume:updated", &r)
 	return nil
 }
@@ -934,6 +1053,7 @@ func (a *App) getProjectsDir() string {
 func (a *App) saveProject(p *Project) {
 	data, _ := json.MarshalIndent(p, "", "  ")
 	os.WriteFile(filepath.Join(a.getProjectsDir(), p.ID+".json"), data, 0644)
+	a.syncRecruitmentProject(p)
 }
 
 // CreateProject 创建招聘项目
@@ -1059,19 +1179,6 @@ func (a *App) GetProjectRanking(projectID string) []*Resume {
 }
 
 func sortResumesByDecision(resumes []*Resume) {
-	eligibilityRank := func(r *Resume) int {
-		if r.Analysis == nil {
-			return 1
-		}
-		switch r.Analysis.RedLineStatus {
-		case "passed", "not_configured":
-			return 0
-		case "failed":
-			return 2
-		default:
-			return 1
-		}
-	}
 	ability := func(r *Resume) int {
 		if r.Analysis != nil && r.Analysis.AbilityScore > 0 {
 			return r.Analysis.AbilityScore
@@ -1080,9 +1187,6 @@ func sortResumesByDecision(resumes []*Resume) {
 	}
 	sort.SliceStable(resumes, func(i, j int) bool {
 		left, right := resumes[i], resumes[j]
-		if eligibilityRank(left) != eligibilityRank(right) {
-			return eligibilityRank(left) < eligibilityRank(right)
-		}
 		leftScore, rightScore := ability(left), ability(right)
 		if leftScore/5 != rightScore/5 {
 			return leftScore/5 > rightScore/5
@@ -1100,7 +1204,10 @@ func sortResumesByDecision(resumes []*Resume) {
 		if leftScore != rightScore {
 			return leftScore > rightScore
 		}
-		return resumes[i].CreatedAt.After(resumes[j].CreatedAt)
+		if !left.CreatedAt.Equal(right.CreatedAt) {
+			return left.CreatedAt.Before(right.CreatedAt)
+		}
+		return left.ID < right.ID
 	})
 }
 
@@ -1170,6 +1277,7 @@ func (a *App) RegisterResumeToProject(projectID string, id string, fileName stri
 	if p != nil {
 		p.ResumeIDs = append(p.ResumeIDs, id)
 		a.UpdateProject(p)
+		a.syncRecruitmentResume(resume)
 	}
 
 	return true, "简历已注册: " + fileName
@@ -1571,12 +1679,20 @@ func (a *App) submit51Job(req JobDraftRequest) JobDraftResult {
 // TestPlatformLogin 独立测试指定平台的企业端账号登录与扫码鉴权
 func (a *App) TestPlatformLogin(platform string) bool {
 	a.bossMutex.Lock()
-	if a.bossCmd != nil && a.bossCmd.Process != nil {
-		_ = a.bossCmd.Process.Kill()
-		a.bossCmd = nil
-		a.bossStopFile = ""
+	if a.searchStarting || (a.bossCmd != nil && a.bossCmd.Process != nil) {
+		a.bossMutex.Unlock()
+		runtime.EventsEmit(a.ctx, "platform:error", map[string]interface{}{
+			"type": "error", "message": "已有检索任务正在运行，请先停止或等待该任务完成",
+		})
+		return false
 	}
+	a.searchStarting = true
 	a.bossMutex.Unlock()
+	defer func() {
+		a.bossMutex.Lock()
+		a.searchStarting = false
+		a.bossMutex.Unlock()
+	}()
 
 	if platform == "" {
 		platform = "boss"
@@ -1988,12 +2104,20 @@ func (a *App) startQuotaMatrixSearch(projectID string, keyword string, city stri
 		return false
 	}
 	a.bossMutex.Lock()
-	if a.bossCmd != nil && a.bossCmd.Process != nil {
-		_ = a.bossCmd.Process.Kill()
-		a.bossCmd = nil
-		a.bossStopFile = ""
+	if a.searchStarting || (a.bossCmd != nil && a.bossCmd.Process != nil) {
+		a.bossMutex.Unlock()
+		runtime.EventsEmit(a.ctx, "platform:error", map[string]interface{}{
+			"type": "error", "message": "已有检索任务正在运行，请先停止或等待该任务完成",
+		})
+		return false
 	}
+	a.searchStarting = true
 	a.bossMutex.Unlock()
+	defer func() {
+		a.bossMutex.Lock()
+		a.searchStarting = false
+		a.bossMutex.Unlock()
+	}()
 
 	if len(platforms) == 0 {
 		platforms = []string{"boss"}
@@ -2093,11 +2217,10 @@ func (a *App) startQuotaMatrixSearch(projectID string, keyword string, city stri
 	}
 
 	excludeFilePath := filepath.Join(dataDir, fmt.Sprintf("exclude_%s.json", projectID))
-	excludeData := map[string]interface{}{
-		"names": excludedNames,
-		"urls":  excludedUrls,
-		"cards": excludedCards,
-	}
+	// 同名或相似履历不构成可信身份。只用独立主页链接跨批次排重。
+	_ = excludedNames
+	_ = excludedCards
+	excludeData := map[string]interface{}{"urls": excludedUrls}
 	if b, err := json.Marshal(excludeData); err == nil {
 		_ = os.WriteFile(excludeFilePath, b, 0644)
 	}
@@ -2124,9 +2247,20 @@ func (a *App) startQuotaMatrixSearch(projectID string, keyword string, city stri
 
 	cmd := exec.Command("node", cmdArgs...)
 	hideConsoleWindow(cmd)
+	taskID, taskErr := a.createSourcingTask(SourcingTaskConfig{
+		ProjectID: projectID, Keyword: keyword, City: city, ExpYears: expYears,
+		EduLevel: eduLevel, Count: count, Platforms: platforms,
+		QuotaMatrixJSON: quotaMatrixJSON, AutoAnalyze: autoAnalyze,
+		ActivityDays: activityDays, ChannelStrategy: channelStrategy,
+	})
+	if taskErr != nil {
+		runtime.EventsEmit(a.ctx, "platform:error", map[string]interface{}{"type": "error", "message": taskErr.Error()})
+		return false
+	}
 
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
+		a.setSourcingTaskStatus(taskID, "failed", fmt.Sprintf("启动管道失败: %v", err))
 		runtime.EventsEmit(a.ctx, "boss:error", map[string]interface{}{
 			"type":    "error",
 			"message": fmt.Sprintf("❌ 启动直连管道失败: %v", err),
@@ -2135,6 +2269,7 @@ func (a *App) startQuotaMatrixSearch(projectID string, keyword string, city stri
 	}
 
 	if err := cmd.Start(); err != nil {
+		a.setSourcingTaskStatus(taskID, "failed", fmt.Sprintf("启动失败: %v", err))
 		runtime.EventsEmit(a.ctx, "boss:error", map[string]interface{}{
 			"type":    "error",
 			"message": fmt.Sprintf("❌ 执行直连子进程失败: %v，请确认系统已安装 Node.js 环境。", err),
@@ -2145,11 +2280,14 @@ func (a *App) startQuotaMatrixSearch(projectID string, keyword string, city stri
 	a.bossMutex.Lock()
 	a.bossCmd = cmd
 	a.bossStopFile = stopFile
+	a.activeSearchTaskID = taskID
 	a.bossMutex.Unlock()
+	a.setSourcingTaskStatus(taskID, "running", "正在检索")
 
 	go func() {
 		persistFailures := 0
 		persistedCount := 0
+		deduplicatedCount := 0
 		var pendingDone map[string]interface{}
 		scanner := bufio.NewScanner(stdout)
 		// 扩容缓冲区上限至 4MB，防止全量大简历 JSON 超出默认 64KB 限制导致静默截断
@@ -2170,12 +2308,14 @@ func (a *App) startQuotaMatrixSearch(projectID string, keyword string, city stri
 			evtType, _ := evt["type"].(string)
 			switch evtType {
 			case "status":
+				a.updateSourcingTaskEvent(taskID, evt)
 				runtime.EventsEmit(a.ctx, "boss:status", evt)
 				runtime.EventsEmit(a.ctx, "platform:status", evt)
 			case "auth":
 				runtime.EventsEmit(a.ctx, "boss:auth", evt)
 				runtime.EventsEmit(a.ctx, "platform:auth", evt)
 			case "captcha":
+				a.setSourcingTaskStatus(taskID, "running", "等待平台安全验证")
 				runtime.EventsEmit(a.ctx, "boss:captcha", evt)
 				runtime.EventsEmit(a.ctx, "platform:captcha", evt)
 			case "captcha_resolved":
@@ -2188,24 +2328,38 @@ func (a *App) startQuotaMatrixSearch(projectID string, keyword string, city stri
 					candPath, _ := candObj["filePath"].(string)
 					candContent, _ := candObj["content"].(string)
 					candUrl, _ := candObj["url"].(string)
+					candPlatform, _ := candObj["platform"].(string)
+					candPlatformID, _ := candObj["platformCandidateId"].(string)
 					candEmail, _ := candObj["email"].(string)
 					candSourceKeyword, _ := candObj["sourceKeyword"].(string)
 					candActivityLabel, _ := candObj["activityLabel"].(string)
 
 					r := &Resume{
-						ID:            candID,
-						ProjectID:     projectID,
-						FileName:      candName,
-						FilePath:      candPath,
-						FileType:      ".txt",
-						FileSize:      int64(len(candContent)),
-						Content:       candContent,
-						URL:           candUrl,
-						Email:         candEmail,
-						SourceKeyword: candSourceKeyword,
-						ActivityLabel: candActivityLabel,
-						Status:        "pending",
-						CreatedAt:     time.Now(),
+						ID:                  candID,
+						ProjectID:           projectID,
+						FileName:            candName,
+						FilePath:            candPath,
+						FileType:            ".txt",
+						FileSize:            int64(len(candContent)),
+						Content:             candContent,
+						URL:                 candUrl,
+						SourcePlatform:      candPlatform,
+						PlatformCandidateID: candPlatformID,
+						Email:               candEmail,
+						SourceKeyword:       candSourceKeyword,
+						ActivityLabel:       candActivityLabel,
+						Status:              "pending",
+						CreatedAt:           time.Now(),
+					}
+					known, identityErr := a.isKnownProjectSource(projectID, r)
+					if identityErr != nil {
+						persistFailures++
+						runtime.EventsEmit(a.ctx, "platform:error", map[string]interface{}{"type": "error", "message": fmt.Sprintf("候选人身份核对失败：%v", identityErr)})
+						continue
+					}
+					if known {
+						deduplicatedCount++
+						continue
 					}
 					if err := a.persistSearchCandidate(r); err != nil {
 						persistFailures++
@@ -2215,6 +2369,10 @@ func (a *App) startQuotaMatrixSearch(projectID string, keyword string, city stri
 						continue
 					}
 					persistedCount++
+					a.recordSourcingCandidate(taskID)
+					if autoAnalyze {
+						a.queueSourcingAnalysis(taskID, projectID, r.ID)
+					}
 
 					runtime.EventsEmit(a.ctx, "resume:dropped", r)
 					runtime.EventsEmit(a.ctx, "boss:candidate_found", evt)
@@ -2235,6 +2393,7 @@ func (a *App) startQuotaMatrixSearch(projectID string, keyword string, city stri
 		if wasCurrent {
 			a.bossCmd = nil
 			a.bossStopFile = ""
+			a.activeSearchTaskID = ""
 		}
 		a.bossMutex.Unlock()
 		_ = os.Remove(stopFile)
@@ -2242,27 +2401,35 @@ func (a *App) startQuotaMatrixSearch(projectID string, keyword string, city stri
 			return
 		}
 		if scanErr != nil || waitErr != nil {
+			a.setSourcingTaskStatus(taskID, "failed", fmt.Sprintf("搜索进程异常结束：%v %v", scanErr, waitErr))
 			runtime.EventsEmit(a.ctx, "platform:error", map[string]interface{}{
 				"type": "error", "message": fmt.Sprintf("搜索进程异常结束：读取错误=%v，进程错误=%v", scanErr, waitErr),
 			})
 		} else if persistFailures > 0 {
+			a.setSourcingTaskStatus(taskID, "partial", fmt.Sprintf("%d 份档案未能保存", persistFailures))
 			runtime.EventsEmit(a.ctx, "platform:error", map[string]interface{}{
 				"type": "error", "message": fmt.Sprintf("搜索结束，但 %d 份候选人档案未能保存；请检查存储空间后重试", persistFailures),
 			})
 		} else if pendingDone != nil {
-			if reportedTotal, ok := pendingDone["total"].(float64); !ok || int(reportedTotal) != persistedCount {
+			if reportedTotal, ok := pendingDone["total"].(float64); !ok || int(reportedTotal) != persistedCount+deduplicatedCount {
+				a.setSourcingTaskStatus(taskID, "partial", "平台结果与本地保存数量不一致")
 				runtime.EventsEmit(a.ctx, "platform:error", map[string]interface{}{
 					"type": "error", "message": fmt.Sprintf("搜索结果与已保存简历数量不一致（已保存 %d 人），请检查本地数据", persistedCount),
 				})
 			} else {
+				stopped, _ := pendingDone["stopped"].(bool)
+				if stopped {
+					a.setSourcingTaskStatus(taskID, "stopped", "已停止，已抓取结果保留")
+				} else if persistedCount < count {
+					a.setSourcingTaskStatus(taskID, "partial", "检索结束，目标人数未达成")
+				} else {
+					a.setSourcingTaskStatus(taskID, "completed", "检索已完成，分析可能仍在进行")
+				}
 				runtime.EventsEmit(a.ctx, "boss:done", pendingDone)
 				runtime.EventsEmit(a.ctx, "platform:done", pendingDone)
-				stopped, _ := pendingDone["stopped"].(bool)
-				if autoAnalyze && !stopped && persistedCount > 0 && a.config.AI.APIKey != "" {
-					go a.StartProjectAnalysis(projectID, &a.config.AI)
-				}
 			}
 		} else {
+			a.setSourcingTaskStatus(taskID, "failed", "搜索任务未返回完成结果")
 			runtime.EventsEmit(a.ctx, "platform:error", map[string]interface{}{
 				"type": "error", "message": "搜索任务已结束，但未返回完成结果；请查看前面的平台提示后重新检索",
 			})
@@ -2284,8 +2451,11 @@ func (a *App) StopBossSearch() bool {
 			}
 		}
 		_ = a.bossCmd.Process.Kill()
+		taskID := a.activeSearchTaskID
 		a.bossCmd = nil
 		a.bossStopFile = ""
+		a.activeSearchTaskID = ""
+		go a.setSourcingTaskStatus(taskID, "stopped", "已强制停止；已抓取结果保留")
 		log.Println("[StopBossSearch] 已终止 BOSS 搜寻任务")
 		return true
 	}
@@ -2536,6 +2706,10 @@ func (a *App) AnalyzeResume(resumeID string, cfg *AIConfig, jobCfg *JobConfig) (
 	var resume Resume
 	if err := json.Unmarshal(data, &resume); err != nil {
 		return nil, fmt.Errorf("解析简历失败: %v", err)
+	}
+	if db := a.activeRecruitmentDB(); db != nil && resume.ProjectID != "" {
+		_ = db.QueryRow(`SELECT COALESCE(MAX(version),0) FROM job_rules WHERE project_id=? AND status='approved'`,
+			resume.ProjectID).Scan(&resume.AnalysisRuleVersion)
 	}
 
 	// 每次分析前重新提取文件内容（避免使用旧解析器缓存的错误内容）

@@ -72,14 +72,14 @@ func TestLegacyAIVerdictsBecomePendingUntilHRReviews(t *testing.T) {
 	}
 }
 
-func TestRankingUsesEligibilityThenAbilityBandThenConfirmedBonus(t *testing.T) {
-	passed := &Resume{ID: "passed", Score: 80, Analysis: &AnalysisResult{AbilityScore: 80, RedLineStatus: "passed", ConfirmedBonusCount: 1}}
+func TestRankingUsesAbilityBandThenConfirmedBonus(t *testing.T) {
+	passed := &Resume{ID: "passed", Score: 83, Analysis: &AnalysisResult{AbilityScore: 83, RedLineStatus: "passed", ConfirmedBonusCount: 1}}
 	pending := &Resume{ID: "pending", Score: 95, Analysis: &AnalysisResult{AbilityScore: 95, RedLineStatus: "pending"}}
 	failed := &Resume{ID: "failed", Score: 99, Analysis: &AnalysisResult{AbilityScore: 99, RedLineStatus: "failed"}}
 	moreBonus := &Resume{ID: "more", Score: 81, Analysis: &AnalysisResult{AbilityScore: 81, RedLineStatus: "passed", ConfirmedBonusCount: 2}}
 	resumes := []*Resume{failed, pending, passed, moreBonus}
 	sortResumesByDecision(resumes)
-	want := []string{"more", "passed", "pending", "failed"}
+	want := []string{"failed", "pending", "more", "passed"}
 	for i, item := range resumes {
 		if item.ID != want[i] {
 			t.Fatalf("rank %d = %s, want %s", i, item.ID, want[i])
