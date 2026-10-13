@@ -32,8 +32,8 @@ const techJobs: JobPreset[] = [
     experienceYears: 5,
     educationLevel: '本科',
     description: '负责公司核心产品的前端架构设计与开发',
-    redLines: ['学历统招全日制本科及以上', '严禁纯外包驻场派遣经历', '工作年限不足5年硬卡'],
-    bonusPoints: ['主导过大型前端工程化重构与性能优化', '熟悉Node.js微服务或全栈全流程架构', '有知名开源项目贡献']
+    redLines: ['能提供可核实的前端产品开发、上线与维护经历'],
+    bonusPoints: ['主导过前端工程化重构并可说明效果', '熟悉 Node.js 服务端开发与前后端协作', '有可核实的开源项目贡献']
   },
   {
     id: 'frontend-junior',
@@ -55,8 +55,8 @@ const techJobs: JobPreset[] = [
     experienceYears: 5,
     educationLevel: '本科',
     description: '负责后端服务架构设计与核心功能开发',
-    redLines: ['统招全日制本科及以上', '严禁纯外包驻场派遣经历', '无高并发高可用生产项目落地经验'],
-    bonusPoints: ['知名大厂/独角兽背景', '主导过微服务架构重构或自研网关', '具备大型系统高可用高并发实战经验']
+    redLines: ['能提供可核实的 Go 生产服务开发与维护经历'],
+    bonusPoints: ['主导过微服务架构重构或网关建设并可复盘', '具备可核实的大型系统高可用实践经验']
   },
   {
     id: 'backend-java',

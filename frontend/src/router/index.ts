@@ -4,9 +4,39 @@ import { createRouter, createWebHashHistory } from 'vue-router'
 const routes = [
   {
     path: '/',
+    name: 'RecruitmentDashboard',
+    component: () => import('../views/RecruitmentDashboardView.vue'),
+    meta: { title: '招聘概览' }
+  },
+  {
+    path: '/jobs',
     name: 'Projects',
+    component: () => import('../views/RecruitmentJobsView.vue'),
+    meta: { title: '职位管理' }
+  },
+  {
+    path: '/jobs/manage',
+    name: 'ProjectsManage',
     component: () => import('../views/ProjectListView.vue'),
-    meta: { title: '招聘项目' }
+    meta: { title: '岗位配置' }
+  },
+  {
+    path: '/talent',
+    name: 'TalentPool',
+    component: () => import('../views/TalentPoolView.vue'),
+    meta: { title: '简历人才库' }
+  },
+  {
+    path: '/interviews',
+    name: 'RecruitmentInterviews',
+    component: () => import('../views/RecruitmentInterviewsView.vue'),
+    meta: { title: '面试安排' }
+  },
+  {
+    path: '/pipeline',
+    name: 'RecruitmentPipeline',
+    component: () => import('../views/RecruitmentPipelineView.vue'),
+    meta: { title: '候选人跟进' }
   },
   {
     path: '/project/:id',

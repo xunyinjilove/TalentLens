@@ -166,6 +166,7 @@ func (a *App) SetReviewedBonus(resumeID, criterion, status, evidence string) (*R
 	if err := os.WriteFile(path, updated, 0600); err != nil {
 		return nil, err
 	}
+	a.syncRecruitmentResume(&resume)
 	if a.ctx != nil {
 		runtime.EventsEmit(a.ctx, "analysis:completed", map[string]interface{}{"id": resumeID, "score": resume.Analysis.OverallScore, "analysis": resume.Analysis})
 	}
@@ -241,6 +242,7 @@ func (a *App) setReviewedRedLine(resumeID string, criterion string, status strin
 	if err = os.WriteFile(filepath.Join(a.getDataDir(), "resumes", resumeID+".json"), updated, 0600); err != nil {
 		return nil, err
 	}
+	a.syncRecruitmentResume(&resume)
 	if a.ctx != nil {
 		runtime.EventsEmit(a.ctx, "analysis:completed", map[string]interface{}{"id": resumeID, "score": analysis.OverallScore, "analysis": analysis})
 	}

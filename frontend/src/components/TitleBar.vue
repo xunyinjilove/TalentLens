@@ -31,6 +31,8 @@
 
       <!-- 右上角 Windows / VS Code 风格窗口控制按钮组 -->
       <div class="window-controls">
+        <WindowSizeMenu />
+
         <button
           class="win-btn minimize"
           @click="minimizeWindow"
@@ -75,6 +77,7 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
+import WindowSizeMenu from './WindowSizeMenu.vue'
 
 const props = withDefaults(defineProps<{
   title?: string

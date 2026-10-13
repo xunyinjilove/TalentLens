@@ -303,10 +303,10 @@ function selectFreshCandidates(candidates, limit, excludedUrls = new Set(), seen
   const batchKeys = new Set();
   for (const candidate of candidates || []) {
     const key = candidateCardKey(candidate);
-    if (!candidate.name || seenKeys.has(key) || batchKeys.has(key)) continue;
+    if (!candidate.name || (candidate.url && (seenKeys.has(key) || batchKeys.has(key)))) continue;
     if (candidate.url && excludedUrls.has(candidate.url)) continue;
     candidate.cardKey = key;
-    batchKeys.add(key);
+    if (candidate.url) batchKeys.add(key);
     selected.push(candidate);
     if (selected.length >= limit) break;
   }
@@ -1734,7 +1734,7 @@ async function autoNavigateAndSearch(page, platformKey, cfg, searchKeyword) {
           /id=|seq=|user|resume|detail|geek/.test(urlLower) ? urlText : '';
         const isDup = candidateUrl
           ? projectExcludedUrls.has(candidateUrl) || seenCandidateKeys.has(`url:${candidateUrl}`)
-          : isDuplicateCandidate(item.name, item.workText, item.infoText);
+          : false;
         if (isDup) {
           if (item.cardKey) seenCandidateKeys.add(item.cardKey);
           continue;
@@ -1779,6 +1779,9 @@ ${cleanedRawText}
         const candData = {
           id: candID,
           platform: platformKey,
+          platformCandidateId: platformKey === '51job' && candidateUrl
+            ? (() => { try { const u = new URL(candidateUrl); return u.hostname === 'ehire.51job.com' && u.pathname === '/Revision/talent/resume/detail' && /^\d+$/.test(u.searchParams.get('resumeId') || '') ? u.searchParams.get('resumeId') : ''; } catch { return ''; } })()
+            : '',
           platformName: cfg.name,
           fileName,
           filePath,
@@ -1799,10 +1802,7 @@ ${cleanedRawText}
         if (savedPerKeyword.length) savedPerKeyword[taskIdx]++;
 
         // 立即记录排重集合，防止后续关键词重复抓取同一人
-        if (candData.name) {
-          projectExcludedNames.add(candData.name.trim());
-          seenCandidateKeys.add(candData.name.trim());
-        }
+        // 同名或相似履历只能形成疑似重复提示，不自动排除。
         if (item.cardKey) seenCandidateKeys.add(item.cardKey);
         if (candData.url) {
           projectExcludedUrls.add(candData.url.trim());

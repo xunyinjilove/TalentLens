@@ -6,11 +6,16 @@
 
       <!-- 主视图区域 -->
       <div class="app-main-viewport">
+        <WorkbenchWindowControls v-if="workbenchRoute" />
         <router-view />
       </div>
 
       <!-- 全局 AI 招聘助理抽屉 & 悬浮按钮 -->
       <AIAssistantDrawer />
+      <SourcingTaskCenter />
+
+      <!-- 全局八方原生无边框窗口缩放手柄 -->
+      <WindowResizeOverlay />
     </div>
   </el-config-provider>
 </template>
@@ -20,13 +25,27 @@ import { onMounted, ref } from 'vue'
 import zhCn from 'element-plus/es/locale/lang/zh-cn'
 import AppSidebar from './components/AppSidebar.vue'
 import AIAssistantDrawer from './components/AIAssistantDrawer.vue'
+import SourcingTaskCenter from './components/SourcingTaskCenter.vue'
+import WorkbenchWindowControls from './components/WorkbenchWindowControls.vue'
+import WindowResizeOverlay from './components/WindowResizeOverlay.vue'
+import { computed } from 'vue'
+import { useRoute } from 'vue-router'
 import { useTheme } from './composables/useTheme'
+import { useProjectStore } from './composables/useProjectStore'
+import { useRecruitmentStore } from './composables/useRecruitmentStore'
+import './styles/recruitment-workbench.scss'
 
 const locale = ref(zhCn)
 const { theme, initTheme } = useTheme()
+const projectStore = useProjectStore()
+const recruitmentStore = useRecruitmentStore()
+const route = useRoute()
+const workbenchRoute = computed(() => ['/', '/jobs', '/talent', '/interviews', '/pipeline'].includes(route.path))
 
 onMounted(async () => {
   initTheme()
+  void projectStore.loadProjects()
+  void recruitmentStore.initEvents()
   // 启动时静默将本地存储的 AI 模型配置对齐同步到 Go 后端
   try {
     const saved = localStorage.getItem('goresume_settings')
