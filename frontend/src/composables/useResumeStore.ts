@@ -177,8 +177,8 @@ export const useResumeStore = defineStore('resume', () => {
     if (!isWailsEnv || !WailsApp) return
     try {
       const result = await WailsApp.GetProjectResumes(projectId)
-      if (result && Array.isArray(result)) {
-        resumes.value = result.map((r: any) => ({
+      if (result == null || Array.isArray(result)) {
+        resumes.value = (result || []).map((r: any) => ({
           id: r.id,
           projectId: r.project_id || projectId,
           fileName: r.file_name,
@@ -268,6 +268,7 @@ export const useResumeStore = defineStore('resume', () => {
           })() : undefined,
           createdAt: r.created_at
         }))
+        if (!resumes.value.some(r => r.id === selectedId.value)) selectedId.value = null
         devLog('info', `加载项目简历: ${resumes.value.length} 份`)
       }
     } catch (err: any) {
@@ -626,19 +627,14 @@ export const useResumeStore = defineStore('resume', () => {
     return true
   }
 
-  // 清空所有简历（前端 + 后端同步清空）
-  async function clearAll() {
+  // 后端先确认只清空当前项目，成功后再更新前端列表。
+  async function clearProjectResumes(projectId: string) {
+    if (!projectId) throw new Error('缺少招聘项目 ID')
+    await loadWailsBindings()
+    if (isWailsEnv && WailsApp) await WailsApp.ClearProjectResumes(projectId)
     resumes.value = []
     selectedId.value = null
-    // 同步清空后端磁盘
-    if (isWailsEnv && WailsApp) {
-      try {
-        await WailsApp.ClearResumes()
-        devLog('info', '后端已清空所有简历')
-      } catch (err: any) {
-        devLog('error', `后端清空失败: ${err.message || err}`)
-      }
-    }
+    devLog('info', `已清空项目 ${projectId} 的简历记录`)
   }
 
   // 从后端数据构建简历并添加到列表
@@ -832,7 +828,7 @@ export const useResumeStore = defineStore('resume', () => {
     reAnalyze,
     reAnalyzeAll,
     startAnalysis,
-    clearAll,
+    clearProjectResumes,
     getResumeContent,
     initWailsEvents,
     cleanupWailsEvents,
