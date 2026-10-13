@@ -43,6 +43,7 @@ const route = useRoute()
 const workbenchRoute = computed(() => ['/', '/jobs', '/talent', '/interviews', '/pipeline'].includes(route.path))
 
 onMounted(async () => {
+  initGlobalWindowDrag()
   initTheme()
   void projectStore.loadProjects()
   void recruitmentStore.initEvents()
@@ -67,6 +68,47 @@ onMounted(async () => {
     }
   } catch {}
 })
+
+// 全局无死角窗口拖拽移动与双击最大化分发器
+function initGlobalWindowDrag() {
+  window.addEventListener('mousedown', (e: MouseEvent) => {
+    if (e.button !== 0) return
+
+    const target = e.target as HTMLElement | null
+    if (!target) return
+
+    // 交互型组件严格排除，确保按钮/输入框/下拉菜单点击行为 100% 正常
+    if (target.closest('[data-wails-no-drag], button, input, textarea, select, a, .el-button, .el-input, .el-dropdown, .el-dialog, .workbench-window-controls, .resize-handle')) {
+      return
+    }
+
+    // 命中可拖拽头部或品牌区域
+    const dragContainer = target.closest('[data-wails-drag], .title-bar, .wb-header, .sidebar-brand, .wails-draggable')
+    if (dragContainer) {
+      if (typeof (window as any).WailsInvoke === 'function') {
+        (window as any).WailsInvoke('drag')
+      }
+    }
+  })
+
+  // 双击顶部空白区域切换最大化 / 还原
+  window.addEventListener('dblclick', async (e: MouseEvent) => {
+    const target = e.target as HTMLElement | null
+    if (!target) return
+    if (target.closest('[data-wails-no-drag], button, input, textarea, select, a, .el-button, .el-dropdown, .workbench-window-controls, .resize-handle')) {
+      return
+    }
+    const dragContainer = target.closest('[data-wails-drag], .title-bar, .wb-header, .wails-draggable')
+    if (dragContainer) {
+      try {
+        const WailsApp = await import('../wailsjs/go/main/App')
+        if (WailsApp && typeof WailsApp.WindowMaximize === 'function') {
+          await WailsApp.WindowMaximize()
+        }
+      } catch {}
+    }
+  })
+}
 </script>
 
 <style lang="scss">

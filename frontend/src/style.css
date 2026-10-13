@@ -342,3 +342,37 @@ body {
 .rounded-lg {
   border-radius: var(--radius-lg);
 }
+
+/* ==========================================
+   Wails 无边框窗口可拖拽区域通用规范
+   ========================================== */
+[data-wails-drag],
+.wails-draggable,
+.title-bar,
+.title-bar-center,
+.sidebar-brand,
+.wb-header {
+  --wails-draggable: drag;
+  -webkit-app-region: drag;
+}
+
+[data-wails-no-drag],
+.wails-no-drag,
+button,
+input,
+textarea,
+select,
+a,
+.el-button,
+.el-input,
+.el-dropdown,
+.el-dialog,
+.title-bar-left,
+.title-bar-right,
+.wb-actions,
+.workbench-window-controls,
+.resize-handle {
+  --wails-draggable: no-drag;
+  -webkit-app-region: no-drag;
+}
+
