@@ -8,9 +8,6 @@
           {{ jobTitle }}
         </span>
         <LanguageSwitcher />
-        <button class="toolbar-btn" @click="router.push('/settings')">
-          <el-icon><Setting /></el-icon>
-        </button>
       </div>
     </TitleBar>
 
@@ -36,34 +33,54 @@
 
         <div class="resume-section">
           <div class="resume-toolbar">
+            <!-- 第一行：标题、待分析状态徽章、更多操作下拉菜单 (Q1, Q4) -->
             <div class="resume-toolbar-heading">
-              <span class="section-label">
-                <el-icon><Document /></el-icon>
-                {{ $t('home.resumeList') }} {{ resumeStore.resumes.length }}
-              </span>
-              <span v-if="resumeStore.resumes.length" class="pending-summary">
-                {{ $t('home.pendingSummary', { count: resumeStore.pendingCount }) }}
-              </span>
-              <el-dropdown trigger="click" @command="handleResumeMenuCommand">
-                <button class="action-btn more-btn" type="button" :aria-label="$t('home.moreActions')">
-                  <el-icon><MoreFilled /></el-icon>
-                  <span>{{ $t('home.moreActions') }}</span>
-                </button>
-                <template #dropdown>
-                  <el-dropdown-menu>
-                    <el-dropdown-item command="reanalyze" :disabled="resumeStore.isAnalyzing || !hasReanalyzableResumes">
-                      {{ $t('home.reAnalyzeAll') }}
-                    </el-dropdown-item>
-                    <el-dropdown-item command="export" :disabled="resumeStore.doneCount === 0">
-                      {{ $t('home.exportReport') }}
-                    </el-dropdown-item>
-                    <el-dropdown-item command="clear" divided :disabled="!projectId || resumeStore.resumes.length === 0 || isAnalysisBusy || isClearingProject" style="color: var(--color-danger)">
-                      {{ $t('home.clearProject') }}
-                    </el-dropdown-item>
-                  </el-dropdown-menu>
-                </template>
-              </el-dropdown>
+              <div class="heading-left">
+                <span class="section-label">
+                  <el-icon><Document /></el-icon>
+                  <span>{{ $t('home.resumeList') }}</span>
+                  <span class="count-badge">({{ resumeStore.resumes.length }})</span>
+                </span>
+                <span v-if="resumeStore.resumes.length > 0 && resumeStore.pendingCount > 0" class="status-pill pending">
+                  {{ resumeStore.pendingCount }} 待分析
+                </span>
+                <span v-else-if="resumeStore.resumes.length > 0" class="status-pill done">
+                  已全部分析
+                </span>
+              </div>
+
+              <div class="heading-right">
+                <el-dropdown trigger="click" @command="handleResumeMenuCommand">
+                  <button class="more-menu-btn" type="button" :aria-label="$t('home.moreActions')" title="更多操作">
+                    <el-icon><MoreFilled /></el-icon>
+                    <span>更多</span>
+                  </button>
+                  <template #dropdown>
+                    <el-dropdown-menu class="resume-more-dropdown">
+                      <el-dropdown-item command="reanalyze" :disabled="resumeStore.isAnalyzing || !hasReanalyzableResumes">
+                        <el-icon><RefreshRight /></el-icon>
+                        <span>{{ $t('home.reAnalyzeAll') }}</span>
+                      </el-dropdown-item>
+                      <el-dropdown-item command="export" :disabled="resumeStore.doneCount === 0">
+                        <el-icon><Download /></el-icon>
+                        <span>{{ $t('home.exportReport') }}</span>
+                      </el-dropdown-item>
+                      <el-dropdown-item
+                        command="clear"
+                        divided
+                        :disabled="!projectId || resumeStore.resumes.length === 0 || isAnalysisBusy || isClearingProject"
+                        class="danger-item"
+                      >
+                        <el-icon><Delete /></el-icon>
+                        <span>{{ $t('home.clearProject') }}</span>
+                      </el-dropdown-item>
+                    </el-dropdown-menu>
+                  </template>
+                </el-dropdown>
+              </div>
             </div>
+
+            <!-- 第二行：三项核心操作按钮（矩阵寻才、继续寻才、开始分析/已全部分析）(Q1, Q3) -->
             <div class="resume-toolbar-actions">
               <button
                 class="action-btn boss-btn"
@@ -82,9 +99,16 @@
                 <el-icon><Plus /></el-icon>
                 <span>继续寻才</span>
               </button>
-              <button class="action-btn primary analysis-action" @click="handleStartAnalysis" :disabled="resumeStore.isAnalyzing || resumeStore.pendingCount === 0">
-                <el-icon v-if="!resumeStore.isAnalyzing"><VideoPlay /></el-icon>
-                <el-icon v-else class="spin"><Loading /></el-icon>
+              <button
+                class="action-btn primary analysis-action"
+                :class="{ 'is-all-done': resumeStore.pendingCount === 0 && !resumeStore.isAnalyzing && resumeStore.resumes.length > 0 }"
+                @click="handleStartAnalysis"
+                :disabled="resumeStore.isAnalyzing || resumeStore.pendingCount === 0 || resumeStore.resumes.length === 0"
+                :title="resumeStore.pendingCount === 0 && resumeStore.resumes.length > 0 ? '所有简历已全部分析完毕。如需重新分析，请从右上角「更多」菜单选择「全部重新分析」' : ''"
+              >
+                <el-icon v-if="resumeStore.isAnalyzing" class="spin"><Loading /></el-icon>
+                <el-icon v-else-if="resumeStore.pendingCount > 0"><VideoPlay /></el-icon>
+                <el-icon v-else><CircleCheck /></el-icon>
                 <span v-if="resumeStore.isAnalyzing">{{ $t('home.analyzing') }}</span>
                 <span v-else-if="resumeStore.pendingCount > 0">{{ $t('home.analyzeCount', { count: resumeStore.pendingCount }) }}</span>
                 <span v-else>{{ $t('home.allAnalyzed') }}</span>
@@ -731,7 +755,7 @@ import {
   CircleCheck, Warning, ChatLineSquare, Clock, Loading, CircleClose,
   RefreshRight, MoreFilled, Tickets, QuestionFilled, DocumentCopy, InfoFilled, Search,
   ChatDotRound, DocumentAdd, Connection, CloseBold, Paperclip, Compass, Check, Message,
-  Link, Plus, Share, Aim, Filter
+  Link, Plus, Share, Aim, Filter, Download, Delete
 } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import TitleBar from '../components/TitleBar.vue'
@@ -1413,7 +1437,12 @@ function handleResumeMenuCommand(command: string) {
 
 async function handleClearProject() {
   const id = projectId.value
-  if (!id || isAnalysisBusy.value || isClearingProject.value || resumeStore.resumes.length === 0) return
+  if (!id) return
+  if (isAnalysisBusy.value) {
+    ElMessage.warning('当前项目正在分析简历，请等待分析结束后再执行清空')
+    return
+  }
+  if (isClearingProject.value || resumeStore.resumes.length === 0) return
   try {
     await ElMessageBox.confirm(
       t('home.clearProjectDescription', { name: projectName.value || id, count: resumeStore.resumes.length }),
@@ -1671,69 +1700,235 @@ onUnmounted(() => {
 .resume-toolbar {
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  padding: 10px 16px;
+  gap: 9px;
+  padding: 10px 14px;
   border-bottom: 1px solid $separator;
-  background: rgba(246, 246, 246, 0.5);
+  background: rgba(246, 246, 246, 0.6);
+  user-select: none;
 
   .resume-toolbar-heading {
     display: flex;
     align-items: center;
+    justify-content: space-between;
     gap: 8px;
     min-width: 0;
-  }
 
-  .section-label {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    flex: 0 0 auto;
-    color: $text-primary;
-    font-size: 13px;
-    font-weight: 600;
-    white-space: nowrap;
-    .el-icon { color: $gray-1; font-size: 15px; }
-  }
+    .heading-left {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      min-width: 0;
+      flex: 1;
 
-  .pending-summary {
-    margin-left: auto;
-    color: $text-secondary;
-    font-size: 12px;
-    white-space: nowrap;
-  }
+      .section-label {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        flex-shrink: 0;
+        color: $text-primary;
+        font-size: 13.5px;
+        font-weight: 700;
+        white-space: nowrap;
 
-  .resume-toolbar-heading > .el-dropdown { margin-left: auto; }
-  .more-btn { white-space: nowrap; }
+        .el-icon {
+          color: var(--accent-blue, #2563eb);
+          font-size: 15px;
+        }
+
+        .count-badge {
+          color: $text-secondary;
+          font-weight: 600;
+          font-size: 12px;
+          margin-left: 2px;
+        }
+      }
+
+      .status-pill {
+        display: inline-flex;
+        align-items: center;
+        padding: 2px 8px;
+        border-radius: 10px;
+        font-size: 11px;
+        font-weight: 600;
+        white-space: nowrap;
+        flex-shrink: 0;
+
+        &.pending {
+          background: rgba(245, 158, 11, 0.12);
+          color: #d97706;
+          border: 1px solid rgba(245, 158, 11, 0.25);
+        }
+
+        &.done {
+          background: rgba(16, 185, 129, 0.12);
+          color: #059669;
+          border: 1px solid rgba(16, 185, 129, 0.25);
+        }
+      }
+    }
+
+    .heading-right {
+      flex-shrink: 0;
+
+      .more-menu-btn {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        padding: 4px 10px;
+        border-radius: 6px;
+        border: 1px solid $gray-4;
+        background: var(--bg-card, #ffffff);
+        color: $text-secondary;
+        font-size: 12px;
+        font-weight: 500;
+        cursor: pointer;
+        transition: all 0.2s ease;
+        white-space: nowrap;
+
+        .el-icon {
+          font-size: 13px;
+        }
+
+        &:hover {
+          background: var(--bg-hover, rgba(0, 0, 0, 0.04));
+          color: $text-primary;
+          border-color: var(--accent-blue, #2563eb);
+        }
+      }
+    }
+  }
 
   .resume-toolbar-actions {
     display: flex;
-    gap: 6px;
+    align-items: center;
+    gap: 8px;
+    width: 100%;
     min-width: 0;
 
     .action-btn {
       flex: 1 1 0;
       min-width: 0;
-      min-height: 36px;
+      height: 35px;
+      display: inline-flex;
+      align-items: center;
       justify-content: center;
-      padding: 7px 5px;
+      gap: 5px;
+      padding: 0 8px;
+      border-radius: 8px;
+      font-size: 12px;
+      font-weight: 600;
       white-space: nowrap;
-      line-height: 1.2;
-    }
+      cursor: pointer;
+      transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+      line-height: 1;
 
-    .analysis-action { flex-grow: 1.15; }
-    .boss-btn {
-      background: rgba(0, 185, 107, 0.1);
-      border-color: rgba(0, 185, 107, 0.35);
-      color: $system-green;
-      box-shadow: none;
-      &:hover:not(:disabled) { background: rgba(0, 185, 107, 0.18); box-shadow: none; transform: none; }
+      .el-icon {
+        font-size: 14px;
+        flex-shrink: 0;
+      }
+
+      span {
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+
+      &.boss-btn {
+        background: linear-gradient(135deg, #00b96b 0%, #059669 100%);
+        border: 1px solid #059669;
+        color: #ffffff;
+        box-shadow: 0 2px 6px rgba(0, 185, 107, 0.25);
+
+        &:hover {
+          background: linear-gradient(135deg, #059669 0%, #047857 100%);
+          transform: translateY(-1px);
+          box-shadow: 0 4px 10px rgba(0, 185, 107, 0.35);
+        }
+
+        &:active {
+          transform: translateY(0);
+        }
+      }
+
+      &.continue-btn {
+        background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%);
+        border: 1px solid #d97706;
+        color: #ffffff;
+        box-shadow: 0 2px 6px rgba(245, 158, 11, 0.25);
+
+        &:hover:not(:disabled) {
+          background: linear-gradient(135deg, #d97706 0%, #b45309 100%);
+          transform: translateY(-1px);
+          box-shadow: 0 4px 10px rgba(245, 158, 11, 0.35);
+        }
+
+        &:active {
+          transform: translateY(0);
+        }
+
+        &:disabled {
+          opacity: 0.45;
+          cursor: not-allowed;
+          transform: none;
+          box-shadow: none;
+        }
+      }
+
+      &.analysis-action {
+        background: linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%);
+        border: 1px solid #1d4ed8;
+        color: #ffffff;
+        box-shadow: 0 2px 6px rgba(37, 99, 235, 0.25);
+
+        &:hover:not(:disabled) {
+          background: linear-gradient(135deg, #1d4ed8 0%, #1e40af 100%);
+          transform: translateY(-1px);
+          box-shadow: 0 4px 10px rgba(37, 99, 235, 0.35);
+        }
+
+        &:active {
+          transform: translateY(0);
+        }
+
+        &.is-all-done {
+          background: rgba(37, 99, 235, 0.08);
+          border: 1px solid rgba(37, 99, 235, 0.25);
+          color: var(--accent-blue, #2563eb);
+          box-shadow: none;
+          cursor: not-allowed;
+          opacity: 0.9;
+
+          &:hover {
+            transform: none;
+            box-shadow: none;
+          }
+        }
+
+        &:disabled:not(.is-all-done) {
+          background: var(--bg-card-secondary, #f1f5f9);
+          border: 1px solid $gray-4;
+          color: $text-secondary;
+          box-shadow: none;
+          cursor: not-allowed;
+          opacity: 0.55;
+
+          &:hover {
+            transform: none;
+            box-shadow: none;
+          }
+        }
+      }
     }
-    .continue-btn {
-      background: $bg-primary;
-      border-color: $gray-4;
-      color: $text-primary;
-      box-shadow: none;
-      &:hover:not(:disabled) { background: $bg-hover; box-shadow: none; transform: none; }
+  }
+}
+
+:deep(.resume-more-dropdown) {
+  .danger-item {
+    color: #ef4444 !important;
+
+    &:hover {
+      color: #dc2626 !important;
+      background: rgba(239, 68, 68, 0.08) !important;
     }
   }
 }

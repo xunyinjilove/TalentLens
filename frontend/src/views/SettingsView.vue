@@ -266,15 +266,9 @@
             <!-- Logo 区域 -->
             <div class="about-hero">
               <div class="about-icon">
-                <svg viewBox="0 0 48 48" fill="none" width="48" height="48">
-                  <rect width="48" height="48" rx="12" fill="url(#aboutGrad)"/>
-                  <path d="M14 16h20M14 24h14M14 32h18" stroke="#fff" stroke-width="2.5" stroke-linecap="round"/>
-                  <circle cx="36" cy="32" r="6" fill="#fff" fill-opacity="0.3"/>
-                  <path d="M34 32l2 2 3-3" stroke="#fff" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
-                  <defs><linearGradient id="aboutGrad" x1="0" y1="0" x2="48" y2="48"><stop stop-color="#007AFF"/><stop offset="1" stop-color="#5856D6"/></linearGradient></defs>
-                </svg>
+                <img src="../assets/tellgen-logo.png" alt="Tellgen" class="about-logo-img" />
               </div>
-              <h1 class="about-title">TalentLens</h1>
+              <h1 class="about-title">Tellgen</h1>
               <span class="about-version">v{{ appVersion || '1.1.0' }}</span>
               <p class="about-subtitle">AI-Powered Resume Screening Tool</p>
             </div>
@@ -507,7 +501,7 @@ async function testConnection() {
   }
 }
 
-function saveSettings() {
+async function saveSettings() {
   const settings = {
     ai: { provider: aiForm.provider, baseURL: aiForm.baseURL, apiKey: aiForm.apiKey, model: aiForm.model },
     job: {
@@ -544,6 +538,29 @@ function saveSettings() {
           bonusPoints: [...(jobForm.bonusPoints || [])]
         })
       }
+    }
+
+    // 同步到后端 Go 服务持久化配置 (config.json 与 a.config.AI)
+    try {
+      const WailsApp = await import('../../wailsjs/go/main/App')
+      if (WailsApp) {
+        const aiConfig = {
+          provider: aiForm.provider || 'deepseek',
+          base_url: aiForm.baseURL || 'https://api.deepseek.com/v1',
+          api_key: aiForm.apiKey || '',
+          model: aiForm.model || 'deepseek-chat',
+          max_retries: 3,
+          timeout: 60
+        }
+        if (typeof WailsApp.SaveAIConfig === 'function') {
+          await WailsApp.SaveAIConfig(aiConfig)
+        } else if (typeof WailsApp.SaveConfig === 'function') {
+          const cur = await WailsApp.GetConfig().catch(() => ({}))
+          await WailsApp.SaveConfig({ ...cur, ai: aiConfig })
+        }
+      }
+    } catch (syncErr) {
+      console.warn('同步 AI 配置到后端失败:', syncErr)
     }
 
     ElMessage.success(t('settings.saved'))
@@ -633,6 +650,23 @@ onMounted(async () => {
         aiForm.baseURL = s.ai.baseURL || aiForm.baseURL
         aiForm.apiKey = s.ai.apiKey || ''
         aiForm.model = s.ai.model || aiForm.model
+
+        // 若本地已有配置，向 Go 后端静默对齐同步一次
+        if (aiForm.apiKey) {
+          try {
+            const WailsApp = await import('../../wailsjs/go/main/App')
+            if (WailsApp && typeof WailsApp.SaveAIConfig === 'function') {
+              await WailsApp.SaveAIConfig({
+                provider: aiForm.provider || 'deepseek',
+                base_url: aiForm.baseURL || 'https://api.deepseek.com/v1',
+                api_key: aiForm.apiKey || '',
+                model: aiForm.model || 'deepseek-chat',
+                max_retries: 3,
+                timeout: 60
+              })
+            }
+          } catch {}
+        }
       }
       if (s.job) {
         jobForm.title = s.job.title || jobForm.title
@@ -676,10 +710,8 @@ onMounted(async () => {
 // 侧边栏
 .sidebar {
   width: 200px;
-  background: $bg-sidebar;
-  backdrop-filter: blur(20px);
-  -webkit-backdrop-filter: blur(20px);
-  border-right: 1px solid $separator;
+  background: var(--sidebar-bg);
+  border-right: 1px solid var(--sidebar-border);
   display: flex;
   flex-direction: column;
   flex-shrink: 0;
@@ -690,7 +722,7 @@ onMounted(async () => {
   padding: 12px 8px;
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 4px;
 }
 
 .nav-item {
@@ -698,36 +730,68 @@ onMounted(async () => {
   align-items: center;
   gap: 10px;
   width: 100%;
-  height: $nav-item-height;
+  height: 38px;
   padding: 0 12px;
   border: none;
-  border-radius: $radius-sm;
+  border-radius: var(--radius-sm, 6px);
   background: transparent;
-  color: $text-primary;
-  font-size: $nav-text-size;
-  font-weight: 400;
+  color: #FFFFFF;
+  font-size: 13px;
+  font-weight: 500;
   cursor: pointer;
-  transition: background $transition-fast;
+  transition: all var(--transition-fast, 0.15s ease);
   text-align: left;
   font-family: $font-family;
+  position: relative;
 
-  &:hover {
-    background: $bg-hover;
-  }
-
-  &.active {
-    background: $bg-active;
+  .nav-label {
+    color: #FFFFFF;
     font-weight: 500;
-
-    .nav-icon {
-      color: $system-blue;
-    }
   }
 
   .nav-icon {
-    font-size: $nav-icon-size;
-    color: $gray-1;
-    transition: color $transition-fast;
+    font-size: 16px;
+    color: #CBD5E1;
+    transition: color var(--transition-fast, 0.15s ease);
+  }
+
+  &:hover {
+    background: var(--sidebar-bg-hover, rgba(255, 255, 255, 0.08));
+    color: #FFFFFF;
+
+    .nav-label {
+      color: #FFFFFF;
+    }
+
+    .nav-icon {
+      color: #FFFFFF;
+    }
+  }
+
+  &.active {
+    background: var(--sidebar-bg-active, rgba(37, 99, 235, 0.25));
+    color: #FFFFFF;
+    font-weight: 600;
+
+    .nav-label {
+      color: #FFFFFF;
+      font-weight: 600;
+    }
+
+    .nav-icon {
+      color: #60A5FA;
+    }
+
+    &::before {
+      content: '';
+      position: absolute;
+      left: 0;
+      top: 6px;
+      bottom: 6px;
+      width: 3px;
+      background: var(--accent-blue, #3B82F6);
+      border-radius: 0 3px 3px 0;
+    }
   }
 }
 
@@ -1031,7 +1095,15 @@ onMounted(async () => {
 
   .about-icon {
     margin-bottom: 14px;
-    svg { filter: drop-shadow(0 4px 12px rgba(0, 122, 255, 0.25)); }
+    display: flex;
+    justify-content: center;
+
+    .about-logo-img {
+      width: 56px;
+      height: 56px;
+      object-fit: contain;
+      filter: drop-shadow(0 4px 12px rgba(229, 57, 53, 0.35));
+    }
   }
 
   .about-title {

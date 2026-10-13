@@ -21,7 +21,7 @@ export default {
   },
 
   app: {
-    title: 'TalentLens',
+    title: 'Tellgen',
     subtitle: 'AI 智能简历审核工具'
   },
 

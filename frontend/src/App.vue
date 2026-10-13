@@ -1,22 +1,75 @@
 <template>
   <el-config-provider :locale="locale">
-    <router-view />
+    <div class="app-layout-frame" :data-theme="theme">
+      <!-- 全局常驻深色侧边栏 -->
+      <AppSidebar />
+
+      <!-- 主视图区域 -->
+      <div class="app-main-viewport">
+        <router-view />
+      </div>
+
+      <!-- 全局 AI 招聘助理抽屉 & 悬浮按钮 -->
+      <AIAssistantDrawer />
+    </div>
   </el-config-provider>
 </template>
 
 <script setup lang="ts">
-import { ref } from 'vue'
+import { onMounted, ref } from 'vue'
 import zhCn from 'element-plus/es/locale/lang/zh-cn'
+import AppSidebar from './components/AppSidebar.vue'
+import AIAssistantDrawer from './components/AIAssistantDrawer.vue'
+import { useTheme } from './composables/useTheme'
 
-// 语言设置
 const locale = ref(zhCn)
+const { theme, initTheme } = useTheme()
+
+onMounted(async () => {
+  initTheme()
+  // 启动时静默将本地存储的 AI 模型配置对齐同步到 Go 后端
+  try {
+    const saved = localStorage.getItem('goresume_settings')
+    if (saved) {
+      const s = JSON.parse(saved)
+      if (s.ai && (s.ai.apiKey || s.ai.api_key)) {
+        const WailsApp = await import('../wailsjs/go/main/App')
+        if (WailsApp && typeof WailsApp.SaveAIConfig === 'function') {
+          await WailsApp.SaveAIConfig({
+            provider: s.ai.provider || 'deepseek',
+            base_url: s.ai.baseURL || s.ai.base_url || 'https://api.deepseek.com/v1',
+            api_key: s.ai.apiKey || s.ai.api_key || '',
+            model: s.ai.model || 'deepseek-chat',
+            max_retries: 3,
+            timeout: 60
+          })
+        }
+      }
+    }
+  } catch {}
+})
 </script>
 
-<style>
-#app {
-  width: 100%;
+<style lang="scss">
+.app-layout-frame {
+  width: 100vw;
   height: 100vh;
-  margin: 0;
-  padding: 0;
+  display: flex;
+  overflow: hidden;
+  background-color: var(--bg-app);
+  color: var(--text-primary);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+  transition: background-color var(--transition-normal), color var(--transition-normal);
+}
+
+.app-main-viewport {
+  flex: 1;
+  height: 100vh;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background-color: var(--bg-app);
+  position: relative;
 }
 </style>
