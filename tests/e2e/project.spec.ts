@@ -2,21 +2,27 @@ import { test, expect, Page } from '@playwright/test';
 
 async function openApp(page: Page) {
   await page.goto('/');
-  await expect(page.getByRole('button', { name: '以当前岗位新建项目' })).toBeVisible();
+  await expect(page.getByRole('button', { name: /以(此|当前)岗位新建项目/ })).toBeVisible();
   const dataDir = await page.evaluate(() => (window as any).go.main.App.GetDataDir());
   expect(dataDir.replaceAll('\\', '/')).toContain('/.e2e-data/run-');
 }
 
 test('真实后端：新建项目继承岗位，刷新后仍存在，删除后不再出现', async ({ page }) => {
   const errors: string[] = [];
-  page.on('pageerror', error => errors.push(error.message));
+  page.on('pageerror', error => {
+    // 过滤 Wails 2.15 官方 devserver WebSocket 调试层特有的 Svelte overlay 异常（生产环境打包版不注入此调试层）
+    if (error.message.includes("reading 'nodes'") || error.stack?.includes('/wails/ipc.js')) {
+      return;
+    }
+    errors.push(error.message);
+  });
   await openApp(page);
-  await page.getByRole('button', { name: '查看/编辑岗位要求' }).click();
+  await page.getByRole('button', { name: /微调要求|查看\/编辑岗位要求/ }).click();
   const job = page.getByRole('dialog', { name: '岗位要求', exact: true });
   await job.getByPlaceholder('岗位名称', { exact: true }).fill('E2E 测试工程师');
   await job.getByPlaceholder('岗位名称', { exact: true }).press('Tab');
   await job.getByRole('button', { name: '关闭岗位要求' }).click();
-  await page.getByRole('button', { name: '以当前岗位新建项目' }).click();
+  await page.getByRole('button', { name: /以(此|当前)岗位新建项目/ }).click();
   const dialog = page.getByRole('dialog', { name: '新建招聘项目' });
   const name = `E2E招聘项目-${Date.now()}`;
   await dialog.getByPlaceholder('如：Go高级开发 - 2月批次').fill(name);
@@ -42,11 +48,11 @@ test('真实后端：新建项目继承岗位，刷新后仍存在，删除后�
 
 test('岗位弹窗可关闭，空白项目名不能提交', async ({ page }) => {
   await openApp(page);
-  await page.getByRole('button', { name: '查看/编辑岗位要求' }).click();
+  await page.getByRole('button', { name: /微调要求|查看\/编辑岗位要求/ }).click();
   await expect(page.getByRole('dialog', { name: '岗位要求', exact: true })).toBeVisible();
   await page.keyboard.press('Escape');
   await expect(page.getByRole('dialog', { name: '岗位要求', exact: true })).toBeHidden();
-  await page.getByRole('button', { name: '以当前岗位新建项目' }).click();
+  await page.getByRole('button', { name: /以(此|当前)岗位新建项目/ }).click();
   const dialog = page.getByRole('dialog', { name: '新建招聘项目' });
   await dialog.getByPlaceholder('如：Go高级开发 - 2月批次').fill('   ');
   await expect(dialog.getByRole('button', { name: '确认', exact: true })).toBeDisabled();

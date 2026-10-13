@@ -1,0 +1,155 @@
+// ============================================
+// TalentLens 现代 B 端 SaaS 设计系统 (Theme Tokens)
+// 支持 Light / Dark 模式一键切换
+// ============================================
+
+:root, [data-theme="light"] {
+  // 品牌色（仅 logo 文字使用红色）
+  --brand-red: #E53935;
+  --brand-red-hover: #D32F2F;
+  --brand-red-glow: rgba(229, 57, 53, 0.2);
+
+  // 核心主题色（专业稳重的科技蓝）
+  --accent-blue: #2563EB;
+  --accent-blue-hover: #1D4ED8;
+  --accent-blue-active: #1E40AF;
+  --accent-blue-light: rgba(37, 99, 235, 0.08);
+  --accent-blue-subtle: rgba(37, 99, 235, 0.15);
+
+  // 状态语义色
+  --color-success: #10B981;
+  --color-success-bg: rgba(16, 185, 129, 0.1);
+  --color-warning: #F59E0B;
+  --color-warning-bg: rgba(245, 158, 11, 0.1);
+  --color-danger: #EF4444;
+  --color-danger-bg: rgba(239, 68, 68, 0.1);
+  --color-info: #3B82F6;
+
+  // 侧边栏（常驻深色 SaaS 风格，如飞书/Slack）
+  --sidebar-width: 210px;
+  --sidebar-bg: #141A29;
+  --sidebar-bg-hover: rgba(255, 255, 255, 0.06);
+  --sidebar-bg-active: rgba(37, 99, 235, 0.22);
+  --sidebar-border: #1E293B;
+  --sidebar-text: #E2E8F0;
+  --sidebar-text-muted: #8E9BAE;
+  --sidebar-active-indicator: #3B82F6;
+
+  // 顶部常驻窗口条
+  --topbar-height: 42px;
+  --topbar-bg: #FFFFFF;
+  --topbar-border: #E2E8F0;
+  --topbar-text: #0F172A;
+  --topbar-drag-text: #64748B;
+  --window-btn-hover: rgba(0, 0, 0, 0.06);
+  --window-close-hover: #E53935;
+  --window-close-color: #FFFFFF;
+
+  // 内容区背景
+  --bg-app: #F8FAFC;
+  --bg-card: #FFFFFF;
+  --bg-card-secondary: #F1F5F9;
+  --bg-hover: rgba(0, 0, 0, 0.04);
+  --bg-active: rgba(0, 0, 0, 0.08);
+
+  // 边框与分隔线
+  --border-color: #E2E8F0;
+  --border-color-light: #F1F5F9;
+  --separator: rgba(0, 0, 0, 0.06);
+
+  // 文字分级
+  --text-primary: #0F172A;
+  --text-secondary: #475569;
+  --text-muted: #8E9BAE;
+  --text-disabled: #CBD5E1;
+
+  // 阴影系统 (Elevation)
+  --shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.04);
+  --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.06), 0 1px 2px rgba(0, 0, 0, 0.04);
+  --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.07), 0 2px 4px -2px rgba(0, 0, 0, 0.05);
+  --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.08), 0 4px 6px -4px rgba(0, 0, 0, 0.04);
+  --shadow-card: 0 1px 3px rgba(15, 23, 42, 0.06), 0 1px 2px rgba(15, 23, 42, 0.04);
+  --shadow-card-hover: 0 8px 16px -2px rgba(15, 23, 42, 0.08), 0 4px 6px -2px rgba(15, 23, 42, 0.04);
+}
+
+[data-theme="dark"] {
+  // 品牌色（在深色背景下稍微明亮）
+  --brand-red: #EF5350;
+  --brand-red-hover: #E53935;
+  --brand-red-glow: rgba(239, 83, 80, 0.3);
+
+  // 核心主题色
+  --accent-blue: #3B82F6;
+  --accent-blue-hover: #60A5FA;
+  --accent-blue-active: #93C5FD;
+  --accent-blue-light: rgba(59, 130, 246, 0.15);
+  --accent-blue-subtle: rgba(59, 130, 246, 0.25);
+
+  // 状态语义色
+  --color-success: #34D399;
+  --color-success-bg: rgba(52, 211, 153, 0.15);
+  --color-warning: #FBBF24;
+  --color-warning-bg: rgba(251, 191, 36, 0.15);
+  --color-danger: #F87171;
+  --color-danger-bg: rgba(248, 113, 113, 0.15);
+  --color-info: #60A5FA;
+
+  // 侧边栏
+  --sidebar-width: 210px;
+  --sidebar-bg: #0B0F19;
+  --sidebar-bg-hover: rgba(255, 255, 255, 0.05);
+  --sidebar-bg-active: rgba(59, 130, 246, 0.25);
+  --sidebar-border: #1E293B;
+  --sidebar-text: #F1F5F9;
+  --sidebar-text-muted: #64748B;
+  --sidebar-active-indicator: #60A5FA;
+
+  // 顶部常驻窗口条
+  --topbar-height: 42px;
+  --topbar-bg: #0F172A;
+  --topbar-border: #1E293B;
+  --topbar-text: #F8FAFC;
+  --topbar-drag-text: #94A3B8;
+  --window-btn-hover: rgba(255, 255, 255, 0.1);
+  --window-close-hover: #DC2626;
+  --window-close-color: #FFFFFF;
+
+  // 内容区背景
+  --bg-app: #0A0E17;
+  --bg-card: #151D2C;
+  --bg-card-secondary: #0F172A;
+  --bg-hover: rgba(255, 255, 255, 0.05);
+  --bg-active: rgba(255, 255, 255, 0.09);
+
+  // 边框与分隔线
+  --border-color: #243046;
+  --border-color-light: #1A2234;
+  --separator: rgba(255, 255, 255, 0.08);
+
+  // 文字分级
+  --text-primary: #F8FAFC;
+  --text-secondary: #CBD5E1;
+  --text-muted: #64748B;
+  --text-disabled: #475569;
+
+  // 阴影系统 (Dark Mode)
+  --shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.3);
+  --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.4);
+  --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.4);
+  --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.5);
+  --shadow-card: 0 1px 3px rgba(0, 0, 0, 0.3);
+  --shadow-card-hover: 0 8px 16px -2px rgba(0, 0, 0, 0.5);
+}
+
+// 统一尺寸与动画定义
+$radius-xs: 4px;
+$radius-sm: 6px;
+$radius-md: 8px;
+$radius-lg: 12px;
+$radius-xl: 16px;
+
+$font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+
+$transition-fast: 0.12s ease;
+$transition-normal: 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+$transition-smooth: 0.3s cubic-bezier(0.4, 0, 0.2, 1);

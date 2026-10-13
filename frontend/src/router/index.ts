@@ -32,7 +32,7 @@ const router = createRouter({
 
 // 路由守卫
 router.beforeEach((to, from, next) => {
-  document.title = `${to.meta.title || 'TalentLens'} - TalentLens`
+  document.title = `${to.meta.title || 'Tellgen'} - Tellgen`
   next()
 })
 

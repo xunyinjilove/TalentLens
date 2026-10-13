@@ -39,7 +39,7 @@ test.afterEach(async () => {
 
 async function seedProject(page: Page, configured = true) {
   await page.goto('/');
-  await expect(page.getByRole('button', { name: '以当前岗位新建项目' })).toBeVisible();
+  await expect(page.getByRole('button', { name: /以(此|当前)岗位新建项目/ })).toBeVisible();
   const project = await page.evaluate(async ({ baseURL, configured }) => {
     const api = (window as any).go.main.App;
     const dir = await api.GetDataDir();

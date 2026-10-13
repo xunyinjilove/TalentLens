@@ -291,7 +291,7 @@ func main() {
 	app := NewApp()
 
 	err := wails.Run(&options.App{
-		Title:            "TalentLens",
+		Title:            "Tellgen",
 		Width:            1200,
 		Height:           800,
 		MinWidth:         900,
@@ -683,6 +683,20 @@ func (a *App) SaveConfig(cfg *Config) error {
 	data, _ := json.MarshalIndent(cfg, "", "  ")
 	return os.WriteFile(a.getConfigPath(), data, 0644)
 }
+
+// SaveAIConfig 单独保存并持久化 AI 模型配置，避免误触或覆写岗位规则
+func (a *App) SaveAIConfig(cfg *AIConfig) error {
+	if cfg == nil {
+		return fmt.Errorf("AI 配置不能为空")
+	}
+	a.config.AI = *cfg
+	data, err := json.MarshalIndent(a.config, "", "  ")
+	if err != nil {
+		return fmt.Errorf("序列化配置失败: %w", err)
+	}
+	return os.WriteFile(a.getConfigPath(), data, 0644)
+}
+
 
 func (a *App) GetResumes() []*Resume {
 	dir := filepath.Join(a.getDataDir(), "resumes")
@@ -2905,85 +2919,18 @@ func (a *App) callAI(cfg *AIConfig, prompt string) (string, error) {
 		userMsg = parts[1]
 	}
 
-	reqBody := ChatRequest{
-		Model: cfg.Model,
-		Messages: []ChatMessage{
-			{
-				Role:    "system",
-				Content: systemMsg,
-			},
-			{
-				Role:    "user",
-				Content: userMsg,
-			},
+	messages := []ChatMessage{
+		{
+			Role:    "system",
+			Content: systemMsg,
 		},
-		Temperature: 0.2,
-		MaxTokens:   4000,
+		{
+			Role:    "user",
+			Content: userMsg,
+		},
 	}
 
-	body, _ := json.Marshal(reqBody)
-	url := strings.TrimSuffix(cfg.BaseURL, "/") + "/chat/completions"
-
-	var lastErr error
-	for attempt := 0; attempt < cfg.MaxRetries; attempt++ {
-		if attempt > 0 {
-			time.Sleep(time.Duration(attempt) * 2 * time.Second)
-		}
-
-		req, err := http.NewRequest("POST", url, bytes.NewReader(body))
-		if err != nil {
-			lastErr = err
-			continue
-		}
-
-		req.Header.Set("Content-Type", "application/json")
-		req.Header.Set("Authorization", "Bearer "+cfg.APIKey)
-
-		timeoutSec := cfg.Timeout
-		if timeoutSec < 180 {
-			timeoutSec = 180
-		}
-		client := &http.Client{Timeout: time.Duration(timeoutSec) * time.Second}
-		log.Printf("[callAI] 正在请求 AI 接口 (尝试 %d/%d, 超时=%d秒): %s", attempt+1, cfg.MaxRetries, timeoutSec, url)
-		resp, err := client.Do(req)
-		if err != nil {
-			lastErr = err
-			continue
-		}
-
-		respBody, _ := io.ReadAll(resp.Body)
-		resp.Body.Close()
-
-		if resp.StatusCode == 429 {
-			lastErr = fmt.Errorf("请求过于频繁")
-			continue
-		}
-
-		if resp.StatusCode >= 400 {
-			lastErr = fmt.Errorf("API错误: %d - %s", resp.StatusCode, string(respBody))
-			continue
-		}
-
-		var chatResp ChatResponse
-		if err := json.Unmarshal(respBody, &chatResp); err != nil {
-			lastErr = fmt.Errorf("解析响应失败: %v", err)
-			continue
-		}
-
-		if chatResp.Error != nil {
-			lastErr = fmt.Errorf("AI错误: %s", chatResp.Error.Message)
-			continue
-		}
-
-		if len(chatResp.Choices) == 0 {
-			lastErr = fmt.Errorf("AI未返回结果")
-			continue
-		}
-
-		return chatResp.Choices[0].Message.Content, nil
-	}
-
-	return "", fmt.Errorf("重试%d次后失败: %v", cfg.MaxRetries, lastErr)
+	return a.callAIChatMessages(cfg, messages, 0.2)
 }
 
 // parseAnalysisResult 解析AI返回的分析结果

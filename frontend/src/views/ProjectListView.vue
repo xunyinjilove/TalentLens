@@ -1,11 +1,8 @@
 <template>
   <div class="project-page">
-    <TitleBar title="TalentLens">
+    <TitleBar title="招聘工作台" subtitle="全渠道招聘与简历智能终审">
       <div class="titlebar-actions">
         <LanguageSwitcher />
-        <button class="toolbar-btn" @click="router.push('/settings')" title="系统设置">
-          <el-icon><Setting /></el-icon>
-        </button>
       </div>
     </TitleBar>
 
@@ -426,7 +423,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, onMounted, nextTick, watch } from 'vue'
+import { ref, reactive, onMounted, onUnmounted, nextTick, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { ElMessage, ElMessageBox } from 'element-plus'
@@ -457,6 +454,7 @@ import JobPresetPicker from '../components/JobPresetPicker.vue'
 import TagInput from '../components/TagInput.vue'
 import JobPostingDialog from '../components/JobPostingDialog.vue'
 import { useProjectStore, type Project } from '../composables/useProjectStore'
+import { useAIAssistantStore, type JobApplyData } from '../composables/useAIAssistantStore'
 import {
   saveCustomJobPreset,
   getMergedPreset,
@@ -467,6 +465,7 @@ import {
 const router = useRouter()
 const { t } = useI18n()
 const projectStore = useProjectStore()
+const assistantStore = useAIAssistantStore()
 
 const showCreateDialog = ref(false)
 const showPostingDialog = ref(false)
@@ -761,13 +760,56 @@ async function handleDelete(id: string) {
   } catch {}
 }
 
+function applyAiJobConfig(jobData: JobApplyData) {
+  if (jobData.title) currentJobConfig.title = jobData.title
+  if (jobData.experience_years !== undefined) currentJobConfig.experienceYears = jobData.experience_years
+  if (jobData.education_level) currentJobConfig.educationLevel = jobData.education_level
+  if (jobData.job_description) currentJobConfig.jobDescription = jobData.job_description
+  if (jobData.required_skills?.length) currentJobConfig.requiredSkills = [...jobData.required_skills]
+  if (jobData.red_lines?.length) currentJobConfig.redLines = [...jobData.red_lines]
+  if (jobData.bonus_points?.length) currentJobConfig.bonusPoints = [...jobData.bonus_points]
+
+  newProject.name = `${currentJobConfig.title} - ${new Date().toLocaleDateString('zh-CN')}招聘`
+  if (jobData.department) newProject.department = jobData.department
+  if (jobData.headcount) newProject.headcount = jobData.headcount
+  if (jobData.job_description) newProject.remark = `AI 智能定制: ${jobData.title}`
+
+  showCreateDialog.value = true
+  saveJobConfigToStorage(false)
+}
+
+const onApplyAiJob = (e: Event) => {
+  const detail = (e as CustomEvent).detail
+  if (detail) {
+    applyAiJobConfig(detail)
+  }
+}
+
+const onTriggerCreate = () => {
+  openCreateDialogWithCurrentJob()
+}
+
 onMounted(async () => {
+  window.addEventListener('talentlens:apply-ai-job', onApplyAiJob)
+  window.addEventListener('talentlens:trigger-create-project', onTriggerCreate)
+
   loadJobConfigFromStorage()
   await projectStore.loadProjects()
   if (projectStore.projects.length === 0) {
     await projectStore.migrateExisting()
   }
   await loadStats()
+
+  // 检查是否已有待套用的 AI 任务
+  if (assistantStore.pendingJobToApply) {
+    applyAiJobConfig(assistantStore.pendingJobToApply)
+    assistantStore.pendingJobToApply = null
+  }
+})
+
+onUnmounted(() => {
+  window.removeEventListener('talentlens:apply-ai-job', onApplyAiJob)
+  window.removeEventListener('talentlens:trigger-create-project', onTriggerCreate)
 })
 </script>
 
