@@ -17,12 +17,15 @@ export interface Project {
     experience_years: number
     education_level: string
     job_description?: string
+    city?: string
+    employment_type?: string
+    salary_range?: string
     red_lines?: string[]
     bonus_points?: string[]
     core_criteria?: string[]
   }
   resume_ids: string[]
-  status: 'draft' | 'analyzing' | 'completed'
+  status: 'publishing' | 'draft' | 'paused' | 'analyzing' | 'completed' | string
   created_at: string
   updated_at: string
 }
@@ -135,6 +138,25 @@ export const useProjectStore = defineStore('project', () => {
     if (currentProjectId.value === id) currentProjectId.value = null
   }
 
+  // 更新项目
+  async function updateProject(project: Project): Promise<boolean> {
+    await loadWails()
+    if (isWailsEnv && WailsApp) {
+      try {
+        await WailsApp.UpdateProject(project)
+        await loadProjects()
+        devLog('info', `更新项目: ${project.name}`)
+        return true
+      } catch (err: any) {
+        devLog('error', `更新项目失败: ${err.message || err}`)
+        return false
+      }
+    }
+    const idx = projects.value.findIndex(p => p.id === project.id)
+    if (idx >= 0) projects.value[idx] = project
+    return true
+  }
+
   // 刷新单个项目
   async function refreshProject(id: string) {
     await loadWails()
@@ -191,6 +213,7 @@ export const useProjectStore = defineStore('project', () => {
     loading,
     loadProjects,
     createProject,
+    updateProject,
     deleteProject,
     refreshProject,
     exportReport,
