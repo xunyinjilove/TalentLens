@@ -6,6 +6,8 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"time"
 )
@@ -364,3 +366,156 @@ func (a *App) CancelRecruitmentInterview(id string) error {
 	}
 	return nil
 }
+
+// JobStats 职位统计数据（投递与合适候选人计数）
+type JobStats struct {
+	TotalApplications int `json:"totalApplications"`
+	SuitableCount     int `json:"suitableCount"`
+}
+
+// GetJobStatistics 返回所有职位的投递总数与合适人数统计
+func (a *App) GetJobStatistics() (map[string]JobStats, error) {
+	candidates, err := a.ListTalentCandidates("")
+	if err != nil {
+		return nil, err
+	}
+	result := make(map[string]JobStats)
+	for _, c := range candidates {
+		stats := result[c.ProjectID]
+		stats.TotalApplications++
+		// 判定“合适”条件：未被淘汰且（能力分>=60且无红线违规，或阶段已推进至沟通/面试/Offer/入职）
+		isSuitable := false
+		if c.Stage != "rejected" {
+			if c.AbilityScore >= 60 && c.RedLineStatus != "failed" {
+				isSuitable = true
+			} else if c.Stage == "first_interview" || c.Stage == "second_interview" || c.Stage == "offer" || c.Stage == "hired" || c.Stage == "communicating" {
+				isSuitable = true
+			}
+		}
+		if isSuitable {
+			stats.SuitableCount++
+		}
+		result[c.ProjectID] = stats
+	}
+
+	// 保证所有现有项目均有初始结构
+	projects := a.GetProjects()
+	for _, p := range projects {
+		if _, ok := result[p.ID]; !ok {
+			result[p.ID] = JobStats{TotalApplications: 0, SuitableCount: 0}
+		}
+	}
+	return result, nil
+}
+
+// MoveCandidateToProject 将候选人从当前职位调配至指定职位库
+func (a *App) MoveCandidateToProject(projectCandidateID, targetProjectID string) error {
+	projectCandidateID = strings.TrimSpace(projectCandidateID)
+	targetProjectID = strings.TrimSpace(targetProjectID)
+	if projectCandidateID == "" || targetProjectID == "" {
+		return fmt.Errorf("参数不完整")
+	}
+
+	targetProj := a.GetProject(targetProjectID)
+	if targetProj == nil {
+		return fmt.Errorf("目标职位不存在")
+	}
+
+	db, err := a.getRecruitmentDB()
+	if err != nil {
+		return err
+	}
+
+	tx, err := db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	var candidateID, currentProjectID, stage string
+	err = tx.QueryRow(`SELECT candidate_id, project_id, stage FROM project_candidates WHERE id = ?`, projectCandidateID).Scan(&candidateID, &currentProjectID, &stage)
+	if err != nil {
+		return fmt.Errorf("未找到候选人档案: %w", err)
+	}
+
+	if currentProjectID == targetProjectID {
+		return nil
+	}
+
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+
+	// 检查目标项目中是否已存在该候选人
+	var existingPCID string
+	err = tx.QueryRow(`SELECT id FROM project_candidates WHERE project_id = ? AND candidate_id = ?`, targetProjectID, candidateID).Scan(&existingPCID)
+	if err == nil && existingPCID != "" {
+		// 目标项目已存在记录，转移简历版本关联并清理当前关联
+		_, _ = tx.Exec(`INSERT OR IGNORE INTO project_candidate_resumes (project_candidate_id, resume_version_id, created_at)
+			SELECT ?, resume_version_id, created_at FROM project_candidate_resumes WHERE project_candidate_id = ?`, existingPCID, projectCandidateID)
+		_, _ = tx.Exec(`UPDATE evaluations SET project_candidate_id = ? WHERE project_candidate_id = ?`, existingPCID, projectCandidateID)
+		_, _ = tx.Exec(`DELETE FROM project_candidates WHERE id = ?`, projectCandidateID)
+		projectCandidateID = existingPCID
+	} else {
+		// 将当前关联直接变更为目标项目
+		_, err = tx.Exec(`UPDATE project_candidates SET project_id = ?, updated_at = ? WHERE id = ?`, targetProjectID, now, projectCandidateID)
+		if err != nil {
+			return fmt.Errorf("更新候选人所属职位失败: %w", err)
+		}
+	}
+
+	// 记录调配跟进事件
+	_, _ = tx.Exec(`INSERT INTO follow_up_events (id, project_candidate_id, event_type, from_stage, to_stage, note, actor, created_at)
+		VALUES (?, ?, 'transfer', ?, ?, ?, 'HR', ?)`,
+		recruitmentID("followup"), projectCandidateID, stage, stage, "调配至职位库: "+targetProj.Name, now)
+
+	// 查询对应的旧版 resume ID (如果有)
+	var legacyResumeID string
+	_ = tx.QueryRow(`SELECT COALESCE(rv.legacy_resume_id, '') FROM project_candidate_resumes pcr
+		JOIN resume_versions rv ON rv.id = pcr.resume_version_id
+		WHERE pcr.project_candidate_id = ? LIMIT 1`, projectCandidateID).Scan(&legacyResumeID)
+
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+
+	// 同步维护 JSON 物理文件与项目简历 ID 列表
+	if legacyResumeID != "" {
+		resDir := filepath.Join(a.getDataDir(), "resumes")
+		resumeData, rErr := os.ReadFile(filepath.Join(resDir, legacyResumeID+".json"))
+		if rErr == nil {
+			var r Resume
+			if json.Unmarshal(resumeData, &r) == nil {
+				r.ProjectID = targetProjectID
+				a.saveResume(&r)
+			}
+		}
+
+		// 从原项目 ResumeIDs 移除
+		oldProj := a.GetProject(currentProjectID)
+		if oldProj != nil {
+			var updatedResumeIDs []string
+			for _, rid := range oldProj.ResumeIDs {
+				if rid != legacyResumeID {
+					updatedResumeIDs = append(updatedResumeIDs, rid)
+				}
+			}
+			oldProj.ResumeIDs = updatedResumeIDs
+			a.saveProject(oldProj)
+		}
+
+		// 追加到目标项目 ResumeIDs
+		hasResume := false
+		for _, rid := range targetProj.ResumeIDs {
+			if rid == legacyResumeID {
+				hasResume = true
+				break
+			}
+		}
+		if !hasResume {
+			targetProj.ResumeIDs = append(targetProj.ResumeIDs, legacyResumeID)
+			a.saveProject(targetProj)
+		}
+	}
+
+	return nil
+}
+

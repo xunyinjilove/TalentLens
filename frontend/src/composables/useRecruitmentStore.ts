@@ -157,6 +157,12 @@ export const useRecruitmentStore = defineStore('recruitment', () => {
     await Promise.all([loadInterviews(), loadDashboard()])
   }
 
+  async function moveCandidate(projectCandidateId: string, targetProjectId: string) {
+    const api: any = await recruitmentAPI()
+    await api.MoveCandidateToProject(projectCandidateId, targetProjectId)
+    await Promise.all([loadCandidates(), loadDashboard()])
+  }
+
   async function initEvents() {
     if (subscribed) return
     subscribed = true
@@ -189,5 +195,5 @@ export const useRecruitmentStore = defineStore('recruitment', () => {
 
   return { candidates, interviews, dashboard, sourcingTasks, loading, error, loadCandidates,
     loadDashboard, loadInterviews, loadSourcingTasks, resumeSourcingTask, stopSourcingTask,
-    updateFollowUp, saveInterview, cancelInterview, initEvents }
+    updateFollowUp, saveInterview, cancelInterview, moveCandidate, initEvents }
 })

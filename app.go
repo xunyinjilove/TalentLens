@@ -74,6 +74,9 @@ type JobConfig struct {
 	ExperienceYears      int      `json:"experience_years"`
 	EducationLevel       string   `json:"education_level"`
 	JobDescription       string   `json:"job_description,omitempty"`
+	City                 string   `json:"city,omitempty"`
+	EmploymentType       string   `json:"employment_type,omitempty"`
+	SalaryRange          string   `json:"salary_range,omitempty"`
 	RedLines             []string `json:"red_lines,omitempty"`             // 一票否决红线 (Deal Breakers / 准入底线)
 	BonusPoints          []string `json:"bonus_points,omitempty"`          // 优先加分项 (Bonus Points / 优质优选)
 	EquivalentExperience []string `json:"equivalent_experience,omitempty"` // 旧项目兼容读取；不再参与配置或评估
@@ -1061,6 +1064,11 @@ func (a *App) CreateProject(name string, department string, headcount int, recru
 	if headcount <= 0 {
 		headcount = 1
 	}
+	if jobCfg == nil {
+		jobCfg = &JobConfig{Title: name}
+	} else if jobCfg.Title == "" {
+		jobCfg.Title = name
+	}
 	p := &Project{
 		ID:         fmt.Sprintf("proj_%d", time.Now().UnixNano()),
 		Name:       name,
@@ -1070,7 +1078,7 @@ func (a *App) CreateProject(name string, department string, headcount int, recru
 		Remark:     remark,
 		JobConfig:  *jobCfg,
 		ResumeIDs:  []string{},
-		Status:     "draft",
+		Status:     "publishing",
 		CreatedAt:  time.Now(),
 		UpdatedAt:  time.Now(),
 	}
