@@ -86,6 +86,7 @@
         <table class="saas-table">
           <thead>
             <tr>
+              <th class="col-sourcing">寻才</th>
               <th class="col-title">职位名称</th>
               <th class="col-dept">部门</th>
               <th class="col-headcount">招聘人数</th>
@@ -97,7 +98,7 @@
           </thead>
           <tbody>
             <tr v-if="loading" class="empty-row">
-              <td colspan="7">
+              <td colspan="8">
                 <div class="empty-state">
                   <el-icon class="is-loading" style="font-size: 24px;"><Loading /></el-icon>
                   <p>正在载入职位数据…</p>
@@ -105,7 +106,7 @@
               </td>
             </tr>
             <tr v-else-if="!filteredProjects.length" class="empty-row">
-              <td colspan="7">
+              <td colspan="8">
                 <div class="empty-state">
                   <p>未找到符合条件的职位</p>
                   <el-button size="small" type="primary" plain @click="openCreateModal">立即新建职位</el-button>
@@ -117,6 +118,18 @@
               :key="project.id"
               class="table-row"
             >
+              <!-- 快捷寻才（最左侧第一列） -->
+              <td class="col-sourcing">
+                <button
+                  class="sourcing-pill-btn"
+                  title="立即为该岗位检索人才"
+                  @click="openSourcing(project)"
+                >
+                  <el-icon><Position /></el-icon>
+                  <span>寻才</span>
+                </button>
+              </td>
+
               <!-- 职位名称与次行信息 -->
               <td class="col-title">
                 <div class="job-title-wrapper">
@@ -166,6 +179,15 @@
               <!-- 操作图标组 -->
               <td class="col-actions">
                 <div class="action-btn-group">
+                  <!-- 快捷寻才 -->
+                  <button
+                    class="action-icon-btn highlight"
+                    title="立即为该岗位检索人才"
+                    @click="openSourcing(project)"
+                  >
+                    <el-icon><Position /></el-icon>
+                  </button>
+
                   <!-- 编辑 -->
                   <button
                     class="action-icon-btn"
@@ -665,11 +687,15 @@ async function saveJob() {
   }
 }
 
+function openSourcing(project: Project) {
+  sourcingProject.value = project
+  showSourcingDialog.value = true
+}
+
 // 更多菜单命令处理
 async function handleActionCommand(cmd: string, project: Project) {
   if (cmd === 'sourcing') {
-    sourcingProject.value = project
-    showSourcingDialog.value = true
+    openSourcing(project)
   } else if (cmd === 'rules') {
     ruleProject.value = project
   } else if (cmd === 'mapping51') {
@@ -978,8 +1004,42 @@ onMounted(() => {
 }
 
 /* 列定义与内容排版 */
+.col-sourcing {
+  width: 90px;
+  min-width: 90px;
+  text-align: center;
+}
+
+.sourcing-pill-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  padding: 6px 14px;
+  font-size: 13px;
+  font-weight: 600;
+  color: #ffffff;
+  background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%);
+  border: none;
+  border-radius: 20px;
+  cursor: pointer;
+  box-shadow: 0 2px 6px rgba(37, 99, 235, 0.25);
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  white-space: nowrap;
+}
+
+.sourcing-pill-btn:hover {
+  background: linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%);
+  box-shadow: 0 4px 10px rgba(37, 99, 235, 0.35);
+  transform: translateY(-1px);
+}
+
+.sourcing-pill-btn:active {
+  transform: translateY(0);
+}
+
 .col-title {
-  min-width: 240px;
+  min-width: 200px;
 }
 
 .job-title-wrapper {
@@ -1012,7 +1072,7 @@ onMounted(() => {
 }
 
 .col-dept {
-  min-width: 120px;
+  min-width: 100px;
 }
 
 .dept-text {
@@ -1021,7 +1081,7 @@ onMounted(() => {
 }
 
 .col-headcount {
-  min-width: 90px;
+  min-width: 80px;
 }
 
 .headcount-text {
@@ -1125,6 +1185,16 @@ onMounted(() => {
 .action-icon-btn:hover {
   background-color: #f1f5f9;
   color: #1e293b;
+}
+
+.action-icon-btn.highlight {
+  color: #2563eb;
+  background-color: #eff6ff;
+}
+
+.action-icon-btn.highlight:hover {
+  background-color: #dbeafe;
+  color: #1d4ed8;
 }
 
 .empty-row td {

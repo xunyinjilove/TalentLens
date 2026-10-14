@@ -455,7 +455,8 @@ func migrateLegacyRecruitmentData(db *sql.DB, dir string) error {
 		for _, resumeID := range project.ResumeIDs {
 			resume := resumes[resumeID]
 			if resume == nil {
-				return fmt.Errorf("项目 %s 引用缺失的旧简历 %s", project.ID, resumeID)
+				// 旧项目引用的历史简历在磁盘中已被清理或不存在，跳过该引用以保证数据库正常初始化
+				continue
 			}
 			if err := linkLegacyProjectResume(tx, project.ID, resume); err != nil {
 				return err

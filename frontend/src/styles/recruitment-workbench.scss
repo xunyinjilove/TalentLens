@@ -47,9 +47,11 @@
 .app-layout-frame[data-theme='light'] .app-sidebar .app-status-bar { color:#64748b; }
 
 .workbench-page {
+  box-sizing: border-box;
   width: 100%;
   height: 100%;
-  overflow: auto;
+  overflow-x: hidden;
+  overflow-y: auto;
   background: var(--wb-bg);
   color: var(--wb-text);
 }
