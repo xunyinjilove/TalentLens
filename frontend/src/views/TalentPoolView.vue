@@ -105,14 +105,15 @@
 
       <!-- 右侧：候选人看板主内容区 -->
       <main class="talent-content-area">
-        <!-- 错误提示 -->
+        <!-- 错误提示（过滤掉旧简历脏数据干扰） -->
         <el-alert
-          v-if="recruitment.error"
+          v-if="recruitment.error && !recruitment.error.includes('引用缺失的旧简历')"
           type="warning"
           :title="recruitment.error"
           show-icon
-          :closable="false"
-          style="margin-bottom: 16px;"
+          closable
+          @close="recruitment.error = ''"
+          style="margin-bottom: 16px; margin-right: 8px;"
         />
 
         <!-- 当前分库信息横幅 (选定职位分库时展示) -->
@@ -250,20 +251,28 @@
 
         <!-- 空数据提示 -->
         <div v-else class="wb-card wb-empty empty-candidate-panel">
-          <p v-if="recruitment.loading">正在载入人才库…</p>
-          <div v-else>
-            <p style="font-size: 15px; font-weight: 500; color: #475569; margin-bottom: 8px;">
+          <p v-if="recruitment.loading" class="empty-loading">
+            <el-icon class="is-loading" style="font-size: 24px; margin-bottom: 8px;"><Loading /></el-icon>
+            <span>正在载入人才库…</span>
+          </p>
+          <div v-else class="empty-detail-box">
+            <div class="empty-illustration">
+              <el-icon><Search /></el-icon>
+            </div>
+            <h3 class="empty-title">
               {{ selectedProject ? `「${selectedProject.job_config?.title || selectedProject.name}」分库中暂无符合条件的候选人` : '当前筛选条件下暂无候选人' }}
-            </p>
-            <p style="color: #94a3b8; font-size: 13px; margin-bottom: 16px;">
-              可点击下方按钮发起矩阵寻才，或导入 51job 投递简历
+            </h3>
+            <p class="empty-subtitle">
+              该职位专属分库已就绪。点击下方按钮即可一键调起多平台矩阵寻才，或导入 51job 投递简历
             </p>
             <el-button
               v-if="selectedProject"
               type="primary"
+              size="large"
+              class="empty-action-btn"
               @click="showSearch = true"
             >
-              <el-icon style="margin-right: 4px;"><Position /></el-icon>
+              <el-icon style="margin-right: 6px;"><Position /></el-icon>
               立即为该岗位检索人才
             </el-button>
           </div>
@@ -643,18 +652,19 @@ async function refresh() {
   await Promise.all([projects.loadProjects(), recruitment.loadCandidates()])
 }
 
-async function loadInbox() {
+async function loadInbox(interactive = false) {
   try {
     const api: any = await import('../../wailsjs/go/main/App')
     pendingApplications.value = (await api.ListImportedApplications('unassigned')) || []
   } catch (err: any) {
-    ElMessage.error(err?.message || String(err))
+    console.warn('loadInbox error:', err)
+    if (interactive) ElMessage.error(err?.message || String(err))
   }
 }
 
 function showInbox() {
   inboxOpen.value = true
-  void loadInbox()
+  void loadInbox(true)
 }
 
 async function import51Job() {
@@ -682,18 +692,19 @@ async function assign(id: string) {
   }
 }
 
-async function loadDuplicates() {
+async function loadDuplicates(interactive = false) {
   try {
     const api: any = await import('../../wailsjs/go/main/App')
     duplicates.value = (await api.ListSuspectedDuplicates()) || []
   } catch (err: any) {
-    ElMessage.error(err?.message || String(err))
+    console.warn('loadDuplicates error:', err)
+    if (interactive) ElMessage.error(err?.message || String(err))
   }
 }
 
 function showDuplicates() {
   duplicatesOpen.value = true
-  void loadDuplicates()
+  void loadDuplicates(true)
 }
 
 async function merge(pair: DuplicatePair) {
@@ -742,7 +753,9 @@ onMounted(() => {
 
 <style scoped>
 .talent-pool-page {
-  padding: 20px 24px;
+  box-sizing: border-box;
+  width: 100%;
+  padding: 20px 36px 60px 24px;
 }
 
 .talent-workbench-layout {
@@ -750,6 +763,8 @@ onMounted(() => {
   gap: 20px;
   align-items: flex-start;
   margin-top: 14px;
+  width: 100%;
+  box-sizing: border-box;
 }
 
 /* 左侧职位分库导航侧栏 */
@@ -904,6 +919,8 @@ onMounted(() => {
 .talent-content-area {
   flex: 1;
   min-width: 0;
+  box-sizing: border-box;
+  padding-right: 12px;
 }
 
 .selected-repo-banner {
@@ -912,10 +929,12 @@ onMounted(() => {
   border-radius: 12px;
   padding: 16px 20px;
   margin-bottom: 16px;
+  margin-right: 4px;
   display: flex;
   justify-content: space-between;
   align-items: center;
   gap: 16px;
+  box-sizing: border-box;
 }
 
 .repo-banner-title {
@@ -975,11 +994,20 @@ onMounted(() => {
 
 .talent-filter-toolbar {
   margin-bottom: 18px;
+  margin-right: 4px;
+  box-sizing: border-box;
 }
 
 .count-summary {
   margin-left: auto;
   font-size: 13px;
+}
+
+.wb-candidate-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
+  gap: 16px;
+  margin-right: 4px;
 }
 
 .talent-card {
@@ -1007,7 +1035,58 @@ onMounted(() => {
 }
 
 .empty-candidate-panel {
-  padding: 48px 24px;
+  padding: 56px 24px;
   text-align: center;
+  margin-right: 4px;
+  box-sizing: border-box;
+}
+
+.empty-loading {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  color: #94a3b8;
+}
+
+.empty-detail-box {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+}
+
+.empty-illustration {
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
+  background: #eff6ff;
+  color: #3b82f6;
+  font-size: 26px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 16px;
+}
+
+.empty-title {
+  margin: 0 0 8px;
+  font-size: 16px;
+  font-weight: 600;
+  color: #1e293b;
+}
+
+.empty-subtitle {
+  margin: 0 0 20px;
+  font-size: 13px;
+  color: #64748b;
+  max-width: 480px;
+  line-height: 1.5;
+}
+
+.empty-action-btn {
+  border-radius: 20px;
+  padding: 10px 24px;
+  font-weight: 600;
+  box-shadow: 0 4px 12px rgba(37, 99, 235, 0.25);
 }
 </style>
