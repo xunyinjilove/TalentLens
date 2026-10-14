@@ -127,8 +127,8 @@ const isProjectsActive = computed(() => {
 
 // 顶部品牌区
 .sidebar-brand {
-  height: 60px;
-  padding: 0 16px;
+  height: 56px;
+  padding: 0 12px;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -140,14 +140,14 @@ const isProjectsActive = computed(() => {
   .brand-logo-wrap {
     display: flex;
     align-items: center;
-    gap: 10px;
+    gap: 8px;
     -webkit-app-region: drag;
     --wails-draggable: drag;
   }
 
   .brand-icon {
-    width: 34px;
-    height: 34px;
+    width: 30px;
+    height: 30px;
     display: flex;
     align-items: center;
     justify-content: center;
@@ -175,16 +175,16 @@ const isProjectsActive = computed(() => {
 
     .brand-title {
       margin: 0;
-      font-size: 18px;
+      font-size: 16px;
       font-weight: 800;
       color: var(--brand-red);
       line-height: 1.15;
-      letter-spacing: 1.5px;
+      letter-spacing: 1px;
       text-shadow: 0 0 12px var(--brand-red-glow);
     }
 
     .brand-subtitle {
-      font-size: 10px;
+      font-size: 9px;
       color: var(--sidebar-text-muted);
       font-weight: 600;
       letter-spacing: 0.5px;
@@ -194,8 +194,8 @@ const isProjectsActive = computed(() => {
   }
 
   .brand-badge {
-    font-size: 10px;
-    padding: 2px 6px;
+    font-size: 9px;
+    padding: 1px 5px;
     background: rgba(37, 99, 235, 0.2);
     color: #60A5FA;
     border-radius: 4px;
@@ -208,17 +208,17 @@ const isProjectsActive = computed(() => {
 // 中间导航项
 .sidebar-nav {
   flex: 1;
-  padding: 16px 10px;
+  padding: 12px 6px;
   overflow-y: auto;
   display: flex;
   flex-direction: column;
   gap: 4px;
 
   .nav-group-title {
-    font-size: 11px;
+    font-size: 10px;
     font-weight: 600;
     color: var(--sidebar-text-muted);
-    padding: 12px 10px 4px;
+    padding: 10px 8px 3px;
     letter-spacing: 0.5px;
     text-transform: uppercase;
   }
@@ -226,8 +226,8 @@ const isProjectsActive = computed(() => {
   .nav-item {
     display: flex;
     align-items: center;
-    gap: 10px;
-    padding: 9px 12px;
+    gap: 8px;
+    padding: 8px 10px;
     border-radius: 8px;
     color: var(--sidebar-text);
     text-decoration: none;
@@ -305,11 +305,11 @@ const isProjectsActive = computed(() => {
 
 // 底部区域
 .sidebar-footer {
-  padding: 14px 12px;
+  padding: 12px 8px;
   border-top: 1px solid var(--sidebar-border);
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 8px;
 
   .theme-toggle-btn {
     display: flex;

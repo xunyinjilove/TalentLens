@@ -68,7 +68,7 @@
                       <el-dropdown-item
                         command="clear"
                         divided
-                        :disabled="!projectId || resumeStore.resumes.length === 0 || isAnalysisBusy || isClearingProject"
+                        :disabled="!projectId || resumeStore.resumes.length === 0 || resumeStore.isAnalyzing || isClearingProject"
                         class="danger-item"
                       >
                         <el-icon><Delete /></el-icon>
@@ -945,7 +945,7 @@ const resumeStore = useResumeStore()
 const projectStore = useProjectStore()
 
 // 项目上下文
-const projectId = computed(() => (route.params.id as string) || '')
+const projectId = computed(() => (route.params.id as string) || projectStore.currentProjectId || '')
 const projectName = computed(() => projectStore.currentProject?.name || '')
 const rightTab = ref<'detail' | 'ranking' | 'content'>('detail')
 const detailSubTab = ref<'summary' | 'competency' | 'water' | 'interview'>('summary')
@@ -1716,8 +1716,8 @@ function handleResumeMenuCommand(command: string) {
 async function handleClearProject() {
   const id = projectId.value
   if (!id) return
-  if (isAnalysisBusy.value) {
-    ElMessage.warning('当前项目正在分析简历，请等待分析结束后再执行清空')
+  if (resumeStore.isAnalyzing) {
+    ElMessage.warning('当前项目正在执行批量分析，请等待分析结束后再执行清空')
     return
   }
   if (isClearingProject.value || resumeStore.resumes.length === 0) return
@@ -1728,7 +1728,7 @@ async function handleClearProject() {
       { type: 'warning', confirmButtonText: t('home.clearProjectConfirm'), cancelButtonText: t('home.cancel'), confirmButtonClass: 'el-button--danger' }
     )
   } catch { return }
-  if (isAnalysisBusy.value || projectId.value !== id) return
+  if (resumeStore.isAnalyzing || projectId.value !== id) return
   isClearingProject.value = true
   try {
     await resumeStore.clearProjectResumes(id)
