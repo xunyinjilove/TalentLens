@@ -122,7 +122,7 @@ export const useAIAssistantStore = defineStore('aiAssistant', () => {
       let replyContent = ''
       if (isWailsEnv && WailsApp && typeof WailsApp.ChatWithAIAssistant === 'function') {
         // 构建转换格式给 Go 后端
-        const reqPayload = messages.value.map(m => ({
+        const reqPayload = messages.value.filter(m => !m.error).map(m => ({
           role: m.role,
           content: m.content
         }))
@@ -161,10 +161,11 @@ export const useAIAssistantStore = defineStore('aiAssistant', () => {
       messages.value.push(assistantMsg)
       saveMessages()
     } catch (err: any) {
+      const reason = err?.message || String(err)
       const errMsg: AssistantMessage = {
         id: 'msg_err_' + Date.now(),
         role: 'assistant',
-        content: `抱歉，遇到错误：${err?.message || err}`,
+        content: reason,
         timestamp: Date.now(),
         error: true
       }

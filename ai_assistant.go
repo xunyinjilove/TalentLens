@@ -100,9 +100,8 @@ func (a *App) ChatWithAIAssistant(messages []ChatMessage, currentContext string,
 	reply, err := a.callAIChatMessages(effectiveCfg, fullMessages, 0.4)
 	if err != nil {
 		log.Printf("[ChatWithAIAssistant] 调用 AI 出错: %v", err)
-		// 出错时尝试知识库兜底并提示
-		offlineReply := a.handleOfflineKnowledgeQuery(trimmedLast)
-		return fmt.Sprintf("【提示：调用云端 AI 接口遇到网络或密钥问题 (%v)，已为您切换至系统内置知识库】\n\n%s", err, offlineReply), nil
+		// 已配置云端模型时，不把通用离线模板伪装成该问题的 AI 回答。
+		return "", err
 	}
 
 	return reply, nil
@@ -178,7 +177,20 @@ func (a *App) callAIChatMessages(cfg *AIConfig, messages []ChatMessage, temperat
 		}
 
 		if resp.StatusCode >= 400 {
-			lastErr = fmt.Errorf("API 错误: HTTP %d - %s", resp.StatusCode, string(respBody))
+			switch resp.StatusCode {
+			case http.StatusPaymentRequired:
+				return "", fmt.Errorf("AI 服务账户余额不足。请到模型服务商平台充值或更换可用模型，再重试")
+			case http.StatusUnauthorized:
+				return "", fmt.Errorf("AI 服务认证失败。请检查系统设置中的 API Key 和模型配置")
+			case http.StatusForbidden:
+				return "", fmt.Errorf("AI 服务拒绝访问。请检查模型权限与账户状态")
+			case http.StatusBadRequest:
+				return "", fmt.Errorf("AI 服务请求配置不正确。请检查模型名称和接口地址")
+			}
+			lastErr = fmt.Errorf("AI 服务暂时不可用 (HTTP %d)", resp.StatusCode)
+			if resp.StatusCode < 500 && resp.StatusCode != http.StatusRequestTimeout && resp.StatusCode != http.StatusTooManyRequests {
+				return "", lastErr
+			}
 			continue
 		}
 

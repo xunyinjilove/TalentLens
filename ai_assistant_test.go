@@ -5,8 +5,33 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 )
+
+func TestChatWithAIAssistantPaymentRequiredDoesNotRetryOrInventAnswer(t *testing.T) {
+	var calls atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls.Add(1)
+		w.WriteHeader(http.StatusPaymentRequired)
+		_, _ = w.Write([]byte(`{"code":30001,"message":"Sorry, your account balance is insufficient"}`))
+	}))
+	defer server.Close()
+
+	app := &App{config: Config{AI: AIConfig{
+		APIKey: "test-key", BaseURL: server.URL, Model: "test-model", MaxRetries: 3,
+	}}}
+	reply, err := app.ChatWithAIAssistant([]ChatMessage{{Role: "user", Content: "你好"}}, "", nil)
+	if err == nil || !strings.Contains(err.Error(), "余额不足") {
+		t.Fatalf("期望清晰的余额不足错误，实际回答=%q 错误=%v", reply, err)
+	}
+	if reply != "" || strings.Contains(err.Error(), "系统内置知识库") || strings.Contains(err.Error(), "30001") {
+		t.Fatalf("不应回退到不相关模板或展示原始 API 错误，回答=%q 错误=%v", reply, err)
+	}
+	if calls.Load() != 1 {
+		t.Fatalf("HTTP 402 不应重试，实际调用 %d 次", calls.Load())
+	}
+}
 
 func TestChatWithAIAssistantOfflineKnowledge(t *testing.T) {
 	app := &App{
@@ -85,7 +110,7 @@ func TestChatWithAIAssistantOnlineMock(t *testing.T) {
 			}{
 				{
 					Message: ChatMessage{
-						Role: "assistant",
+						Role:    "assistant",
 						Content: "收到，已为您制定高级前端岗位：\n\n```json:talentlens-job\n{\n  \"title\": \"高级前端工程师\",\n  \"department\": \"研发中心\",\n  \"headcount\": 2,\n  \"experience_years\": 5,\n  \"education_level\": \"本科\",\n  \"job_description\": \"负责前端架构设计与复杂交互落地\",\n  \"required_skills\": [\"Vue3\", \"TypeScript\", \"Pinia\"],\n  \"red_lines\": [\"必须精通Vue3与TS\"],\n  \"bonus_points\": [\"有跨端开发经验\"]\n}\n```\n\n[ACTION:NAVIGATE|/|查看项目列表]",
 					},
 				},
@@ -177,4 +202,3 @@ func TestChatWithAIAssistantWithCustomConfigOverridesEmptyBackend(t *testing.T) 
 		t.Errorf("后端未自动同步更新 customCfg: %+v", app.config.AI)
 	}
 }
-

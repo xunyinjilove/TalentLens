@@ -117,6 +117,10 @@
                   <!-- 解析后的文本部分 -->
                   <div class="rendered-markdown" v-html="renderMessageText(msg.content)"></div>
 
+                  <button v-if="msg.error" class="error-settings-btn" type="button" @click="router.push('/settings')">
+                    前往 AI 设置
+                  </button>
+
                   <!-- 如果消息中包含 talentlens-job 结构化数据，渲染交互卡片 -->
                   <div
                     v-if="extractJobData(msg.content)"
@@ -351,6 +355,7 @@ async function handleSend() {
   const contextDesc = `当前用户所在页面: ${currentPath}`
 
   await assistantStore.sendMessage(content, contextDesc)
+  if (assistantStore.messages.at(-1)?.error) inputContent.value = content
   scrollToBottom()
 }
 
@@ -857,6 +862,21 @@ async function handleCopyJD(jobData: JobApplyData) {
     }
   }
 }
+
+.error-settings-btn {
+  align-self: flex-start;
+  border: 1px solid var(--accent-blue);
+  border-radius: 7px;
+  background: var(--accent-blue-light);
+  color: var(--accent-blue);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 650;
+  padding: 6px 10px;
+  cursor: pointer;
+}
+
+.error-settings-btn:hover { background: var(--accent-blue-subtle); }
 
 /* 消息 Markdown 格式 */
 .rendered-markdown {
