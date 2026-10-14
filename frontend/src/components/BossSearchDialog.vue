@@ -595,7 +595,7 @@ const emit = defineEmits<{
   (e: 'refresh'): void
 }>()
 
-const visible = ref(false)
+const visible = ref(Boolean(props.modelValue))
 const isSearchingStarted = ref(false) // 区分表单配置页与运行监控页
 const searching = ref(false)
 const isFinished = ref(false)
@@ -742,10 +742,8 @@ watch(() => props.modelValue, (val) => {
     captchaAlert.active = false
     searchLogs.value = []
 
-    // 继承第一次寻才的岗位关键词（若已有值则保留，不进行粗暴覆盖）
-    if (!form.keyword) {
-      form.keyword = props.jobTitle || '临床项目经理'
-    }
+    // 每次打开弹窗根据当前选中的职位刷新默认关键词
+    form.keyword = props.jobTitle || form.keyword || '临床项目经理'
 
     if (props.isContinue) {
       currentStatusText.value = '继续寻才模式 — 请选择/确认招聘平台后启动'
@@ -753,7 +751,7 @@ watch(() => props.modelValue, (val) => {
       currentStatusText.value = '准备就绪'
     }
   }
-})
+}, { immediate: true })
 
 watch(visible, (val) => {
   emit('update:modelValue', val)

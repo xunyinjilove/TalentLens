@@ -123,7 +123,7 @@
                 <button
                   class="sourcing-pill-btn"
                   title="立即为该岗位检索人才"
-                  @click="openSourcing(project)"
+                  @click.stop="openSourcing(project)"
                 >
                   <el-icon><Position /></el-icon>
                   <span>寻才</span>
@@ -183,7 +183,7 @@
                   <button
                     class="action-icon-btn highlight"
                     title="立即为该岗位检索人才"
-                    @click="openSourcing(project)"
+                    @click.stop="openSourcing(project)"
                   >
                     <el-icon><Position /></el-icon>
                   </button>
@@ -394,12 +394,13 @@
       :exp-years="sourcingProject.job_config?.experience_years || 0"
       :edu-level="sourcingProject.job_config?.education_level || ''"
       @refresh="load"
+      @update:model-value="val => { showSourcingDialog = val; if (!val) sourcingProject = null }"
     />
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, nextTick, onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import {
   Search,
@@ -687,8 +688,9 @@ async function saveJob() {
   }
 }
 
-function openSourcing(project: Project) {
+async function openSourcing(project: Project) {
   sourcingProject.value = project
+  await nextTick()
   showSourcingDialog.value = true
 }
 
