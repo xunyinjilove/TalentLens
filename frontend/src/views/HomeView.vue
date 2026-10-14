@@ -28,7 +28,7 @@
 
     <main class="app-main">
       <!-- 左侧面板 -->
-      <aside class="left-panel">
+      <aside class="left-panel" :style="{ width: leftPanelWidth + 'px' }">
         <DropZone @select-files="handleSelectFiles" />
 
         <div class="resume-section">
@@ -131,6 +131,17 @@
         </div>
       </aside>
 
+      <!-- 左右面板拖拽调整手柄 (Splitter Resizer) -->
+      <div
+        class="panel-resizer"
+        :class="{ 'is-resizing': isResizing }"
+        @mousedown="startResize"
+        @dblclick="resetPanelWidth"
+        title="按住鼠标左键拖动调整左右分栏宽度，双击恢复默认宽度"
+      >
+        <div class="resizer-handle"></div>
+      </div>
+
       <!-- 右侧面板 -->
       <section class="right-panel">
         <div class="preview-section">
@@ -163,68 +174,71 @@
             <div v-if="resumeStore.selectedResume" class="resume-detail">
               <!-- 1. 常驻决策与画像总览横幅 (Hero Card) -->
               <div class="resume-hero-header">
-                <div class="hero-left-section">
-                  <div class="hero-avatar">
-                    <span>{{ (resumeStore.selectedResume.analysis?.candidateName || resumeStore.selectedResume.fileName || '人').slice(0, 1) }}</span>
-                  </div>
-                  <div class="hero-candidate-info">
-                    <div class="hero-title-row">
-                      <h3 class="hero-candidate-name">
-                        {{ resumeStore.selectedResume.analysis?.candidateName || '候选人' }}
-                      </h3>
-                      <span v-if="resumeStore.selectedResume.is_merged_analysis || resumeStore.selectedResume.has_attachment" class="hero-badge merged">
-                        ⭐ 深度终审版
-                      </span>
-                      <span class="hero-file-name" :title="resumeStore.selectedResume.fileName">
-                        {{ resumeStore.selectedResume.fileName }}
-                      </span>
+                <!-- 上排：画像 + 决策看板 (左右分立，绝不重叠挤压) -->
+                <div class="hero-top-row">
+                  <div class="hero-left-section">
+                    <div class="hero-avatar">
+                      <span>{{ (resumeStore.selectedResume.analysis?.candidateName || resumeStore.selectedResume.fileName || '人').slice(0, 1) }}</span>
                     </div>
+                    <div class="hero-candidate-info">
+                      <div class="hero-title-row">
+                        <h3 class="hero-candidate-name">
+                          {{ resumeStore.selectedResume.analysis?.candidateName || '候选人' }}
+                        </h3>
+                        <span v-if="resumeStore.selectedResume.is_merged_analysis || resumeStore.selectedResume.has_attachment" class="hero-badge merged">
+                          ⭐ 深度终审版
+                        </span>
+                        <span class="hero-file-name" :title="resumeStore.selectedResume.fileName">
+                          {{ resumeStore.selectedResume.fileName }}
+                        </span>
+                      </div>
 
-                    <div class="hero-meta-row">
-                      <span v-if="resumeStore.selectedResume.analysis?.currentRole" class="meta-tag role">
-                        <el-icon><Briefcase /></el-icon> {{ resumeStore.selectedResume.analysis.currentRole }}
+                      <div class="hero-meta-row">
+                        <span v-if="resumeStore.selectedResume.analysis?.currentRole" class="meta-tag role">
+                          <el-icon><Briefcase /></el-icon> {{ resumeStore.selectedResume.analysis.currentRole }}
+                        </span>
+                        <span v-if="resumeStore.selectedResume.analysis?.workYears" class="meta-tag exp">
+                          <el-icon><Calendar /></el-icon> {{ resumeStore.selectedResume.analysis.workYears }}经验
+                        </span>
+                        <span v-if="resumeStore.selectedResume.analysis?.education" class="meta-tag edu">
+                          {{ resumeStore.selectedResume.analysis.education }}
+                        </span>
+                        <span v-if="resumeStore.selectedResume.source_keyword" class="meta-tag source" title="配额调度派生词条">
+                          <el-icon><Filter /></el-icon> 来源词: {{ resumeStore.selectedResume.source_keyword }}
+                        </span>
+                        <span v-if="resumeStore.selectedResume.activity_label" class="meta-tag activity">
+                          <el-icon><Clock /></el-icon> 活跃: {{ resumeStore.selectedResume.activity_label }}
+                        </span>
+                        <span v-if="resumeStore.selectedResume.email" class="meta-tag email clickable" title="点击复制候选人邮箱" @click="copyCandidateEmail">
+                          <el-icon><Message /></el-icon> {{ resumeStore.selectedResume.email }}
+                          <el-icon class="copy-sub-icon"><DocumentCopy /></el-icon>
+                        </span>
+                        <span v-else class="meta-tag email disabled" title="在线直聘平台默认隐私保护">
+                          <el-icon><Message /></el-icon> 邮箱未公开
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+
+                  <!-- 右上角：综合评分与推荐结论 (固定在右上，flex-shrink: 0，永远醒目) -->
+                  <div v-if="resumeStore.selectedResume.status === 'done' && resumeStore.selectedResume.analysis" class="hero-score-section">
+                    <div class="hero-score-box" :class="getScoreClass(resumeStore.selectedResume.score)">
+                      <strong class="hero-score-num">{{ animatedDetailScore || resumeStore.selectedResume.score }}</strong>
+                      <span class="hero-score-label">{{ $t('analysis.totalScore') }}</span>
+                    </div>
+                    <div class="hero-decision-badge-wrap">
+                      <span class="hero-rec-badge" :class="resumeStore.selectedResume.analysis.recommendation">
+                        {{ $t(`analysis.recommendations.${resumeStore.selectedResume.analysis.recommendation || 'consider'}`) }}
                       </span>
-                      <span v-if="resumeStore.selectedResume.analysis?.workYears" class="meta-tag exp">
-                        <el-icon><Calendar /></el-icon> {{ resumeStore.selectedResume.analysis.workYears }}经验
-                      </span>
-                      <span v-if="resumeStore.selectedResume.analysis?.education" class="meta-tag edu">
-                        {{ resumeStore.selectedResume.analysis.education }}
-                      </span>
-                      <span v-if="resumeStore.selectedResume.source_keyword" class="meta-tag source" title="配额调度派生词条">
-                        <el-icon><Filter /></el-icon> 来源词: {{ resumeStore.selectedResume.source_keyword }}
-                      </span>
-                      <span v-if="resumeStore.selectedResume.activity_label" class="meta-tag activity">
-                        <el-icon><Clock /></el-icon> 活跃: {{ resumeStore.selectedResume.activity_label }}
-                      </span>
-                      <span v-if="resumeStore.selectedResume.email" class="meta-tag email clickable" title="点击复制候选人邮箱" @click="copyCandidateEmail">
-                        <el-icon><Message /></el-icon> {{ resumeStore.selectedResume.email }}
-                        <el-icon class="copy-sub-icon"><DocumentCopy /></el-icon>
-                      </span>
-                      <span v-else class="meta-tag email disabled" title="在线直聘平台默认隐私保护">
-                        <el-icon><Message /></el-icon> 邮箱未公开
+                      <span class="hero-redline-status" :class="resumeStore.selectedResume.analysis.redLineStatus || 'none'">
+                        红线: {{ !resumeStore.selectedResume.analysis.redLineChecks?.length ? '尚未配置' : resumeStore.selectedResume.analysis.redLineStatus === 'failed' ? '不满足' : resumeStore.selectedResume.analysis.redLineStatus === 'pending' ? '待 HR 核实' : '已满足' }}
                       </span>
                     </div>
                   </div>
                 </div>
 
-                <!-- 中间：综合评分与推荐结论 -->
-                <div v-if="resumeStore.selectedResume.status === 'done' && resumeStore.selectedResume.analysis" class="hero-score-section">
-                  <div class="hero-score-box" :class="getScoreClass(resumeStore.selectedResume.score)">
-                    <strong class="hero-score-num">{{ animatedDetailScore }}</strong>
-                    <span class="hero-score-label">{{ $t('analysis.totalScore') }}</span>
-                  </div>
-                  <div class="hero-decision-badge-wrap">
-                    <span class="hero-rec-badge" :class="resumeStore.selectedResume.analysis.recommendation">
-                      {{ $t(`analysis.recommendations.${resumeStore.selectedResume.analysis.recommendation}`) }}
-                    </span>
-                    <span class="hero-redline-status" :class="resumeStore.selectedResume.analysis.redLineStatus || 'none'">
-                      红线: {{ !resumeStore.selectedResume.analysis.redLineChecks?.length ? '尚未配置' : resumeStore.selectedResume.analysis.redLineStatus === 'failed' ? '不满足' : resumeStore.selectedResume.analysis.redLineStatus === 'pending' ? '待 HR 核实' : '已满足' }}
-                    </span>
-                  </div>
-                </div>
-
-                <!-- 右侧：快捷操作组 -->
-                <div class="hero-actions-section">
+                <!-- 下排：快捷操作组与沟通提示 (横向平铺，自适应换行) -->
+                <div class="hero-bottom-row">
                   <div class="hero-action-buttons">
                     <button
                       v-if="resumeStore.selectedResume.status === 'done' && resumeStore.selectedResume.analysis"
@@ -895,6 +909,62 @@ const projectId = computed(() => (route.params.id as string) || '')
 const projectName = computed(() => projectStore.currentProject?.name || '')
 const rightTab = ref<'detail' | 'ranking' | 'content'>('detail')
 const detailSubTab = ref<'summary' | 'competency' | 'water' | 'interview'>('summary')
+
+// 左右面板拖拽调整宽度 (Splitter Resizer)
+const DEFAULT_LEFT_PANEL_WIDTH = 340
+const savedLeftWidth = Number(localStorage.getItem('talentlens_left_panel_width'))
+const leftPanelWidth = ref(savedLeftWidth && savedLeftWidth >= 260 && savedLeftWidth <= 600 ? savedLeftWidth : DEFAULT_LEFT_PANEL_WIDTH)
+const isResizing = ref(false)
+
+let activeMouseMoveHandler: ((e: MouseEvent) => void) | null = null
+let activeMouseUpHandler: (() => void) | null = null
+
+function cleanupResizeListeners() {
+  if (activeMouseMoveHandler) {
+    window.removeEventListener('mousemove', activeMouseMoveHandler)
+    activeMouseMoveHandler = null
+  }
+  if (activeMouseUpHandler) {
+    window.removeEventListener('mouseup', activeMouseUpHandler)
+    activeMouseUpHandler = null
+  }
+  isResizing.value = false
+  document.body.style.cursor = ''
+  document.body.style.userSelect = ''
+}
+
+function startResize(e: MouseEvent) {
+  e.preventDefault()
+  cleanupResizeListeners()
+  isResizing.value = true
+  document.body.style.cursor = 'col-resize'
+  document.body.style.userSelect = 'none'
+
+  const startX = e.clientX
+  const startWidth = leftPanelWidth.value
+
+  activeMouseMoveHandler = (moveEvent: MouseEvent) => {
+    const deltaX = moveEvent.clientX - startX
+    const maxWidth = Math.max(380, Math.min(window.innerWidth * 0.55, 620))
+    const minWidth = 260
+    const newWidth = Math.round(Math.max(minWidth, Math.min(maxWidth, startWidth + deltaX)))
+    leftPanelWidth.value = newWidth
+  }
+
+  activeMouseUpHandler = () => {
+    cleanupResizeListeners()
+    localStorage.setItem('talentlens_left_panel_width', String(leftPanelWidth.value))
+  }
+
+  window.addEventListener('mousemove', activeMouseMoveHandler)
+  window.addEventListener('mouseup', activeMouseUpHandler)
+}
+
+function resetPanelWidth() {
+  leftPanelWidth.value = DEFAULT_LEFT_PANEL_WIDTH
+  localStorage.setItem('talentlens_left_panel_width', String(DEFAULT_LEFT_PANEL_WIDTH))
+  ElMessage.info('已恢复默认分栏比例 (340px)')
+}
 
 // 待核实红线项数量
 const unverifiedRedLineCount = computed(() => {
@@ -1651,6 +1721,7 @@ onMounted(async () => {
 })
 
 onUnmounted(() => {
+  cleanupResizeListeners()
   if (contactPollTimer !== null) window.clearInterval(contactPollTimer)
   resumeStore.cleanupWailsEvents()
 })
@@ -1779,16 +1850,19 @@ onUnmounted(() => {
   display: flex;
   flex: 1;
   overflow: hidden;
+  width: 100%;
+  position: relative;
 }
 
 // 左侧面板
 .left-panel {
-  width: 380px;
+  min-width: 240px;
+  max-width: 650px;
   display: flex;
   flex-direction: column;
-  border-right: 1px solid $separator;
   background: $bg-primary;
   flex-shrink: 0;
+  transition: width 0.04s ease;
 
   .resume-section {
     flex: 1;
@@ -1798,11 +1872,46 @@ onUnmounted(() => {
   }
 }
 
+// 左右拖拽手柄
+.panel-resizer {
+  width: 8px;
+  cursor: col-resize;
+  position: relative;
+  z-index: 20;
+  background: transparent;
+  user-select: none;
+  flex-shrink: 0;
+  margin: 0 -4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background-color 0.15s ease;
+
+  .resizer-handle {
+    width: 2px;
+    height: 100%;
+    background: $separator;
+    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  }
+
+  &:hover, &.is-resizing {
+    background: rgba(37, 99, 235, 0.08);
+
+    .resizer-handle {
+      width: 4px;
+      background: var(--accent-blue, #2563eb);
+      box-shadow: 0 0 8px rgba(37, 99, 235, 0.45);
+    }
+  }
+}
+
 // 右侧面板
 .right-panel {
   flex: 1;
+  min-width: 0; // 核心：允许 flex 弹性缩小，防止子卡片撑爆父容器并被 overflow 裁剪
   display: flex;
   flex-direction: column;
+  overflow: hidden;
   background: $bg-primary;
 }
 
@@ -2170,6 +2279,7 @@ onUnmounted(() => {
 // 预览区
 .preview-section {
   flex: 1;
+  min-width: 0;
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -2177,8 +2287,11 @@ onUnmounted(() => {
 
 .preview-content {
   flex: 1;
-  overflow: auto;
-  padding: 16px;
+  min-width: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 16px 20px 32px 18px;
+  box-sizing: border-box;
   background: $bg-secondary;
 
   :deep(.el-empty) {
@@ -2192,188 +2305,211 @@ onUnmounted(() => {
   display: flex;
   flex-direction: column;
   gap: 12px;
+  min-width: 0;
+  width: 100%;
+  box-sizing: border-box;
 
   // 1. 常驻决策与画像总览横幅 (Hero Card)
   .resume-hero-header {
     display: flex;
-    align-items: center;
-    justify-content: space-between;
-    flex-wrap: wrap;
-    gap: 16px;
+    flex-direction: column;
+    gap: 12px;
     padding: 14px 18px;
     background: $bg-primary;
     border-radius: $radius-lg;
     border: 1px solid $separator;
     box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
+    min-width: 0;
+    width: 100%;
+    box-sizing: border-box;
 
-    .hero-left-section {
+    // 上排：左侧画像 + 右上角评分/决策
+    .hero-top-row {
       display: flex;
-      align-items: center;
-      gap: 14px;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 16px;
+      width: 100%;
       min-width: 0;
-      flex: 1 1 360px;
 
-      .hero-avatar {
-        width: 44px;
-        height: 44px;
-        min-width: 44px;
-        border-radius: 12px;
-        background: linear-gradient(135deg, $system-blue 0%, #2563eb 100%);
-        color: #ffffff;
-        font-size: 19px;
-        font-weight: 700;
+      .hero-left-section {
         display: flex;
-        align-items: center;
-        justify-content: center;
-        box-shadow: 0 2px 6px rgba(37, 99, 235, 0.25);
-      }
-
-      .hero-candidate-info {
+        align-items: flex-start;
+        gap: 14px;
         min-width: 0;
         flex: 1;
 
-        .hero-title-row {
+        .hero-avatar {
+          width: 44px;
+          height: 44px;
+          min-width: 44px;
+          border-radius: 12px;
+          background: linear-gradient(135deg, $system-blue 0%, #2563eb 100%);
+          color: #ffffff;
+          font-size: 19px;
+          font-weight: 700;
           display: flex;
           align-items: center;
-          flex-wrap: wrap;
-          gap: 8px;
-          margin-bottom: 5px;
-
-          .hero-candidate-name {
-            font-size: 17px;
-            font-weight: 700;
-            color: $text-primary;
-            margin: 0;
-          }
-
-          .hero-badge.merged {
-            padding: 2px 7px;
-            border-radius: 6px;
-            font-size: 11px;
-            font-weight: 600;
-            background: #fef3c7;
-            color: #b45309;
-            border: 1px solid #fde68a;
-          }
-
-          .hero-file-name {
-            font-size: 12px;
-            color: $text-tertiary;
-            max-width: 240px;
-            overflow: hidden;
-            text-overflow: ellipsis;
-            white-space: nowrap;
-          }
+          justify-content: center;
+          box-shadow: 0 2px 6px rgba(37, 99, 235, 0.25);
+          flex-shrink: 0;
         }
 
-        .hero-meta-row {
-          display: flex;
-          align-items: center;
-          flex-wrap: wrap;
-          gap: 6px;
+        .hero-candidate-info {
+          min-width: 0;
+          flex: 1;
 
-          .meta-tag {
-            display: inline-flex;
+          .hero-title-row {
+            display: flex;
             align-items: center;
-            gap: 4px;
-            font-size: 12px;
-            color: $text-secondary;
-            background: $bg-secondary;
-            padding: 2px 7px;
-            border-radius: 6px;
+            flex-wrap: wrap;
+            gap: 8px;
+            margin-bottom: 5px;
 
-            &.email.clickable {
-              cursor: pointer;
-              transition: color 0.15s ease;
-              &:hover {
-                color: $system-blue;
-                background: rgba(37, 99, 235, 0.08);
+            .hero-candidate-name {
+              font-size: 17px;
+              font-weight: 700;
+              color: $text-primary;
+              margin: 0;
+            }
+
+            .hero-badge.merged {
+              padding: 2px 7px;
+              border-radius: 6px;
+              font-size: 11px;
+              font-weight: 600;
+              background: #fef3c7;
+              color: #b45309;
+              border: 1px solid #fde68a;
+            }
+
+            .hero-file-name {
+              font-size: 12px;
+              color: $text-tertiary;
+              max-width: 240px;
+              overflow: hidden;
+              text-overflow: ellipsis;
+              white-space: nowrap;
+            }
+          }
+
+          .hero-meta-row {
+            display: flex;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 6px;
+
+            .meta-tag {
+              display: inline-flex;
+              align-items: center;
+              gap: 4px;
+              font-size: 12px;
+              color: $text-secondary;
+              background: $bg-secondary;
+              padding: 2px 7px;
+              border-radius: 6px;
+
+              &.email.clickable {
+                cursor: pointer;
+                transition: color 0.15s ease;
+                &:hover {
+                  color: $system-blue;
+                  background: rgba(37, 99, 235, 0.08);
+                }
+              }
+
+              &.email.disabled {
+                opacity: 0.65;
+              }
+
+              .copy-sub-icon {
+                font-size: 11px;
+                margin-left: 2px;
               }
             }
+          }
+        }
+      }
 
-            &.email.disabled {
-              opacity: 0.65;
-            }
+      // 右侧评分区：固定不缩小，永远醒目
+      .hero-score-section {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        padding: 4px 14px;
+        background: rgba(248, 250, 252, 0.9);
+        border: 1px solid $separator;
+        border-radius: 10px;
+        flex-shrink: 0;
 
-            .copy-sub-icon {
-              font-size: 11px;
-              margin-left: 2px;
-            }
+        .hero-score-box {
+          width: 58px;
+          min-width: 58px;
+          padding: 4px 2px;
+          border-radius: 8px;
+          text-align: center;
+          background: #f1f5f9;
+          color: #475569;
+
+          &.high { background: #ecfdf5; color: #047857; }
+          &.medium { background: #fff7ed; color: #c2410c; }
+          &.low { background: #fef2f2; color: #b91c1c; }
+
+          .hero-score-num {
+            display: block;
+            font-size: 23px;
+            font-weight: 800;
+            line-height: 1.1;
+          }
+
+          .hero-score-label {
+            font-size: 10px;
+            opacity: 0.85;
+          }
+        }
+
+        .hero-decision-badge-wrap {
+          display: flex;
+          flex-direction: column;
+          gap: 4px;
+
+          .hero-rec-badge {
+            display: inline-block;
+            padding: 3px 8px;
+            border-radius: 6px;
+            font-size: 12px;
+            font-weight: 700;
+            text-align: center;
+            &.strong_recommend, &.recommend { background: #ecfdf5; color: #047857; }
+            &.consider { background: #fff7ed; color: #c2410c; }
+            &.not_recommend { background: #fef2f2; color: #b91c1c; }
+          }
+
+          .hero-redline-status {
+            font-size: 11px;
+            padding: 1px 6px;
+            border-radius: 4px;
+            text-align: center;
+            white-space: nowrap;
+            &.failed { color: #ef4444; background: #fee2e2; }
+            &.pending { color: #f59e0b; background: #fef3c7; }
+            &.met, &.passed { color: #10b981; background: #d1fae5; }
+            &.none { color: $text-tertiary; }
           }
         }
       }
     }
 
-    .hero-score-section {
+    // 下排：快捷操作组与沟通提示
+    .hero-bottom-row {
       display: flex;
       align-items: center;
-      gap: 12px;
-      padding: 2px 16px;
-      border-left: 1px solid $separator;
-      border-right: 1px solid $separator;
-
-      .hero-score-box {
-        width: 60px;
-        min-width: 60px;
-        padding: 5px 4px;
-        border-radius: 8px;
-        text-align: center;
-        background: #f1f5f9;
-        color: #475569;
-
-        &.high { background: #ecfdf5; color: #047857; }
-        &.medium { background: #fff7ed; color: #c2410c; }
-        &.low { background: #fef2f2; color: #b91c1c; }
-
-        .hero-score-num {
-          display: block;
-          font-size: 24px;
-          font-weight: 800;
-          line-height: 1.1;
-        }
-
-        .hero-score-label {
-          font-size: 10px;
-          opacity: 0.85;
-        }
-      }
-
-      .hero-decision-badge-wrap {
-        display: flex;
-        flex-direction: column;
-        gap: 4px;
-
-        .hero-rec-badge {
-          display: inline-block;
-          padding: 3px 8px;
-          border-radius: 6px;
-          font-size: 12px;
-          font-weight: 700;
-          text-align: center;
-          &.strong_recommend, &.recommend { background: #ecfdf5; color: #047857; }
-          &.consider { background: #fff7ed; color: #c2410c; }
-          &.not_recommend { background: #fef2f2; color: #b91c1c; }
-        }
-
-        .hero-redline-status {
-          font-size: 11px;
-          padding: 1px 6px;
-          border-radius: 4px;
-          text-align: center;
-          white-space: nowrap;
-          &.failed { color: #ef4444; background: #fee2e2; }
-          &.pending { color: #f59e0b; background: #fef3c7; }
-          &.met, &.passed { color: #10b981; background: #d1fae5; }
-          &.none { color: $text-tertiary; }
-        }
-      }
-    }
-
-    .hero-actions-section {
-      display: flex;
-      flex-direction: column;
-      align-items: flex-end;
-      gap: 6px;
+      justify-content: space-between;
+      flex-wrap: wrap;
+      gap: 10px;
+      padding-top: 8px;
+      border-top: 1px solid rgba(0, 0, 0, 0.05);
+      width: 100%;
 
       .hero-action-buttons {
         display: flex;
@@ -2436,6 +2572,7 @@ onUnmounted(() => {
       .hero-contact-tip {
         font-size: 11px;
         color: $text-tertiary;
+        margin-left: auto;
       }
     }
   }
@@ -2445,11 +2582,17 @@ onUnmounted(() => {
     display: flex;
     align-items: center;
     gap: 8px;
-    padding: 5px;
+    padding: 6px 8px;
     background: $bg-primary;
     border-radius: 10px;
     border: 1px solid $separator;
     overflow-x: auto;
+    min-width: 0;
+    max-width: 100%;
+    box-sizing: border-box;
+
+    &::-webkit-scrollbar { height: 4px; }
+    &::-webkit-scrollbar-thumb { background: rgba(0, 0, 0, 0.15); border-radius: 2px; }
 
     .subtab-btn {
       display: inline-flex;
@@ -3237,8 +3380,11 @@ details.candidate-portal-bar[open] > summary.portal-header { margin-bottom: 12px
 // 解析内容面板
 .parsed-content-tab {
   flex: 1;
+  min-width: 0;
   overflow-y: auto;
-  padding: 16px;
+  overflow-x: hidden;
+  padding: 16px 20px 32px 18px;
+  box-sizing: border-box;
   background: $bg-secondary;
 
   .content-loading {
@@ -3318,8 +3464,11 @@ details.candidate-portal-bar[open] > summary.portal-header { margin-bottom: 12px
 // 排名面板
 .ranking-content {
   flex: 1;
+  min-width: 0;
   overflow-y: auto;
-  padding: 16px;
+  overflow-x: hidden;
+  padding: 16px 20px 32px 18px;
+  box-sizing: border-box;
   background: $bg-secondary;
 }
 
@@ -4047,8 +4196,11 @@ details.candidate-portal-bar[open] > summary.portal-header { margin-bottom: 12px
 
   .water-radar-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+    grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
     gap: 12px;
+    min-width: 0;
+    width: 100%;
+    box-sizing: border-box;
 
     .radar-grid-item {
       background: #f8fafc;
