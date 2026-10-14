@@ -364,6 +364,25 @@
                     <p class="summary-body">{{ resumeStore.selectedResume.analysis.summary || '暂无分析总结' }}</p>
                   </div>
 
+                  <!-- 三维匹配度环形图看板 (SVG Donut Rings) -->
+                  <div class="match-donuts-row">
+                    <SvgDonutRing
+                      :percentage="resumeStore.selectedResume.analysis.skillMatch"
+                      title="核心技能匹配"
+                      subtitle="技术栈与专业度"
+                    />
+                    <SvgDonutRing
+                      :percentage="resumeStore.selectedResume.analysis.experienceMatch"
+                      title="工作经验匹配"
+                      subtitle="年限与业务场景"
+                    />
+                    <SvgDonutRing
+                      :percentage="resumeStore.selectedResume.analysis.educationMatch"
+                      title="学历背景对口"
+                      subtitle="院校与专业资质"
+                    />
+                  </div>
+
                   <!-- 岗位红线逐项核验卡 -->
                   <div class="redline-alert-card">
                     <div class="redline-alert-header">
@@ -381,11 +400,15 @@
                     <p v-if="!resumeStore.selectedResume.analysis.redLineChecks?.length" class="empty-review-help">本项目尚未设置红线。添加后，该项目的候选人会先标记为待 HR 核实。</p>
                     <ul class="redline-violations-list">
                        <li v-for="(check, vIdx) in resumeStore.selectedResume.analysis.redLineChecks" :key="vIdx" class="redline-violation-item">
-                        <el-icon><Warning /></el-icon>
-                        <span>{{ check.status === 'met' ? 'HR确认满足' : check.status === 'violated' ? 'HR确认不满足' : '待HR核实' }} · {{ check.criterion }}{{ check.suggested_status && check.status === 'unknown' ? `（AI提示：${check.suggested_status === 'met' ? '可能满足' : '可能不满足'}）` : '' }}{{ check.evidence ? `（原文线索：${check.evidence}）` : '（暂无可核对原文）' }}</span>
-                        <el-button size="small" text type="success" @click="handleReviewRedLine(check.criterion, 'met')">确认满足</el-button>
-                        <el-button size="small" text type="danger" @click="handleReviewRedLine(check.criterion, 'violated')">确认不满足</el-button>
-                        <el-button size="small" text @click="handleReviewRedLine(check.criterion, 'unknown')">待核实</el-button>
+                        <span class="redline-stamp-badge" :class="check.status || 'unknown'">
+                          {{ check.status === 'met' ? '✓ 合规满足' : check.status === 'violated' ? '✕ 触碰红线' : '？ 待HR核验' }}
+                        </span>
+                        <span class="redline-item-desc">{{ check.criterion }}{{ check.suggested_status && check.status === 'unknown' ? `（AI提示：${check.suggested_status === 'met' ? '可能满足' : '可能不满足'}）` : '' }}{{ check.evidence ? `（原文线索：${check.evidence}）` : '（暂无可核对原文）' }}</span>
+                        <div class="redline-btn-actions">
+                          <el-button size="small" text type="success" @click="handleReviewRedLine(check.criterion, 'met')">确认满足</el-button>
+                          <el-button size="small" text type="danger" @click="handleReviewRedLine(check.criterion, 'violated')">确认不满足</el-button>
+                          <el-button size="small" text @click="handleReviewRedLine(check.criterion, 'unknown')">待核实</el-button>
+                        </div>
                       </li>
                     </ul>
                   </div>
@@ -483,33 +506,53 @@
                   </div>
 
                   <!-- 评分面板与逐项评分卡 -->
-                  <div class="score-section-card">
+                  <div class="score-section-card modern-competency-card">
                     <div class="section-card-header">
                       <div class="header-title">
                         <el-icon><Histogram /></el-icon>
-                        <span>核心能力评分维度 ({{ resumeStore.selectedResume.analysis.abilityScore ?? resumeStore.selectedResume.score }} 分)</span>
+                        <span>核心能力维度全景雷达 ({{ resumeStore.selectedResume.analysis.abilityScore ?? resumeStore.selectedResume.score }} 分)</span>
                       </div>
-                      <span class="header-tip">红线与加分另列；加分不抬高能力分</span>
+                      <span class="header-tip">点击雷达图顶点或下方条目可高亮对应简历证据</span>
                     </div>
 
-                    <div class="score-breakdown-box">
-                      <p v-if="resumeStore.selectedResume.analysis.scoreBasis === 'provisional'" class="score-explanation warning">
-                        ⚠️ 暂估分：AI 未提供足够可定位的逐项原文，系统改用技能与经验匹配估计；请 HR 核对后再推进。
-                      </p>
-                      <div v-for="item in resumeStore.selectedResume.analysis.coreCriterionChecks || []" :key="item.criterion" class="criterion-item-row">
-                        <div class="criterion-name-col">
-                          <span class="criterion-name">{{ item.criterion }}</span>
-                          <span class="criterion-level-badge" :class="'level-' + item.level">
-                            {{ item.level }}/4 · {{ item.level === 0 && resumeStore.selectedResume.analysis.scoreBasis === 'provisional' ? '未取得可核对原文' : ['未体现', '了解', '参与', '独立完成', '主导并可复盘'][item.level] || '待核实' }}
-                          </span>
-                        </div>
-                        <div v-if="item.evidence" class="criterion-evidence-col">
-                          {{ item.evidence }}
-                        </div>
+                    <div class="competency-split-layout">
+                      <!-- 左侧：原生 SVG 蜘蛛网雷达图 -->
+                      <div class="radar-visual-col">
+                        <SvgRadarChart
+                          :indicators="radarIndicators"
+                          :candidate-values="radarCandidateValues"
+                          :selected-index="selectedRadarIndex"
+                          @select="handleSelectRadarIndex"
+                        />
                       </div>
-                      <p v-if="!resumeStore.selectedResume.analysis.coreCriterionChecks?.length" class="score-explanation empty">
-                        暂无逐项评分卡；当前显示核心匹配估计，建议重新分析以取得可核对的逐项依据。
-                      </p>
+
+                      <!-- 右侧：逐项评分卡与原文线索 -->
+                      <div class="score-breakdown-box">
+                        <p v-if="resumeStore.selectedResume.analysis.scoreBasis === 'provisional'" class="score-explanation warning">
+                          ⚠️ 暂估分：AI 未提供足够可定位的逐项原文，系统改用技能与经验匹配估计；请 HR 核对后再推进。
+                        </p>
+                        <div
+                          v-for="(item, cIdx) in resumeStore.selectedResume.analysis.coreCriterionChecks || []"
+                          :key="item.criterion"
+                          class="criterion-item-row clickable"
+                          :class="{ highlighted: selectedRadarIndex === cIdx }"
+                          @click="handleSelectRadarIndex(cIdx)"
+                        >
+                          <div class="criterion-name-col">
+                            <span class="criterion-name">{{ item.criterion }}</span>
+                            <span class="criterion-level-badge" :class="'level-' + item.level">
+                              {{ item.level }}/4 · {{ item.level === 0 && resumeStore.selectedResume.analysis.scoreBasis === 'provisional' ? '未取得可核对原文' : ['未体现', '了解', '参与', '独立完成', '主导并可复盘'][item.level] || '待核实' }}
+                            </span>
+                          </div>
+                          <div v-if="item.evidence" class="criterion-evidence-col">
+                            {{ item.evidence }}
+                          </div>
+                        </div>
+                        <p v-if="!resumeStore.selectedResume.analysis.coreCriterionChecks?.length" class="score-explanation empty">
+                          暂无逐项评分卡；当前显示核心匹配估计，建议重新分析以取得可核对的逐项依据。
+                        </p>
+                      </div>
+                    </div>
 
                       <!-- 三维进度条 -->
                       <div class="progress-bars-group">
@@ -527,7 +570,6 @@
                         </div>
                       </div>
                     </div>
-                  </div>
 
                   <!-- 评分详解 (技能、经验、学历文本解析) -->
                   <div v-if="resumeStore.selectedResume.analysis.skillDetail" class="detail-cards-grid">
@@ -569,6 +611,14 @@
                         <div class="radar-score-caption">注水破绽分 (越低越真实)</div>
                       </div>
                     </div>
+
+                    <!-- 可视化履历时间轴与空窗断层追踪 (Work Timeline) -->
+                    <WorkTimeline
+                      :gaps="resumeStore.selectedResume.analysis?.water_check?.gaps"
+                      :work-years="resumeStore.selectedResume.analysis?.workYears"
+                      :current-role="resumeStore.selectedResume.analysis?.currentRole"
+                      class="water-timeline-embed"
+                    />
 
                     <div class="water-radar-grid">
                       <!-- 1. 职场时间断层侦测 -->
@@ -664,21 +714,7 @@
                       </div>
                     </div>
 
-                    <div class="qa-list-cards">
-                      <div v-for="(item, idx) in resumeStore.selectedResume.analysis.interviewQA" :key="idx" class="qa-card-item">
-                        <div class="qa-card-header">
-                          <span class="qa-badge" :class="getCategoryClass(item.category)">{{ item.category || '技术提问' }}</span>
-                          <span class="qa-tag">Q{{ idx + 1 }}</span>
-                          <span class="qa-question-text">{{ item.question }}</span>
-                        </div>
-                        <div v-if="item.reference_answer" class="qa-card-body">
-                          <div class="qa-answer-title">
-                            <el-icon><InfoFilled /></el-icon> 基于简历事实的参考回答要点：
-                          </div>
-                          <div class="qa-answer-text">{{ item.reference_answer }}</div>
-                        </div>
-                      </div>
-                    </div>
+                    <InterviewAccordionCard :qa-list="resumeStore.selectedResume.analysis.interviewQA" />
                   </div>
 
                   <!-- 面试重点建议 -->
@@ -894,6 +930,10 @@ import AIConfigGuide from '../components/AIConfigGuide.vue'
 import DevPanel from '../components/DevPanel.vue'
 import BossSearchDialog from '../components/BossSearchDialog.vue'
 import AIInterviewDialog from '../components/AIInterviewDialog.vue'
+import SvgDonutRing from '../components/charts/SvgDonutRing.vue'
+import SvgRadarChart from '../components/charts/SvgRadarChart.vue'
+import WorkTimeline from '../components/WorkTimeline.vue'
+import InterviewAccordionCard from '../components/InterviewAccordionCard.vue'
 import { useResumeStore } from '../composables/useResumeStore'
 import { useProjectStore } from '../composables/useProjectStore'
 import { runWith51JobBrowser } from '../composables/51jobBrowserRecovery'
@@ -909,6 +949,39 @@ const projectId = computed(() => (route.params.id as string) || '')
 const projectName = computed(() => projectStore.currentProject?.name || '')
 const rightTab = ref<'detail' | 'ranking' | 'content'>('detail')
 const detailSubTab = ref<'summary' | 'competency' | 'water' | 'interview'>('summary')
+
+// 蜘蛛网雷达图维度与数值提取
+const selectedRadarIndex = ref<number | null>(null)
+function handleSelectRadarIndex(idx: number) {
+  selectedRadarIndex.value = selectedRadarIndex.value === idx ? null : idx
+}
+
+const radarIndicators = computed(() => {
+  const coreChecks = resumeStore.selectedResume?.analysis?.coreCriterionChecks
+  if (coreChecks && coreChecks.length >= 3) {
+    return coreChecks.map(c => ({ name: c.criterion, max: 4 }))
+  }
+  return [
+    { name: '核心技能', max: 100 },
+    { name: '业务经验', max: 100 },
+    { name: '学历资质', max: 100 },
+    { name: '综合胜任力', max: 100 }
+  ]
+})
+
+const radarCandidateValues = computed(() => {
+  const coreChecks = resumeStore.selectedResume?.analysis?.coreCriterionChecks
+  if (coreChecks && coreChecks.length >= 3) {
+    return coreChecks.map(c => c.level ?? 2)
+  }
+  const a = resumeStore.selectedResume?.analysis
+  return [
+    a?.skillMatch ?? 75,
+    a?.experienceMatch ?? 70,
+    a?.educationMatch ?? 80,
+    resumeStore.selectedResume?.score ?? 75
+  ]
+})
 
 // 左右面板拖拽调整宽度 (Splitter Resizer)
 const DEFAULT_LEFT_PANEL_WIDTH = 340
@@ -2688,6 +2761,15 @@ onUnmounted(() => {
       }
     }
 
+    .match-donuts-row {
+      display: flex;
+      align-items: stretch;
+      gap: 12px;
+      width: 100%;
+      margin-bottom: 2px;
+      flex-wrap: wrap;
+    }
+
     .score-section-card {
       padding: 16px;
       background: $bg-primary;
@@ -2713,6 +2795,36 @@ onUnmounted(() => {
         .header-tip {
           font-size: 11.5px;
           color: $text-tertiary;
+        }
+      }
+
+      .competency-split-layout {
+        display: flex;
+        align-items: flex-start;
+        gap: 20px;
+        margin-top: 10px;
+
+        @media (max-width: 960px) {
+          flex-direction: column;
+          align-items: center;
+        }
+
+        .radar-visual-col {
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          justify-content: center;
+          flex-shrink: 0;
+          background: rgba(248, 250, 252, 0.85);
+          padding: 14px 16px;
+          border-radius: 12px;
+          border: 1px solid $separator;
+        }
+
+        .score-breakdown-box {
+          flex: 1;
+          min-width: 0;
+          width: 100%;
         }
       }
 
@@ -2743,6 +2855,23 @@ onUnmounted(() => {
           padding: 8px 12px;
           border-radius: 6px;
           background: $bg-secondary;
+          border: 1px solid transparent;
+
+          &.clickable {
+            cursor: pointer;
+            transition: all 0.2s ease;
+
+            &:hover {
+              background: #f1f5f9;
+              border-color: #cbd5e1;
+            }
+
+            &.highlighted {
+              background: #eff6ff;
+              border-color: #3b82f6;
+              box-shadow: 0 0 0 1px #3b82f6;
+            }
+          }
 
           .criterion-name-col {
             display: flex;
@@ -3662,18 +3791,52 @@ details.candidate-portal-bar[open] > summary.portal-header { margin-bottom: 12px
     .redline-violation-item {
       display: flex;
       align-items: center;
-      gap: 8px;
+      justify-content: space-between;
+      gap: 10px;
       font-size: 12px;
-      font-weight: 600;
-      color: #b91c1c;
+      color: #1e293b;
       background: #fff7f7;
-      padding: 6px 10px;
-      border-radius: 6px;
-      border-left: 3px solid #dc2626;
+      padding: 6px 12px;
+      border-radius: 8px;
+      border: 1px solid #fee2e2;
 
-      .el-icon {
-        color: #dc2626;
-        font-size: 14px;
+      .redline-stamp-badge {
+        font-size: 11px;
+        font-weight: 700;
+        padding: 2px 8px;
+        border-radius: 6px;
+        white-space: nowrap;
+        flex-shrink: 0;
+        border: 1px solid transparent;
+
+        &.met {
+          background: #ecfdf5;
+          color: #047857;
+          border-color: #a7f3d0;
+        }
+        &.violated {
+          background: #fef2f2;
+          color: #b91c1c;
+          border-color: #fca5a5;
+        }
+        &.unknown {
+          background: #fffbeb;
+          color: #b45309;
+          border-color: #fde68a;
+        }
+      }
+
+      .redline-item-desc {
+        flex: 1;
+        min-width: 0;
+        line-height: 1.5;
+        color: #334155;
+      }
+
+      .redline-btn-actions {
+        display: flex;
+        align-items: center;
+        gap: 4px;
         flex-shrink: 0;
       }
     }
@@ -4081,6 +4244,10 @@ details.candidate-portal-bar[open] > summary.portal-header { margin-bottom: 12px
   &.risk-high {
     border-color: #fecaca;
     background: linear-gradient(180deg, #fef2f2 0%, #ffffff 50px);
+  }
+
+  .water-timeline-embed {
+    margin: 12px 0 14px;
   }
 
   .water-radar-header {
