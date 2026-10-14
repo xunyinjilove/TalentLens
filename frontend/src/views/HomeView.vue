@@ -118,9 +118,10 @@
 
           <div class="resume-list">
             <ResumeCard
-              v-for="resume in sortedResumes"
+              v-for="(resume, index) in sortedResumes"
               :key="resume.id"
               :resume="resume"
+              :sequence="index + 1"
               :selected="resumeStore.selectedId === resume.id"
               @click="resumeStore.selectResume(resume.id)"
               @re-analyze="handleReAnalyze"
@@ -2337,7 +2338,7 @@ onUnmounted(() => {
   flex: 1;
   overflow-y: auto;
   padding: 10px;
-  background: $bg-secondary;
+  background: var(--bg-app);
 
   &::-webkit-scrollbar { width: 6px; }
   &::-webkit-scrollbar-track { background: transparent; }

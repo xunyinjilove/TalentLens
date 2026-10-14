@@ -14,7 +14,7 @@ permissions:
   contents: write
 
 env:
-  GO_VERSION: '1.24'
+  GO_VERSION: '1.25'
   NODE_VERSION: '18'
   APP_NAME: 'TalentLens'
   # workflow_dispatch 用 inputs.tag，tag push 用 github.ref_name
@@ -48,7 +48,7 @@ jobs:
           cache-dependency-path: frontend/package-lock.json
 
       - name: Install Wails CLI
-        run: go install github.com/wailsapp/wails/v2/cmd/wails@latest
+        run: go install github.com/wailsapp/wails/v2/cmd/wails@v2.15.0
 
       - name: Install frontend dependencies
         working-directory: frontend
@@ -66,10 +66,12 @@ jobs:
           $version = "${{ env.RELEASE_TAG }}" -replace '^v', ''
           $artifact = "${{ env.APP_NAME }}-$version-windows-${{ matrix.arch }}.zip"
           $stage = "build/bin/package-${{ matrix.arch }}"
-          New-Item -ItemType Directory -Force "$stage/scripts" | Out-Null
+          New-Item -ItemType Directory -Force "$stage" | Out-Null
           Copy-Item "build/bin/${{ env.APP_NAME }}.exe" "$stage/${{ env.APP_NAME }}.exe"
-          Copy-Item "scripts/multi_platform_agent.js", "scripts/51job_job_publisher.js", "scripts/boss_agent.js", "scripts/51job_conversation.js", "scripts/show_candidate_window.js", "scripts/51job_functions.json", "scripts/51job_majors.json" "$stage/scripts/"
+          Copy-Item "build/bin/scripts" "$stage/scripts" -Recurse
           Copy-Item "node_modules" "$stage/node_modules" -Recurse
+          if (!(Test-Path "$stage/scripts/51job_application_import.js")) { throw "51job 投递导入脚本未打包" }
+          if (!(Test-Path "$stage/node_modules/puppeteer-core")) { throw "浏览器驱动依赖未打包" }
           Compress-Archive -Path "$stage/*" -DestinationPath "build/bin/$artifact"
           echo "ARTIFACT=$artifact" >> $env:GITHUB_ENV
 

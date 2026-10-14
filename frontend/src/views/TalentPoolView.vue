@@ -189,12 +189,12 @@
         <!-- 候选人看板网格 -->
         <div v-if="filtered.length" class="wb-candidate-grid">
           <article
-            v-for="item in filtered"
+            v-for="(item, index) in filtered"
             :key="item.projectCandidateId"
             class="wb-card wb-candidate talent-card"
           >
             <div class="wb-candidate-top">
-              <span class="wb-avatar">{{ item.name.slice(0, 1) }}</span>
+              <span class="wb-avatar candidate-sequence" :title="`当前列表第 ${index + 1} 位`">{{ index + 1 }}</span>
               <div class="candidate-headline">
                 <div class="wb-candidate-name">{{ item.name }}</div>
                 <div class="wb-candidate-role">
@@ -1012,6 +1012,13 @@ onMounted(() => {
 
 .talent-card {
   transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+
+.candidate-sequence {
+  font-variant-numeric: tabular-nums;
+  font-size: 15px;
+  border: 1px solid var(--wb-border);
+  background: var(--wb-brand-soft);
 }
 
 .talent-card:hover {

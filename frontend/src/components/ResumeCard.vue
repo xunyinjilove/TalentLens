@@ -11,23 +11,26 @@
       }"
       @click="$emit('click')"
     >
-      <!-- 分析中的发光效果 -->
-      <div v-if="resume.status === 'analyzing'" class="analyzing-glow"></div>
-
       <div class="card-header">
-        <el-icon class="file-icon"><Document /></el-icon>
-        <span class="file-name">{{ resume.fileName }}</span>
+        <span class="sequence-badge" :aria-label="`列表第 ${sequence} 位`">{{ sequence }}</span>
+        <div class="card-heading">
+          <span class="file-name" :title="resume.fileName">{{ resume.fileName }}</span>
+          <span class="file-meta">{{ sourceText }} · {{ fileTypeText }} · {{ statusText }}</span>
+        </div>
+      </div>
+
+      <div v-if="showTags" class="card-tags">
         <span v-if="(resume as any).is_merged_analysis || (resume as any).has_attachment" class="merged-badge" title="已完成微简历与完整附件结合终审">
-          ⭐ 终审
+          已合并终审
         </span>
-        <span v-if="resume.analysis?.redLineViolations && resume.analysis.redLineViolations.length > 0" class="redline-pill" title="触碰用人部门一票否决红线，已直接淘汰">
-          🚫 触碰红线
+        <span v-if="resume.analysis?.redLineViolations && resume.analysis.redLineViolations.length > 0" class="redline-pill" title="AI 发现红线线索，请由 HR 核实">
+          红线线索待核实
         </span>
         <span v-else-if="resume.analysis?.redLineStatus === 'pending'" class="redline-pill" title="红线材料不足，需人工核实">
-          ❓ 红线待核实
+          红线待核实
         </span>
         <span v-else-if="resume.analysis?.bonusMatches && resume.analysis.bonusMatches.length > 0" class="bonus-pill" title="命中用人部门优先加分项">
-          ⭐ 加分达成
+          加分达成
         </span>
         <span v-if="(resume as any).source_keyword" class="source-kw-badge" :title="'派生检索词: ' + (resume as any).source_keyword">
           {{ (resume as any).source_keyword }}
@@ -40,9 +43,10 @@
           <div class="score-badge" :class="scoreClass">
             <span class="score-number">{{ displayScore }}</span>
           </div>
-          <span class="recommendation" :class="recommendationClass">
-            {{ recommendationText }}
-          </span>
+          <div class="result-copy">
+            <span class="result-caption">能力评估</span>
+            <span class="recommendation" :class="recommendationClass">{{ recommendationText }}</span>
+          </div>
         </div>
 
         <!-- 分析中状态 - 带实时进度条 -->
@@ -70,7 +74,7 @@
       </div>
 
       <div class="card-footer">
-        <span class="file-type">{{ fileTypeText }}</span>
+        <span class="footer-hint">点击查看评测详情</span>
         <div class="card-actions">
           <button
             v-if="resume.status === 'done' || resume.status === 'error'"
@@ -96,7 +100,6 @@
 import { computed, ref, watch, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import {
-  Document,
   Loading,
   CircleClose,
   Clock,
@@ -108,6 +111,7 @@ const { t } = useI18n()
 
 const props = defineProps<{
   resume: Resume
+  sequence: number
   selected?: boolean
 }>()
 
@@ -172,6 +176,34 @@ const fileTypeText = computed(() => {
   if (ext === '.txt') return '微简历 / TXT'
   return t('file.unknown')
 })
+
+const statusText = computed(() => {
+  if (props.resume.status === 'done') return '已完成'
+  if (props.resume.status === 'analyzing') return '分析中'
+  if (props.resume.status === 'error') return '失败'
+  return '待分析'
+})
+
+const sourceText = computed(() => {
+  const match = props.resume.fileName.match(/^【([^】]+)】/)
+  if (match) return match[1]
+  try {
+    const host = new URL(props.resume.url || '').hostname
+    if (host.endsWith('51job.com')) return '前程无忧'
+    if (host.endsWith('zhipin.com')) return 'BOSS直聘'
+    if (host.endsWith('zhaopin.com')) return '智联招聘'
+    if (host.endsWith('liepin.com')) return '猎聘'
+  } catch {}
+  return '本地导入'
+})
+
+const showTags = computed(() => Boolean(
+  props.resume.is_merged_analysis || props.resume.has_attachment ||
+  props.resume.analysis?.redLineViolations?.length ||
+  props.resume.analysis?.redLineStatus === 'pending' ||
+  props.resume.analysis?.bonusMatches?.length ||
+  props.resume.source_keyword
+))
 
 // 分数等级
 const scoreClass = computed(() => {
@@ -726,6 +758,165 @@ $radius-md: 10px;
     opacity: 1;
     transform: translateX(0);
   }
+}
+
+// 紧凑评测卡片：用主题变量保持浅色、深色模式一致。
+.resume-card {
+  padding: 14px;
+  margin-bottom: 9px;
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-left: 3px solid var(--text-muted);
+  border-radius: 12px;
+  box-shadow: var(--shadow-xs);
+  color: var(--text-primary);
+
+  &:hover {
+    background: var(--bg-card);
+    border-color: var(--accent-blue-subtle);
+    box-shadow: var(--shadow-card-hover);
+    transform: translateY(-1px);
+  }
+
+  &.is-selected {
+    background: var(--bg-card);
+    border-color: var(--accent-blue);
+    box-shadow: 0 0 0 2px var(--accent-blue-subtle);
+  }
+
+  &.is-done { border-left-color: var(--color-success); }
+  &.is-analyzing { border-left-color: var(--color-info); }
+  &.is-error { border-left-color: var(--color-danger); }
+  &.is-done::before, &.is-analyzing::after { display: none; }
+
+  .card-header {
+    display: flex;
+    align-items: center;
+    gap: 11px;
+    margin-bottom: 8px;
+  }
+
+  .sequence-badge {
+    width: 34px;
+    height: 34px;
+    flex: 0 0 34px;
+    display: grid;
+    place-items: center;
+    border-radius: 9px;
+    background: var(--accent-blue-light);
+    color: var(--accent-blue);
+    font-size: 14px;
+    font-weight: 750;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .card-heading {
+    display: flex;
+    flex: 1;
+    min-width: 0;
+    flex-direction: column;
+    gap: 3px;
+  }
+
+  .card-header .file-name {
+    display: block;
+    width: 100%;
+    color: var(--text-primary);
+    font-size: 13px;
+    font-weight: 700;
+    line-height: 1.35;
+  }
+
+  .file-meta {
+    color: var(--text-muted);
+    font-size: 11px;
+    line-height: 1.25;
+  }
+
+  .card-tags {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 5px;
+    margin: 0 0 10px 45px;
+  }
+
+  .card-tags:empty { display: none; }
+
+  .card-tags > span {
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    border-radius: 5px;
+    padding: 2px 6px;
+    font-size: 10px;
+    font-weight: 650;
+  }
+
+  .card-tags .redline-pill { color: var(--color-danger); background: var(--color-danger-bg); border: 0; }
+  .card-tags .bonus-pill { color: var(--color-warning); background: var(--color-warning-bg); border: 0; }
+  .card-tags .merged-badge { color: var(--color-success); background: var(--color-success-bg); border: 0; }
+  .card-tags .source-kw-badge { color: var(--accent-blue); background: var(--accent-blue-light); border: 0; max-width: 125px; }
+
+  .card-body {
+    margin-bottom: 10px;
+  }
+
+  .card-body .result { gap: 10px; }
+
+  .card-body .result .score-badge {
+    width: 43px;
+    height: 43px;
+    border-radius: 9px;
+    box-shadow: none;
+  }
+
+  .card-body .result .score-badge::after { display: none; }
+
+  .result-copy {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 3px;
+  }
+
+  .result-caption { color: var(--text-muted); font-size: 10px; }
+
+  .card-body .result .recommendation {
+    padding: 0;
+    background: transparent;
+    font-size: 12px;
+  }
+
+  .card-body .result .recommendation.positive { color: var(--color-success); }
+  .card-body .result .recommendation.neutral { color: var(--color-warning); }
+  .card-body .result .recommendation.negative { color: var(--color-danger); }
+
+  .card-body .analyzing, .card-body .error, .card-body .pending {
+    padding: 8px 10px;
+    border-radius: 7px;
+    font-size: 12px;
+  }
+
+  .card-body .analyzing { background: var(--accent-blue-light); border-color: var(--accent-blue-subtle); }
+  .card-body .error { background: var(--color-danger-bg); color: var(--color-danger); }
+  .card-body .pending { background: var(--bg-card-secondary); color: var(--text-secondary); }
+
+  .card-footer {
+    padding-top: 9px;
+    border-top-color: var(--border-color-light);
+  }
+
+  .footer-hint { color: var(--text-muted); font-size: 11px; }
+
+  .card-footer .card-actions .reanalyze-btn {
+    color: var(--accent-blue);
+    background: var(--accent-blue-light);
+    border-color: var(--accent-blue-subtle);
+  }
+
+  .card-footer .card-actions .delete-btn { color: var(--color-danger); }
+  .card-footer .card-actions .delete-btn:hover { background: var(--color-danger-bg); }
 }
 
 @keyframes shake {
