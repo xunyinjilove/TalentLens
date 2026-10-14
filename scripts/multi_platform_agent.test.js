@@ -369,12 +369,32 @@ test('pagination only advances when candidate page actually changes', async () =
     body: {}
   };
   const page = { frames: () => [page], evaluate: async fn => fn(), mouse: { wheel: async () => {} } };
-  assert.equal(await agent.advanceSearchResults(page), true);
+  assert.equal(await agent.advanceSearchResults(page, { waitStepMs: 1 }), true);
   canAdvance = false;
-  assert.equal(await agent.advanceSearchResults(page), false);
+  assert.equal(await agent.advanceSearchResults(page, { waitStepMs: 1 }), false);
   delete global.location;
   delete global.window;
   delete global.document;
+});
+
+test('pagination waits for a slow platform render before declaring the results exhausted', async () => {
+  let fingerprints = 0;
+  let clicked = false;
+  const page = {
+    frames: () => [page],
+    evaluate: async fn => {
+      if (String(fn).includes('button.btn-next')) {
+        clicked = true;
+        return true;
+      }
+      if (!String(fn).includes('cardSelector')) return undefined;
+      fingerprints++;
+      return fingerprints >= 7 ? 'new results' : 'old results';
+    },
+    mouse: { wheel: async () => {} }
+  };
+  assert.equal(await agent.advanceSearchResults(page, { waitStepMs: 1 }), true);
+  assert.equal(clicked, true);
 });
 
 test('virtual list scroll counts as progress until its real bottom', async () => {
@@ -403,9 +423,9 @@ test('virtual list scroll counts as progress until its real bottom', async () =>
     frames: () => [page], evaluate: async (fn, ...args) => fn(...args),
     mouse: { wheel: async () => { throw Error('mouse wheel must not be used'); } }
   };
-  assert.equal(await agent.advanceSearchResults(page), true);
+  assert.equal(await agent.advanceSearchResults(page, { waitStepMs: 1 }), true);
   scroller.scrollTop = 1500;
-  assert.equal(await agent.advanceSearchResults(page), false);
+  assert.equal(await agent.advanceSearchResults(page, { waitStepMs: 1 }), false);
   delete global.location;
   delete global.document;
 });

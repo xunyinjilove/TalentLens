@@ -2306,6 +2306,7 @@ func (a *App) startQuotaMatrixSearch(projectID string, keyword string, city stri
 		persistFailures := 0
 		persistedCount := 0
 		deduplicatedCount := 0
+		lastEngineError := ""
 		var pendingDone map[string]interface{}
 		scanner := bufio.NewScanner(stdout)
 		// 扩容缓冲区上限至 4MB，防止全量大简历 JSON 超出默认 64KB 限制导致静默截断
@@ -2399,6 +2400,9 @@ func (a *App) startQuotaMatrixSearch(projectID string, keyword string, city stri
 			case "done":
 				pendingDone = evt
 			case "error":
+				if message, ok := evt["message"].(string); ok && strings.TrimSpace(message) != "" {
+					lastEngineError = strings.TrimSpace(message)
+				}
 				runtime.EventsEmit(a.ctx, "boss:error", evt)
 				runtime.EventsEmit(a.ctx, "platform:error", evt)
 			}
@@ -2429,25 +2433,20 @@ func (a *App) startQuotaMatrixSearch(projectID string, keyword string, city stri
 				"type": "error", "message": fmt.Sprintf("搜索结束，但 %d 份候选人档案未能保存；请检查存储空间后重试", persistFailures),
 			})
 		} else if pendingDone != nil {
-			if reportedTotal, ok := pendingDone["total"].(float64); !ok || int(reportedTotal) != persistedCount+deduplicatedCount {
-				a.setSourcingTaskStatus(taskID, "partial", "平台结果与本地保存数量不一致")
+			if !a.finishSourcingTaskFromDone(taskID, pendingDone, persistedCount, deduplicatedCount, count) {
 				runtime.EventsEmit(a.ctx, "platform:error", map[string]interface{}{
 					"type": "error", "message": fmt.Sprintf("搜索结果与已保存简历数量不一致（已保存 %d 人），请检查本地数据", persistedCount),
 				})
 			} else {
-				stopped, _ := pendingDone["stopped"].(bool)
-				if stopped {
-					a.setSourcingTaskStatus(taskID, "stopped", "已停止，已抓取结果保留")
-				} else if persistedCount < count {
-					a.setSourcingTaskStatus(taskID, "partial", "检索结束，目标人数未达成")
-				} else {
-					a.setSourcingTaskStatus(taskID, "completed", "检索已完成，分析可能仍在进行")
-				}
 				runtime.EventsEmit(a.ctx, "boss:done", pendingDone)
 				runtime.EventsEmit(a.ctx, "platform:done", pendingDone)
 			}
 		} else {
-			a.setSourcingTaskStatus(taskID, "failed", "搜索任务未返回完成结果")
+			failureMessage := lastEngineError
+			if failureMessage == "" {
+				failureMessage = "搜索任务未返回完成结果"
+			}
+			a.setSourcingTaskStatus(taskID, "failed", failureMessage)
 			runtime.EventsEmit(a.ctx, "platform:error", map[string]interface{}{
 				"type": "error", "message": "搜索任务已结束，但未返回完成结果；请查看前面的平台提示后重新检索",
 			})

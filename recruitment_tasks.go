@@ -85,7 +85,7 @@ func (a *App) ListSourcingTasks(projectID string) ([]SourcingTask, error) {
 	rows, err := db.Query(`SELECT t.id,t.project_id,p.name,t.config_json,t.status,t.target_count,
 		t.captured_count,t.analyzed_count,t.failed_count,t.current_platform,t.message,t.created_at,t.updated_at
 		FROM search_tasks t JOIN projects p ON p.id=t.project_id
-		WHERE (?='' OR t.project_id=?) ORDER BY t.created_at DESC,t.id DESC LIMIT 100`, projectID, projectID)
+		WHERE (?='' OR t.project_id=?) ORDER BY t.created_at DESC,t.id DESC`, projectID, projectID)
 	if err != nil {
 		return nil, err
 	}
@@ -105,6 +105,74 @@ func (a *App) ListSourcingTasks(projectID string) ([]SourcingTask, error) {
 		out = append(out, item)
 	}
 	return out, rows.Err()
+}
+
+// DeleteSourcingTask removes only the progress/history row. Candidates and AI
+// analysis jobs remain in their own tables.
+func (a *App) DeleteSourcingTask(taskID string) (bool, error) {
+	db, err := a.getRecruitmentDB()
+	if err != nil {
+		return false, err
+	}
+	result, err := db.Exec(`DELETE FROM search_tasks WHERE id=? AND status IN ('completed','partial','failed','stopped','interrupted')`, taskID)
+	if err != nil {
+		return false, err
+	}
+	deleted, err := result.RowsAffected()
+	if err != nil {
+		return false, err
+	}
+	if deleted > 0 {
+		return true, nil
+	}
+	var status string
+	if err := db.QueryRow(`SELECT status FROM search_tasks WHERE id=?`, taskID).Scan(&status); err != nil {
+		if err == sql.ErrNoRows {
+			return false, fmt.Errorf("寻才任务不存在")
+		}
+		return false, err
+	}
+	return false, fmt.Errorf("任务仍在运行（%s），请先停止并等待结果保存", status)
+}
+
+// ClearFinishedSourcingTasks clears the entire finished history.
+func (a *App) ClearFinishedSourcingTasks() (int64, error) {
+	db, err := a.getRecruitmentDB()
+	if err != nil {
+		return 0, err
+	}
+	result, err := db.Exec(`DELETE FROM search_tasks WHERE status IN ('completed','partial','failed','stopped','interrupted')`)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
+// finishSourcingTaskFromDone is the persistence boundary for a normal engine
+// completion. The engine's shortfall reason must survive the final status write.
+func (a *App) finishSourcingTaskFromDone(taskID string, done map[string]interface{}, persistedCount, deduplicatedCount, targetCount int) bool {
+	reportedTotal, ok := done["total"].(float64)
+	if !ok || int(reportedTotal) != persistedCount+deduplicatedCount {
+		a.setSourcingTaskStatus(taskID, "partial", "平台结果与本地保存数量不一致")
+		return false
+	}
+	if stopped, _ := done["stopped"].(bool); stopped {
+		a.setSourcingTaskStatus(taskID, "stopped", "已停止，已抓取结果保留")
+	} else if persistedCount < targetCount {
+		reason, _ := done["shortfallReason"].(string)
+		reason = strings.TrimSpace(reason)
+		if reason == "" {
+			reason = "当前筛选条件下没有足够的新候选人"
+		}
+		message := "未达目标：" + reason
+		if len([]rune(message)) > 400 {
+			message = string([]rune(message)[:400])
+		}
+		a.setSourcingTaskStatus(taskID, "partial", message)
+	} else {
+		a.setSourcingTaskStatus(taskID, "completed", "检索已完成，分析可能仍在进行")
+	}
+	return true
 }
 
 func (a *App) emitSourcingTask(id string) {
