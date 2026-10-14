@@ -9,6 +9,7 @@ import (
 func TestClearProjectResumesKeepsOtherProjectsAndOriginalFiles(t *testing.T) {
 	a := NewApp()
 	a.dataDirOverride = t.TempDir()
+	defer a.closeRecruitmentDB()
 	first := a.CreateProject("项目 A", "", 1, "", "", &JobConfig{})
 	second := a.CreateProject("项目 B", "", 1, "", "", &JobConfig{})
 	original := filepath.Join(a.getDataDir(), "candidate.pdf")
@@ -53,6 +54,7 @@ func TestClearProjectResumesKeepsOtherProjectsAndOriginalFiles(t *testing.T) {
 func TestClearProjectResumesRejectsActiveAnalysis(t *testing.T) {
 	a := NewApp()
 	a.dataDirOverride = t.TempDir()
+	defer a.closeRecruitmentDB()
 	p := a.CreateProject("分析中", "", 1, "", "", &JobConfig{})
 	a.saveResume(&Resume{ID: "resume_1", ProjectID: p.ID, Status: "analyzing"})
 	p.ResumeIDs = []string{"resume_1"}

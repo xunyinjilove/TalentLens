@@ -735,7 +735,7 @@ onMounted(async () => {
   border: none;
   border-radius: var(--radius-sm, 6px);
   background: transparent;
-  color: #FFFFFF;
+  color: var(--sidebar-text, #334155);
   font-size: 13px;
   font-weight: 500;
   cursor: pointer;
@@ -745,41 +745,41 @@ onMounted(async () => {
   position: relative;
 
   .nav-label {
-    color: #FFFFFF;
+    color: var(--sidebar-text, #334155);
     font-weight: 500;
   }
 
   .nav-icon {
     font-size: 16px;
-    color: #CBD5E1;
+    color: var(--sidebar-text-muted, #64748b);
     transition: color var(--transition-fast, 0.15s ease);
   }
 
   &:hover {
-    background: var(--sidebar-bg-hover, rgba(255, 255, 255, 0.08));
-    color: #FFFFFF;
+    background: var(--sidebar-bg-hover, #eef2ff);
+    color: var(--wb-brand, #4338ca);
 
     .nav-label {
-      color: #FFFFFF;
+      color: var(--wb-brand, #4338ca);
     }
 
     .nav-icon {
-      color: #FFFFFF;
+      color: var(--wb-brand, #4f46e5);
     }
   }
 
   &.active {
-    background: var(--sidebar-bg-active, rgba(37, 99, 235, 0.25));
-    color: #FFFFFF;
+    background: var(--sidebar-bg-active, #eef2ff);
+    color: var(--wb-brand, #4338ca);
     font-weight: 600;
 
     .nav-label {
-      color: #FFFFFF;
+      color: var(--wb-brand, #4338ca);
       font-weight: 600;
     }
 
     .nav-icon {
-      color: #60A5FA;
+      color: var(--wb-brand, #4f46e5);
     }
 
     &::before {
@@ -789,7 +789,7 @@ onMounted(async () => {
       top: 6px;
       bottom: 6px;
       width: 3px;
-      background: var(--accent-blue, #3B82F6);
+      background: var(--accent-blue, #4f46e5);
       border-radius: 0 3px 3px 0;
     }
   }

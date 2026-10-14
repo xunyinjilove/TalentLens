@@ -324,6 +324,39 @@ func (a *App) deleteRecruitmentProject(projectID string) error {
 	return tx.Commit()
 }
 
+func (a *App) clearRecruitmentProjectResumes(projectID string) error {
+	db, err := a.getRecruitmentDB()
+	if err != nil || projectID == "" {
+		return err
+	}
+	tx, err := db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	queries := []string{
+		`DELETE FROM interviews WHERE project_candidate_id IN (SELECT id FROM project_candidates WHERE project_id = ?)`,
+		`DELETE FROM follow_up_events WHERE project_candidate_id IN (SELECT id FROM project_candidates WHERE project_id = ?)`,
+		`DELETE FROM outreach_items WHERE project_candidate_id IN (SELECT id FROM project_candidates WHERE project_id = ?)`,
+		`DELETE FROM outreach_items WHERE batch_id IN (SELECT id FROM outreach_batches WHERE project_id = ?)`,
+		`DELETE FROM outreach_batches WHERE project_id = ?`,
+		`DELETE FROM analysis_jobs WHERE project_candidate_id IN (SELECT id FROM project_candidates WHERE project_id = ?)`,
+		`DELETE FROM evaluations WHERE project_candidate_id IN (SELECT id FROM project_candidates WHERE project_id = ?)`,
+		`DELETE FROM project_candidate_resumes WHERE project_candidate_id IN (SELECT id FROM project_candidates WHERE project_id = ?)`,
+		`DELETE FROM resume_versions WHERE candidate_id IN (SELECT candidate_id FROM project_candidates WHERE project_id = ?)`,
+		`DELETE FROM project_candidates WHERE project_id = ?`,
+		`UPDATE applications SET project_id = NULL WHERE project_id = ?`,
+	}
+	for _, q := range queries {
+		if _, err := tx.Exec(q, projectID); err != nil {
+			fmt.Fprintf(os.Stderr, "[RecruitmentStore] clear project resumes query failed (%s): %v\n", q, err)
+			return err
+		}
+	}
+	return tx.Commit()
+}
+
 func (a *App) deleteRecruitmentResume(resumeID string) error {
 	db, err := a.getRecruitmentDB()
 	if err != nil || resumeID == "" {

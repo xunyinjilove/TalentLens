@@ -882,7 +882,7 @@ func (a *App) ClearProjectResumes(projectID string) error {
 	var ownedPaths []string
 	for _, id := range p.ResumeIDs {
 		if id == "" || id == "." || id == ".." || strings.ContainsAny(id, `/\`) || filepath.Base(id) != id {
-			return fmt.Errorf("简历 ID 无效")
+			continue
 		}
 		if a.activeAnalyses[id] {
 			return fmt.Errorf("当前项目正在分析，完成后才能清空")
@@ -893,14 +893,13 @@ func (a *App) ClearProjectResumes(projectID string) error {
 			continue
 		}
 		if err != nil {
-			return err
+			continue
 		}
 		var resume Resume
-		if err := json.Unmarshal(data, &resume); err != nil {
-			return fmt.Errorf("读取简历 %s 失败: %w", id, err)
-		}
-		if resume.ProjectID == projectID {
-			ownedPaths = append(ownedPaths, path)
+		if err := json.Unmarshal(data, &resume); err == nil {
+			if resume.ProjectID == projectID {
+				ownedPaths = append(ownedPaths, path)
+			}
 		}
 	}
 
@@ -915,10 +914,16 @@ func (a *App) ClearProjectResumes(projectID string) error {
 		return err
 	}
 	for _, path := range ownedPaths {
-		if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
-			return err
-		}
+		_ = os.Remove(path)
 	}
+
+	// 事务级级联清理 SQLite 数据库中该项目的候选人与评估流转记录
+	_ = a.clearRecruitmentProjectResumes(projectID)
+	if a.ctx != nil {
+		runtime.EventsEmit(a.ctx, "resume:updated", map[string]interface{}{"projectId": projectID})
+		runtime.EventsEmit(a.ctx, "project:updated", p)
+	}
+
 	return nil
 }
 
@@ -1163,6 +1168,9 @@ func (a *App) GetProjectResumes(projectID string) []*Resume {
 		}
 		var r Resume
 		if json.Unmarshal(data, &r) == nil {
+			if r.Status == "analyzing" && (a.activeAnalyses == nil || !a.activeAnalyses[r.ID]) {
+				r.Status = "pending"
+			}
 			a.prepareResumeDecision(&r, &p.JobConfig)
 			resumes = append(resumes, &r)
 		}
