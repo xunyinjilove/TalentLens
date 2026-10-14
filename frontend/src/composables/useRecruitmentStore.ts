@@ -82,6 +82,7 @@ export const useRecruitmentStore = defineStore('recruitment', () => {
   const candidates = ref<TalentCandidate[]>([])
   const interviews = ref<RecruitmentInterview[]>([])
   const sourcingTasks = ref<SourcingTask[]>([])
+  const dismissedSourcingTaskIds = new Set<string>()
   const dashboard = ref<RecruitmentDashboard>(emptyDashboard())
   const loading = ref(false)
   const error = ref('')
@@ -122,7 +123,7 @@ export const useRecruitmentStore = defineStore('recruitment', () => {
   async function loadSourcingTasks() {
     try {
       const api: any = await recruitmentAPI()
-      sourcingTasks.value = await api.ListSourcingTasks('') || []
+      sourcingTasks.value = (await api.ListSourcingTasks('') || []).filter((task: SourcingTask) => !dismissedSourcingTaskIds.has(task.id))
     } catch (err: any) {
       error.value = err?.message || String(err)
     }
@@ -137,6 +138,23 @@ export const useRecruitmentStore = defineStore('recruitment', () => {
   async function stopSourcingTask() {
     const api: any = await recruitmentAPI()
     await api.StopBossSearch()
+  }
+
+  async function deleteSourcingTask(id: string) {
+    const api: any = await recruitmentAPI()
+    await api.DeleteSourcingTask(id)
+    dismissedSourcingTaskIds.add(id)
+    sourcingTasks.value = sourcingTasks.value.filter(task => task.id !== id)
+  }
+
+  async function clearFinishedSourcingTasks() {
+    const api: any = await recruitmentAPI()
+    const removed: number = await api.ClearFinishedSourcingTasks()
+    for (const task of sourcingTasks.value) {
+      if (!['queued', 'running'].includes(task.status)) dismissedSourcingTaskIds.add(task.id)
+    }
+    await loadSourcingTasks()
+    return removed
   }
 
   async function updateFollowUp(item: TalentCandidate, stage: string, owner: string, nextActionAt: string, note: string) {
@@ -179,6 +197,7 @@ export const useRecruitmentStore = defineStore('recruitment', () => {
         runtime.EventsOn(event, schedule)
       }
       runtime.EventsOn('sourcing:updated', (task: SourcingTask) => {
+        if (dismissedSourcingTaskIds.has(task.id)) return
         const index = sourcingTasks.value.findIndex(item => item.id === task.id)
         const priorStatus = index >= 0 ? sourcingTasks.value[index].status : ''
         if (index < 0) sourcingTasks.value.unshift(task)
@@ -195,5 +214,6 @@ export const useRecruitmentStore = defineStore('recruitment', () => {
 
   return { candidates, interviews, dashboard, sourcingTasks, loading, error, loadCandidates,
     loadDashboard, loadInterviews, loadSourcingTasks, resumeSourcingTask, stopSourcingTask,
+    deleteSourcingTask, clearFinishedSourcingTasks,
     updateFollowUp, saveInterview, cancelInterview, moveCandidate, initEvents }
 })

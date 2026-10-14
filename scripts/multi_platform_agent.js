@@ -841,8 +841,10 @@ async function scrollSearchResults(page) {
   await smoothScroll(page, 600, 100).catch(() => {});
 }
 
-async function advanceSearchResults(page) {
+async function advanceSearchResults(page, options = {}) {
   const before = await searchPageFingerprint(page);
+  const waitStepMs = Math.max(0, Number(options.waitStepMs ?? 600));
+  const maxChecks = Math.max(1, Number(options.maxChecks ?? 10));
   const clickedNext = await page.evaluate(() => {
     const selectors = 'button.btn-next, .btn-next, .next-page, a.next, .el-pagination .btn-next, li.number.active + li.number';
     const buttons = Array.from(document.querySelectorAll(selectors));
@@ -855,8 +857,8 @@ async function advanceSearchResults(page) {
     return true;
   }).catch(() => false);
   if (!clickedNext) await scrollSearchResults(page);
-  for (let attempt = 0; attempt < 4; attempt++) {
-    await new Promise(resolve => setTimeout(resolve, 600));
+  for (let attempt = 0; attempt < maxChecks; attempt++) {
+    await new Promise(resolve => setTimeout(resolve, waitStepMs));
     const after = await searchPageFingerprint(page);
     if (after && after !== before) return true;
   }
@@ -1686,8 +1688,6 @@ async function autoNavigateAndSearch(page, platformKey, cfg, searchKeyword) {
             }
           }
         }
-        if (pollAttempts >= 3) break;
-
         // 周期性提醒用户后台正在持续守候
         if (pollAttempts % 5 === 0) {
           sendMsg('status', {
@@ -1859,7 +1859,7 @@ ${cleanedRawText}
   const stopReason = stopRequested() ? 'HR 已停止检索'
     : allPlatformSavedList.length >= targetCount ? ''
     : exhaustedKeywords.size > 0 ? '列表与滚动位置均未变化，可能已到结果末尾'
-    : batchIdx >= maxBatches ? `已达到本次安全批次数上限（连续 ${emptyBatches} 批无新增）`
+    : batchIdx >= maxBatches ? `已达到本次 ${maxBatches} 批检索上限（最后连续 ${emptyBatches} 批无新增）`
     : '当前筛选条件下没有更多可确认的新候选人';
   sendMsg('status', {
     platform: platformKey,
