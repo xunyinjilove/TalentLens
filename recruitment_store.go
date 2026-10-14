@@ -288,6 +288,72 @@ func (a *App) syncRecruitmentProject(project *Project) {
 	}
 }
 
+func (a *App) deleteRecruitmentProject(projectID string) error {
+	db, err := a.getRecruitmentDB()
+	if err != nil || projectID == "" {
+		return err
+	}
+	tx, err := db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	queries := []string{
+		`DELETE FROM interviews WHERE project_candidate_id IN (SELECT id FROM project_candidates WHERE project_id = ?)`,
+		`DELETE FROM follow_up_events WHERE project_candidate_id IN (SELECT id FROM project_candidates WHERE project_id = ?)`,
+		`DELETE FROM outreach_items WHERE project_candidate_id IN (SELECT id FROM project_candidates WHERE project_id = ?)`,
+		`DELETE FROM outreach_items WHERE batch_id IN (SELECT id FROM outreach_batches WHERE project_id = ?)`,
+		`DELETE FROM outreach_batches WHERE project_id = ?`,
+		`DELETE FROM analysis_jobs WHERE project_candidate_id IN (SELECT id FROM project_candidates WHERE project_id = ?)`,
+		`DELETE FROM evaluations WHERE project_candidate_id IN (SELECT id FROM project_candidates WHERE project_id = ?)`,
+		`DELETE FROM project_candidate_resumes WHERE project_candidate_id IN (SELECT id FROM project_candidates WHERE project_id = ?)`,
+		`DELETE FROM project_candidates WHERE project_id = ?`,
+		`DELETE FROM search_tasks WHERE project_id = ?`,
+		`DELETE FROM job_rules WHERE project_id = ?`,
+		`DELETE FROM platform_job_mappings WHERE project_id = ?`,
+		`UPDATE applications SET project_id = NULL WHERE project_id = ?`,
+		`DELETE FROM projects WHERE id = ?`,
+	}
+	for _, q := range queries {
+		if _, err := tx.Exec(q, projectID); err != nil {
+			fmt.Fprintf(os.Stderr, "[RecruitmentStore] delete project query failed (%s): %v\n", q, err)
+			return err
+		}
+	}
+	return tx.Commit()
+}
+
+func (a *App) deleteRecruitmentResume(resumeID string) error {
+	db, err := a.getRecruitmentDB()
+	if err != nil || resumeID == "" {
+		return err
+	}
+	tx, err := db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	versionID := "legacy_resume_" + resumeID
+	execs := []struct {
+		query string
+		args  []any
+	}{
+		{`DELETE FROM evaluations WHERE resume_version_id = ? OR resume_version_id IN (SELECT id FROM resume_versions WHERE legacy_resume_id = ?)`, []any{versionID, resumeID}},
+		{`DELETE FROM analysis_jobs WHERE resume_version_id = ? OR resume_version_id IN (SELECT id FROM resume_versions WHERE legacy_resume_id = ?)`, []any{versionID, resumeID}},
+		{`DELETE FROM project_candidate_resumes WHERE resume_version_id = ? OR resume_version_id IN (SELECT id FROM resume_versions WHERE legacy_resume_id = ?)`, []any{versionID, resumeID}},
+		{`DELETE FROM resume_versions WHERE legacy_resume_id = ? OR id = ?`, []any{resumeID, versionID}},
+	}
+	for _, item := range execs {
+		if _, err := tx.Exec(item.query, item.args...); err != nil {
+			fmt.Fprintf(os.Stderr, "[RecruitmentStore] delete resume query failed (%s): %v\n", item.query, err)
+			return err
+		}
+	}
+	return tx.Commit()
+}
+
 func (a *App) syncRecruitmentResume(resume *Resume) {
 	db := a.activeRecruitmentDB()
 	if db == nil || resume == nil {

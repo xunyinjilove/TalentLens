@@ -832,6 +832,7 @@ func (a *App) GetResumes() []*Resume {
 }
 
 func (a *App) DeleteResume(id string) error {
+	_ = a.deleteRecruitmentResume(id)
 	path := filepath.Join(a.getDataDir(), "resumes", id+".json")
 	return os.Remove(path)
 }
@@ -1143,6 +1144,7 @@ func (a *App) DeleteProject(id string) error {
 			a.DeleteResume(rid)
 		}
 	}
+	_ = a.deleteRecruitmentProject(id)
 	return os.Remove(filepath.Join(a.getProjectsDir(), id+".json"))
 }
 
