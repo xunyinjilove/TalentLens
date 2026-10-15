@@ -352,7 +352,6 @@
 
         <!-- 阶段二：检索进行中或已完成阶段 -->
         <template v-else>
-          <el-button v-if="searching" @click="visible = false">缩小到任务入口</el-button>
           <el-button v-if="searching" type="danger" plain :loading="stopPending" :disabled="stopPending" @click="handleStop">{{ stopPending ? '正在保存已抓取的人选' : '停止检索' }}</el-button>
           <el-button v-if="!searching && !isFinished" @click="handleBackToForm">
             <el-icon><Back /></el-icon> 返回修改配置

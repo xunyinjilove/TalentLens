@@ -12,7 +12,6 @@
 
       <!-- 全局 AI 招聘助理抽屉 & 悬浮按钮 -->
       <AIAssistantDrawer />
-      <SourcingTaskCenter />
 
       <!-- 全局八方原生无边框窗口缩放手柄 -->
       <WindowResizeOverlay />
@@ -25,7 +24,6 @@ import { onMounted, ref } from 'vue'
 import zhCn from 'element-plus/es/locale/lang/zh-cn'
 import AppSidebar from './components/AppSidebar.vue'
 import AIAssistantDrawer from './components/AIAssistantDrawer.vue'
-import SourcingTaskCenter from './components/SourcingTaskCenter.vue'
 import WorkbenchWindowControls from './components/WorkbenchWindowControls.vue'
 import WindowResizeOverlay from './components/WindowResizeOverlay.vue'
 import { computed } from 'vue'
