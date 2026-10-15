@@ -869,6 +869,23 @@ async function advanceSearchResults(page, options = {}) {
   return false;
 }
 
+// A stationary page is not proof that the platform has no more matching people.
+// Retry with a bounded backoff while the desktop app remains open.
+function searchRetryDelay(idlePasses) {
+  return Math.min(600000, 60000 * 2 ** Math.max(0, Math.min(4, idlePasses)));
+}
+
+async function waitForSearchRetry(delayMs, stopRequested, wait = ms => new Promise(resolve => setTimeout(resolve, ms))) {
+  let remaining = Math.max(0, delayMs);
+  while (remaining > 0) {
+    if (stopRequested()) return false;
+    const step = Math.min(5000, remaining);
+    await wait(step);
+    remaining -= step;
+  }
+  return !stopRequested();
+}
+
 // 深度净化候选人简历正文：剔除防泄密水印网格、举报按钮、平台免责声明与动态操作框
 function cleanCandidateResumeText(rawText) {
   if (!rawText) return '';
@@ -1644,8 +1661,10 @@ async function autoNavigateAndSearch(page, platformKey, cfg, searchKeyword) {
   let activeKeyword = '';
   let batchIdx = 0;
   let emptyBatches = 0;
+  let idlePasses = 0;
+  let passStartCount = 0;
 
-  while (allPlatformSavedList.length < targetCount && batchIdx < maxBatches && !stopRequested()) {
+  while (allPlatformSavedList.length < targetCount && !stopRequested()) {
     const batchStartCount = allPlatformSavedList.length;
     const currentBatchQuota = Math.min(MAX_BATCH_SIZE, targetCount - batchStartCount);
 
@@ -1943,7 +1962,19 @@ ${cleanedRawText}
     if (allPlatformSavedList.length === batchStartCount) emptyBatches++;
     else emptyBatches = 0;
     batchIdx++;
-    if (quotaTasks.every(task => task.targetCount <= 0 || exhaustedKeywords.has(task.keyword))) break;
+    const passExhausted = quotaTasks.every(task => task.targetCount <= 0 || exhaustedKeywords.has(task.keyword));
+    if (passExhausted || batchIdx >= maxBatches) {
+      idlePasses = allPlatformSavedList.length > passStartCount ? 0 : idlePasses + 1;
+      const delayMs = searchRetryDelay(idlePasses);
+      sendMsg('status', { platform: platformKey,
+        message: `未达目标（${allPlatformSavedList.length}/${targetCount}）：当前页面暂无可确认的新候选人，等待约 ${Math.ceil(delayMs / 60000)} 分钟后重新检索；可随时停止，已抓取档案保留。` });
+      if (!await waitForSearchRetry(delayMs, stopRequested)) break;
+      exhaustedKeywords.clear();
+      activeKeyword = '';
+      batchIdx = 0;
+      passStartCount = allPlatformSavedList.length;
+      continue;
+    }
 
     // 子批次间短暂停顿；缺额由下一批继续搜索。
     if (batchIdx < maxBatches && allPlatformSavedList.length < targetCount && !stopRequested()) {
@@ -1964,9 +1995,7 @@ ${cleanedRawText}
 
   const stopReason = stopRequested() ? 'HR 已停止检索'
     : allPlatformSavedList.length >= targetCount ? ''
-    : exhaustedKeywords.size > 0 ? '列表与滚动位置均未变化，可能已到结果末尾'
-    : batchIdx >= maxBatches ? `已达到本次 ${maxBatches} 批检索上限（最后连续 ${emptyBatches} 批无新增）`
-    : '当前筛选条件下没有更多可确认的新候选人';
+    : '检索已中断，已抓取结果保留';
   sendMsg('status', {
     platform: platformKey,
     message: `【${cfg.name}】检索结束，实际抓取并导入 ${allPlatformSavedList.length}/${targetCount} 位候选人档案${stopReason ? `；原因：${stopReason}` : ''}。`
@@ -2249,4 +2278,4 @@ if (require.main === module) {
   });
 }
 
-module.exports = { allocateQuota, planChannelQuota, smoothScroll, keepPageActiveInBackground, setBrowserWindowState, preserveBrowserWindow, connectToExistingBrowser, launchPlatformBrowser, openDedicatedSearchPage, createBackgroundPage, capture51jobDetailUrl, extract51JobResumeId, isBrowserStartPage, browserLaunchArgs, closeUnusedStartPages, isPlatformPageUrl, ensurePlatformPage, submit51jobSearch, detectCaptcha, extractCandidatesAcrossFrames, selectFreshCandidates, advanceSearchResults, main };
+module.exports = { allocateQuota, planChannelQuota, smoothScroll, keepPageActiveInBackground, setBrowserWindowState, preserveBrowserWindow, connectToExistingBrowser, launchPlatformBrowser, openDedicatedSearchPage, createBackgroundPage, capture51jobDetailUrl, extract51JobResumeId, isBrowserStartPage, browserLaunchArgs, closeUnusedStartPages, isPlatformPageUrl, ensurePlatformPage, submit51jobSearch, detectCaptcha, extractCandidatesAcrossFrames, selectFreshCandidates, advanceSearchResults, searchRetryDelay, waitForSearchRetry, main };

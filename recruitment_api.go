@@ -98,7 +98,7 @@ func (a *App) ListTalentCandidates(projectID string) ([]TalentCandidate, error) 
 			WHERE pcr.project_candidate_id=pc.id ORDER BY rv2.created_at DESC,rv2.id DESC LIMIT 1)
 		LEFT JOIN evaluations ev ON ev.id=(SELECT id FROM evaluations
 			WHERE project_candidate_id=pc.id ORDER BY created_at DESC,id DESC LIMIT 1)
-		WHERE (?='' OR p.id=?) ORDER BY pc.created_at DESC,pc.id DESC`, projectID, projectID)
+		WHERE pc.archived_at='' AND (?='' OR p.id=?) ORDER BY pc.created_at DESC,pc.id DESC`, projectID, projectID)
 	if err != nil {
 		return nil, err
 	}
@@ -166,7 +166,7 @@ func (a *App) GetRecruitmentDashboard() (RecruitmentDashboard, error) {
 	}{
 		{"SELECT COUNT(*) FROM projects", nil, &result.OpenProjects},
 		{"SELECT COUNT(*) FROM candidates WHERE created_at>=?", []interface{}{weekStart}, &result.CandidatesThisWeek},
-		{"SELECT COUNT(*) FROM project_candidates WHERE next_action_at<>'' AND next_action_at<=? AND stage NOT IN ('hired','rejected')", []interface{}{now}, &result.PendingFollowUps},
+		{"SELECT COUNT(*) FROM project_candidates WHERE archived_at='' AND next_action_at<>'' AND next_action_at<=? AND stage NOT IN ('hired','rejected')", []interface{}{now}, &result.PendingFollowUps},
 		{"SELECT COUNT(*) FROM interviews WHERE starts_at>=? AND status='scheduled'", []interface{}{now}, &result.UpcomingInterviews},
 	}
 	for _, q := range queries {
@@ -174,7 +174,7 @@ func (a *App) GetRecruitmentDashboard() (RecruitmentDashboard, error) {
 			return result, err
 		}
 	}
-	rows, err := db.Query("SELECT stage,COUNT(*) FROM project_candidates GROUP BY stage")
+	rows, err := db.Query("SELECT stage,COUNT(*) FROM project_candidates WHERE archived_at='' GROUP BY stage")
 	if err != nil {
 		return result, err
 	}
@@ -188,6 +188,56 @@ func (a *App) GetRecruitmentDashboard() (RecruitmentDashboard, error) {
 		result.StageCounts[stage] = count
 	}
 	return result, rows.Err()
+}
+
+// ArchiveTalentCandidates removes project links from the active talent pool
+// while retaining the shared profile, resume versions and communication history.
+func (a *App) ArchiveTalentCandidates(projectCandidateIDs []string) (int, error) {
+	if len(projectCandidateIDs) == 0 {
+		return 0, fmt.Errorf("请选择要移出人才库的简历")
+	}
+	db, err := a.getRecruitmentDB()
+	if err != nil {
+		return 0, err
+	}
+	tx, err := db.Begin()
+	if err != nil {
+		return 0, err
+	}
+	defer tx.Rollback()
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	seen := make(map[string]bool, len(projectCandidateIDs))
+	count := 0
+	for _, rawID := range projectCandidateIDs {
+		id := strings.TrimSpace(rawID)
+		if id == "" || seen[id] {
+			continue
+		}
+		seen[id] = true
+		result, err := tx.Exec("UPDATE project_candidates SET archived_at=?,updated_at=? WHERE id=? AND archived_at=''", now, now, id)
+		if err != nil {
+			return 0, err
+		}
+		changed, err := result.RowsAffected()
+		if err != nil {
+			return 0, err
+		}
+		if changed == 0 {
+			return 0, fmt.Errorf("简历不存在或已移出人才库: %s", id)
+		}
+		if _, err := tx.Exec(`INSERT INTO follow_up_events(id,project_candidate_id,event_type,note,actor,created_at)
+			VALUES(?,?,'archived','从人才库移除，保留统一档案及沟通记录','HR',?)`, recruitmentID("followup"), id, now); err != nil {
+			return 0, err
+		}
+		count++
+	}
+	if count == 0 {
+		return 0, fmt.Errorf("请选择要移出人才库的简历")
+	}
+	if err := tx.Commit(); err != nil {
+		return 0, err
+	}
+	return count, nil
 }
 
 func (a *App) UpdateCandidateFollowUp(projectCandidateID, stage, owner, nextActionAt, note, actor string) error {
@@ -518,4 +568,3 @@ func (a *App) MoveCandidateToProject(projectCandidateID, targetProjectID string)
 
 	return nil
 }
-

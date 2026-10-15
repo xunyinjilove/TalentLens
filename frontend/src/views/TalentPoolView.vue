@@ -256,6 +256,16 @@
               共 <strong>{{ filtered.length }}</strong> 位候选人
             </span>
 
+            <el-button size="small" @click="manageMode = !manageMode; selectedCandidateIds = []">
+              {{ manageMode ? '退出管理' : '管理简历' }}
+            </el-button>
+            <template v-if="manageMode">
+              <el-button size="small" @click="selectVisibleCandidates">全选当前结果</el-button>
+              <el-button size="small" type="danger" plain :disabled="!selectedCandidateIds.length" @click="archiveSelectedCandidates">
+                批量删除（{{ selectedCandidateIds.length }}）
+              </el-button>
+            </template>
+
             <!-- 双视图模式切换 (Card / Table) -->
             <el-radio-group v-model="viewMode" size="small" class="view-mode-toggle">
               <el-radio-button label="grid" title="卡片看板视图">
@@ -278,6 +288,12 @@
             class="wb-card wb-candidate talent-card"
           >
             <div class="wb-candidate-top">
+              <el-checkbox
+                v-if="manageMode"
+                :model-value="selectedCandidateIds.includes(item.projectCandidateId)"
+                :aria-label="`选择 ${item.name}`"
+                @change="toggleCandidateSelection(item.projectCandidateId)"
+              />
               <span class="wb-avatar candidate-sequence" :title="`当前列表第 ${index + 1} 位`">
                 #{{ index + 1 }}
               </span>
@@ -343,6 +359,7 @@
                 >
                   评测
                 </el-button>
+                <el-button size="small" type="danger" plain @click="archiveOneCandidate(item)">删除</el-button>
               </div>
             </div>
           </article>
@@ -357,6 +374,16 @@
             class="talent-data-table"
             @row-click="handleTableRowClick"
           >
+            <el-table-column v-if="manageMode" label="选择" width="58" align="center">
+              <template #default="{ row }">
+                <el-checkbox
+                  :model-value="selectedCandidateIds.includes(row.projectCandidateId)"
+                  :aria-label="`选择 ${row.name}`"
+                  @click.stop
+                  @change="toggleCandidateSelection(row.projectCandidateId)"
+                />
+              </template>
+            </el-table-column>
             <el-table-column type="index" label="#" width="60" align="center">
               <template #default="{ $index }">
                 <span class="table-seq">#{{ $index + 1 }}</span>
@@ -425,12 +452,13 @@
               </template>
             </el-table-column>
 
-            <el-table-column label="操作" width="180" fixed="right" align="center">
+            <el-table-column label="操作" width="220" fixed="right" align="center">
               <template #default="{ row }">
                 <div class="table-row-actions" @click.stop>
                   <el-button link type="primary" size="small" @click="selected = row">档案</el-button>
                   <el-button link type="primary" size="small" @click="openMoveDialog(row)">调配</el-button>
                   <el-button link type="primary" size="small" @click="router.push('/project/' + row.projectId)">评测</el-button>
+                  <el-button link type="danger" size="small" @click="archiveOneCandidate(row)">删除</el-button>
                   <el-button
                     v-if="row.analysisStatus === 'error'"
                     link
@@ -783,7 +811,7 @@ import { useProjectStore, type Project } from '../composables/useProjectStore'
 import { useRecruitmentStore, stageLabels, type TalentCandidate } from '../composables/useRecruitmentStore'
 import BossSearchDialog from '../components/BossSearchDialog.vue'
 import TopTenOutreachDialog from '../components/TopTenOutreachDialog.vue'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 
 interface PendingApplication { id: string; applicationId: string; candidateName: string; platformJobId: string }
 interface DuplicatePair { candidateId: string; otherCandidateId: string; name: string; reason: string }
@@ -806,6 +834,47 @@ const statusFilter = ref('')
 const sourceFilter = ref('')
 const stageFilter = ref('')
 const viewMode = ref<'grid' | 'table'>('grid')
+const manageMode = ref(false)
+const selectedCandidateIds = ref<string[]>([])
+
+function toggleCandidateSelection(id: string) {
+  selectedCandidateIds.value = selectedCandidateIds.value.includes(id)
+    ? selectedCandidateIds.value.filter(item => item !== id)
+    : [...selectedCandidateIds.value, id]
+}
+
+function selectVisibleCandidates() {
+  selectedCandidateIds.value = filtered.value.map(item => item.projectCandidateId)
+}
+
+async function archiveCandidates(ids: string[]) {
+  if (!ids.length) return
+  try {
+    await ElMessageBox.confirm(
+      `确认从人才库删除 ${ids.length} 条岗位简历？统一候选人档案、原始简历和沟通记录会保留。`,
+      '删除简历',
+      { confirmButtonText: '确认删除', cancelButtonText: '取消', type: 'warning' }
+    )
+  } catch {
+    return
+  }
+  try {
+    const removed = await recruitment.archiveCandidates(ids)
+    selectedCandidateIds.value = selectedCandidateIds.value.filter(id => !ids.includes(id))
+    if (selected.value && ids.includes(selected.value.projectCandidateId)) selected.value = null
+    ElMessage.success(`已从人才库删除 ${removed} 条岗位简历`)
+  } catch (err: any) {
+    ElMessage.error(err?.message || String(err))
+  }
+}
+
+function archiveOneCandidate(item: TalentCandidate) {
+  void archiveCandidates([item.projectCandidateId])
+}
+
+function archiveSelectedCandidates() {
+  void archiveCandidates(selectedCandidateIds.value)
+}
 
 const hasActiveFilters = computed(() => {
   return !!(keyword.value || statusFilter.value || sourceFilter.value || stageFilter.value)
@@ -1638,8 +1707,9 @@ onMounted(() => {
 
 .wb-candidate-foot {
   display: flex;
-  justify-content: space-between;
-  align-items: center;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 8px;
   padding-top: 8px;
   border-top: 1px solid #f1f5f9;
   margin-top: auto;
@@ -1652,7 +1722,14 @@ onMounted(() => {
 
 .candidate-actions {
   display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
   gap: 6px;
+  min-width: 0;
+}
+
+.candidate-actions .el-button + .el-button {
+  margin-left: 0;
 }
 
 /* 高密数据表格视图 (Table View) */

@@ -307,7 +307,7 @@ func (a *App) PreviewTopTenOutreach(projectID string) (OutreachBatch, error) {
 		err := db.QueryRow(`SELECT pc.id,cs.platform,cs.platform_candidate_id FROM project_candidates pc
 			JOIN resume_versions rv ON rv.candidate_id=pc.candidate_id
 			LEFT JOIN candidate_sources cs ON cs.id=rv.source_id
-			WHERE pc.project_id=? AND rv.legacy_resume_id=?`, projectID, resume.ID).Scan(&linkID, &sourcePlatform, &sourceID)
+			WHERE pc.project_id=? AND pc.archived_at='' AND rv.legacy_resume_id=?`, projectID, resume.ID).Scan(&linkID, &sourcePlatform, &sourceID)
 		if err != nil {
 			continue
 		}
@@ -456,6 +456,13 @@ func (a *App) ConfirmOutreachBatch(batchID string, approvals []OutreachApproval)
 		seen[approval.ItemID] = true
 		status, result := "excluded", "HR 未选择发送"
 		if approval.Include {
+			var active int
+			if err = tx.QueryRow("SELECT COUNT(*) FROM project_candidates WHERE id=? AND archived_at=''", item.ProjectCandidateID).Scan(&active); err != nil {
+				return batch, err
+			}
+			if active == 0 {
+				return batch, fmt.Errorf("候选人 %s 已从人才库删除，请重新生成预览", item.CandidateName)
+			}
 			if item.RedLineStatus == "pending" && !approval.ConfirmPending {
 				return batch, fmt.Errorf("候选人 %s 的红线待核实，发送前须单独勾选", item.CandidateName)
 			}

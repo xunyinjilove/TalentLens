@@ -62,7 +62,7 @@ CREATE TABLE IF NOT EXISTS project_candidates (
   id TEXT PRIMARY KEY, project_id TEXT NOT NULL REFERENCES projects(id),
   candidate_id TEXT NOT NULL REFERENCES candidates(id),
   stage TEXT NOT NULL DEFAULT 'new', owner TEXT NOT NULL DEFAULT '',
-  next_action_at TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL,
+  next_action_at TEXT NOT NULL DEFAULT '', archived_at TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL, UNIQUE(project_id, candidate_id)
 );
 CREATE TABLE IF NOT EXISTS project_candidate_resumes (
@@ -167,6 +167,9 @@ func (a *App) getRecruitmentDB() (*sql.DB, error) {
 		_, err = db.Exec(recruitmentSchema)
 	}
 	if err == nil {
+		err = ensureTalentArchiveColumn(db)
+	}
+	if err == nil {
 		_, err = db.Exec(`INSERT OR IGNORE INTO project_candidate_resumes(project_candidate_id,resume_version_id,created_at)
 			SELECT pc.id,rv.id,rv.created_at FROM project_candidates pc JOIN resume_versions rv ON rv.candidate_id=pc.candidate_id
 			WHERE json_valid(rv.raw_json) AND json_extract(rv.raw_json,'$.project_id')=pc.project_id`)
@@ -181,6 +184,33 @@ func (a *App) getRecruitmentDB() (*sql.DB, error) {
 	a.recruitmentDB = db
 	a.recruitmentDir = dir
 	return db, nil
+}
+
+func ensureTalentArchiveColumn(db *sql.DB) error {
+	rows, err := db.Query("PRAGMA table_info(project_candidates)")
+	if err != nil {
+		return err
+	}
+	found := false
+	for rows.Next() {
+		var id, notNull, primaryKey int
+		var name, columnType string
+		var defaultValue sql.NullString
+		if err = rows.Scan(&id, &name, &columnType, &notNull, &defaultValue, &primaryKey); err != nil {
+			rows.Close()
+			return err
+		}
+		if name == "archived_at" {
+			found = true
+		}
+	}
+	err = rows.Err()
+	rows.Close()
+	if err != nil || found {
+		return err
+	}
+	_, err = db.Exec("ALTER TABLE project_candidates ADD COLUMN archived_at TEXT NOT NULL DEFAULT ''")
+	return err
 }
 
 func (a *App) closeRecruitmentDB() {
