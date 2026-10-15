@@ -4,6 +4,7 @@
     <div
       v-if="!assistantStore.isOpen"
       class="ai-float-trigger"
+      :class="{ 'with-sourcing-tasks': recruitmentStore.sourcingTasks.length > 0 }"
       @click="assistantStore.openDrawer"
       title="唤起透景 AI 招聘助理"
     >
@@ -18,7 +19,7 @@
     <el-drawer
       v-model="assistantStore.isOpen"
       direction="rtl"
-      size="540px"
+      size="min(540px, 100%)"
       :with-header="false"
       class="talentlens-ai-drawer"
       destroy-on-close="false"
@@ -40,6 +41,7 @@
           </div>
 
           <div class="header-actions">
+            <el-button v-if="recruitmentStore.sourcingTasks.length" link class="task-shortcut" @click="openTaskCenter">寻才记录</el-button>
             <el-button
               link
               class="header-btn"
@@ -307,9 +309,16 @@ import {
   DocumentCopy
 } from '@element-plus/icons-vue'
 import { useAIAssistantStore, type JobApplyData } from '../composables/useAIAssistantStore'
+import { useRecruitmentStore } from '../composables/useRecruitmentStore'
 
 const router = useRouter()
 const assistantStore = useAIAssistantStore()
+const recruitmentStore = useRecruitmentStore()
+
+function openTaskCenter() {
+  assistantStore.closeDrawer()
+  recruitmentStore.taskCenterOpen = true
+}
 
 const inputContent = ref('')
 const chatViewportRef = ref<HTMLElement | null>(null)
@@ -529,8 +538,8 @@ async function handleCopyJD(jobData: JobApplyData) {
 /* 常驻右下角悬浮按钮 */
 .ai-float-trigger {
   position: fixed;
-  right: 28px;
-  bottom: 28px;
+  right: 18px;
+  bottom: 22px;
   height: 44px;
   padding: 0 16px 0 12px;
   border-radius: 22px;
@@ -544,6 +553,10 @@ async function handleCopyJD(jobData: JobApplyData) {
   z-index: 990;
   user-select: none;
   transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+
+  &.with-sourcing-tasks {
+    bottom: 82px;
+  }
 
   &:hover {
     transform: translateY(-2px) scale(1.03);
@@ -653,6 +666,8 @@ async function handleCopyJD(jobData: JobApplyData) {
     display: flex;
     align-items: center;
     gap: 6px;
+
+    .task-shortcut { white-space: nowrap; color: var(--wb-brand); }
 
     .header-btn {
       font-size: 17px;

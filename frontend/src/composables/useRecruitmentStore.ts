@@ -82,6 +82,7 @@ export const useRecruitmentStore = defineStore('recruitment', () => {
   const candidates = ref<TalentCandidate[]>([])
   const interviews = ref<RecruitmentInterview[]>([])
   const sourcingTasks = ref<SourcingTask[]>([])
+  const taskCenterOpen = ref(false)
   const dismissedSourcingTaskIds = new Set<string>()
   const dashboard = ref<RecruitmentDashboard>(emptyDashboard())
   const loading = ref(false)
@@ -212,7 +213,7 @@ export const useRecruitmentStore = defineStore('recruitment', () => {
     }
   }
 
-  return { candidates, interviews, dashboard, sourcingTasks, loading, error, loadCandidates,
+  return { candidates, interviews, dashboard, sourcingTasks, taskCenterOpen, loading, error, loadCandidates,
     loadDashboard, loadInterviews, loadSourcingTasks, resumeSourcingTask, stopSourcingTask,
     deleteSourcingTask, clearFinishedSourcingTasks,
     updateFollowUp, saveInterview, cancelInterview, moveCandidate, initEvents }

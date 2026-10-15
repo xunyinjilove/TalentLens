@@ -36,7 +36,7 @@ import (
 )
 
 // 版本信息
-const AppVersion = "1.8.10"
+const AppVersion = "1.8.11"
 const GitHubRepo = "xunyinjilove/TalentLens"
 
 //go:embed all:frontend/dist
@@ -2450,11 +2450,11 @@ func (a *App) startQuotaMatrixSearch(projectID string, keyword string, city stri
 			failureMessage := lastEngineError
 			if failureMessage == "" {
 				failureMessage = "搜索任务未返回完成结果"
+				runtime.EventsEmit(a.ctx, "platform:error", map[string]interface{}{
+					"type": "error", "message": failureMessage,
+				})
 			}
 			a.setSourcingTaskStatus(taskID, "failed", failureMessage)
-			runtime.EventsEmit(a.ctx, "platform:error", map[string]interface{}{
-				"type": "error", "message": "搜索任务已结束，但未返回完成结果；请查看前面的平台提示后重新检索",
-			})
 		}
 	}()
 
