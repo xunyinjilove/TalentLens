@@ -179,6 +179,17 @@ test('document scrolling counts as progress even when visible card identities ar
   }
 });
 
+test('an unmet target schedules another search pass after an unchanged result page', async () => {
+  assert.equal(agent.searchRetryDelay(0), 60000);
+  assert.equal(agent.searchRetryDelay(1), 120000);
+  assert.equal(agent.searchRetryDelay(4), 600000);
+  let waited = 0;
+  const continued = await agent.waitForSearchRetry(6000, () => false, async ms => { waited += ms; });
+  assert.equal(continued, true);
+  assert.equal(waited, 6000);
+  assert.equal(await agent.waitForSearchRetry(6000, () => true, async () => { throw Error('must stop'); }), false);
+});
+
 test('reused browser window stays visible while its search tab runs', async () => {
   const browser = {};
   agent.preserveBrowserWindow(browser);

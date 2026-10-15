@@ -182,6 +182,13 @@ export const useRecruitmentStore = defineStore('recruitment', () => {
     await Promise.all([loadCandidates(), loadDashboard()])
   }
 
+  async function archiveCandidates(projectCandidateIds: string[]) {
+    const api: any = await recruitmentAPI()
+    const removed: number = await api.ArchiveTalentCandidates(projectCandidateIds)
+    await Promise.all([loadCandidates(), loadDashboard()])
+    return removed
+  }
+
   async function initEvents() {
     if (subscribed) return
     subscribed = true
@@ -216,5 +223,5 @@ export const useRecruitmentStore = defineStore('recruitment', () => {
   return { candidates, interviews, dashboard, sourcingTasks, taskCenterOpen, loading, error, loadCandidates,
     loadDashboard, loadInterviews, loadSourcingTasks, resumeSourcingTask, stopSourcingTask,
     deleteSourcingTask, clearFinishedSourcingTasks,
-    updateFollowUp, saveInterview, cancelInterview, moveCandidate, initEvents }
+    updateFollowUp, saveInterview, cancelInterview, moveCandidate, archiveCandidates, initEvents }
 })

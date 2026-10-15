@@ -56,3 +56,26 @@ func TestOutreachPreviewRequiresPendingRedlineSelectionAndRecordsManualOutcome(t
 		t.Fatal("confirmed batch should be one-shot")
 	}
 }
+
+func TestArchivedCandidateCannotBeConfirmedFromOldOutreachPreview(t *testing.T) {
+	app := NewApp()
+	app.dataDirOverride = t.TempDir()
+	defer app.closeRecruitmentDB()
+	project := app.CreateProject("Synthetic role", "Test", 1, "HR", "", &JobConfig{Title: "Synthetic role"})
+	resume := &Resume{ID: "archive_outreach", ProjectID: project.ID, FileName: "synthetic.txt", Content: "synthetic experience", Status: "done", Score: 80,
+		Analysis: &AnalysisResult{CandidateName: "Synthetic candidate", AbilityScore: 80, CoreMatch: 80, RedLineStatus: "passed"}}
+	if err := app.persistSearchCandidate(resume); err != nil {
+		t.Fatal(err)
+	}
+	batch, err := app.PreviewTopTenOutreach(project.ID)
+	if err != nil || len(batch.Items) != 1 {
+		t.Fatalf("preview: %d, %v", len(batch.Items), err)
+	}
+	if _, err := app.ArchiveTalentCandidates([]string{batch.Items[0].ProjectCandidateID}); err != nil {
+		t.Fatal(err)
+	}
+	_, err = app.ConfirmOutreachBatch(batch.ID, []OutreachApproval{{ItemID: batch.Items[0].ID, Include: true, Message: "Synthetic greeting"}})
+	if err == nil || !strings.Contains(err.Error(), "已从人才库删除") {
+		t.Fatalf("archived candidate must not remain eligible: %v", err)
+	}
+}
