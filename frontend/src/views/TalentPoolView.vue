@@ -12,73 +12,58 @@
         <div class="wb-crumb">人才检索 / 按职位分库多维归档、查验与协同调配</div>
       </div>
 
-      <div class="header-actions-bar">
-        <!-- 次级数据录入与分流维护工具组 -->
-        <div class="action-triage-group">
-          <el-button
-            class="action-triage-btn"
-            @click="refresh"
-            :loading="recruitment.loading"
-            title="刷新人才库数据"
-          >
-            <el-icon><Refresh /></el-icon>刷新
+      <div class="header-actions-bar" aria-label="人才库操作">
+        <el-button
+          type="primary"
+          class="matrix-search-btn"
+          :disabled="!selectedProjectId"
+          @click="showSearch = true"
+          :title="selectedProjectId ? '唤起 4合1 多平台矩阵式主动寻才' : '请先选择左侧具体职位分库'"
+        >
+          <el-icon><Position /></el-icon><span>矩阵寻才</span>
+        </el-button>
+
+        <el-button
+          class="outreach-action-btn"
+          :disabled="!selectedProjectId"
+          @click="showOutreach = true"
+          :title="selectedProjectId ? '一键向当前分库前十名匹配候选人打招呼' : '请先选择左侧具体职位分库'"
+        >
+          <el-icon><ChatRound /></el-icon><span>前十名打招呼</span>
+        </el-button>
+
+        <el-dropdown trigger="click" @command="handleLibraryAction">
+          <el-button class="library-tools-btn" aria-label="导入与核对，展开更多操作">
+            <el-icon><FolderOpened /></el-icon><span>导入与核对</span>
+            <span v-if="pendingReviewCount" class="library-tools-count">{{ pendingReviewCount > 99 ? '99+' : pendingReviewCount }}</span>
+            <el-icon class="dropdown-chevron"><ArrowDown /></el-icon>
           </el-button>
+          <template #dropdown>
+            <el-dropdown-menu>
+              <el-dropdown-item command="import" :disabled="importing">
+                <el-icon><Download /></el-icon>导入 51job 投递
+              </el-dropdown-item>
+              <el-dropdown-item command="inbox">
+                <el-icon><Tickets /></el-icon>待分配投递
+                <span v-if="pendingApplications.length" class="dropdown-item-count">{{ pendingApplications.length }}</span>
+              </el-dropdown-item>
+              <el-dropdown-item command="duplicates">
+                <el-icon><CopyDocument /></el-icon>疑似重复
+                <span v-if="duplicates.length" class="dropdown-item-count">{{ duplicates.length }}</span>
+              </el-dropdown-item>
+            </el-dropdown-menu>
+          </template>
+        </el-dropdown>
 
-          <el-button
-            class="action-triage-btn"
-            :loading="importing"
-            @click="import51Job"
-            title="一键拉取 51job 最新投递简历"
-          >
-            <el-icon><Download /></el-icon>51job 投递导入
-          </el-button>
-
-          <el-badge
-            :value="pendingApplications.length"
-            :hidden="!pendingApplications.length"
-            type="primary"
-            class="triage-badge"
-          >
-            <el-button class="action-triage-btn" @click="showInbox">
-              待分配投递
-            </el-button>
-          </el-badge>
-
-          <el-badge
-            :value="duplicates.length"
-            :hidden="!duplicates.length"
-            type="warning"
-            class="triage-badge"
-          >
-            <el-button class="action-triage-btn" @click="showDuplicates">
-              疑似重复
-            </el-button>
-          </el-badge>
-        </div>
-
-        <div class="header-action-divider"></div>
-
-        <!-- 主业务动作组 (重点突出) -->
-        <div class="action-primary-group">
-          <el-button
-            class="outreach-action-btn"
-            :disabled="!selectedProjectId"
-            @click="showOutreach = true"
-            :title="selectedProjectId ? '一键向当前分库前十名匹配候选人打招呼' : '请先选择左侧具体职位分库'"
-          >
-            <el-icon><ChatRound /></el-icon>向前十名打招呼
-          </el-button>
-
-          <el-button
-            type="primary"
-            class="matrix-search-btn"
-            :disabled="!selectedProjectId"
-            @click="showSearch = true"
-            :title="selectedProjectId ? '唤起 4合1 多平台矩阵式主动寻才' : '请先选择左侧具体职位分库'"
-          >
-            <el-icon><Position /></el-icon>矩阵寻才
-          </el-button>
-        </div>
+        <el-button
+          class="refresh-tool-btn"
+          :loading="recruitment.loading"
+          aria-label="刷新人才库数据"
+          title="刷新人才库数据"
+          @click="refresh"
+        >
+          <el-icon v-if="!recruitment.loading"><Refresh /></el-icon>
+        </el-button>
       </div>
     </header>
 
@@ -800,6 +785,9 @@ import {
   Grid,
   Tickets,
   Download,
+  FolderOpened,
+  CopyDocument,
+  ArrowDown,
   ChatRound,
   CircleCheck,
   CircleClose,
@@ -896,6 +884,13 @@ const assignment = ref<Record<string, string>>({})
 const duplicates = ref<DuplicatePair[]>([])
 const duplicatesOpen = ref(false)
 const mergeReasons = ref<Record<string, string>>({})
+const pendingReviewCount = computed(() => pendingApplications.value.length + duplicates.value.length)
+
+function handleLibraryAction(command: string) {
+  if (command === 'import') void import51Job()
+  if (command === 'inbox') showInbox()
+  if (command === 'duplicates') showDuplicates()
+}
 
 const contactKind = ref('email')
 const verifiedContact = ref('')
@@ -1161,24 +1156,29 @@ onMounted(() => {
 .talent-pool-page {
   box-sizing: border-box;
   width: 100%;
-  padding: 20px 32px 60px 24px;
-  overflow-x: auto;
+  padding: 0 32px 60px 24px;
+  overflow-x: hidden;
 }
 
-/* 顶部全局标题栏与动作分组 */
+/* 顶栏随内容增高，避免继承工作台固定高度后覆盖筛选区 */
 .talent-page-header {
+  height: auto;
+  min-height: 88px;
+  box-sizing: border-box;
   display: flex;
   justify-content: space-between;
   align-items: center;
   flex-wrap: wrap;
-  gap: 16px;
-  padding-bottom: 4px;
+  gap: 12px 20px;
+  padding: 16px 142px 16px 0;
 }
 
 .header-title-box {
   display: flex;
   flex-direction: column;
   gap: 4px;
+  flex: 1 1 310px;
+  min-width: 0;
 }
 
 .title-with-badge {
@@ -1191,15 +1191,15 @@ onMounted(() => {
   margin: 0;
   font-size: 22px;
   font-weight: 800;
-  color: #0f172a;
+  color: var(--wb-text);
   letter-spacing: -0.02em;
 }
 
 .pool-count-tag {
   font-size: 12px;
   font-weight: 600;
-  color: #4338ca;
-  background: #e0e7ff;
+  color: var(--wb-brand);
+  background: var(--wb-brand-soft);
   padding: 2px 10px;
   border-radius: 12px;
 }
@@ -1207,67 +1207,99 @@ onMounted(() => {
 .header-actions-bar {
   display: flex;
   align-items: center;
-  gap: 12px;
-  flex-wrap: wrap;
-}
-
-.action-triage-group {
-  display: flex;
-  align-items: center;
+  justify-content: flex-end;
   gap: 8px;
+  flex-wrap: wrap;
+  max-width: 100%;
+  margin-left: auto;
 }
 
-.action-triage-btn {
+.header-actions-bar :deep(.el-button + .el-button) {
+  margin-left: 0;
+}
+
+.header-actions-bar .el-button {
+  height: 38px;
+  padding: 0 14px;
+  border-radius: 9px;
   font-size: 13px;
-  font-weight: 500;
-  color: #334155;
-  border-color: #cbd5e1;
-  background-color: #ffffff;
-  transition: all 0.15s ease;
-}
-
-.action-triage-btn:hover {
-  color: #2563eb;
-  border-color: #93c5fd;
-  background-color: #f8faff;
-}
-
-.triage-badge :deep(.el-badge__content) {
-  font-size: 11px;
-  font-weight: 700;
-  height: 18px;
-  line-height: 18px;
-  padding: 0 5px;
-}
-
-.header-action-divider {
-  width: 1px;
-  height: 24px;
-  background-color: #e2e8f0;
-}
-
-.action-primary-group {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-
-.outreach-action-btn {
   font-weight: 600;
-  color: #4338ca;
-  border-color: #c7d2fe;
-  background-color: #eef2ff;
+  white-space: nowrap;
+  transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease;
 }
 
-.outreach-action-btn:hover:not(:disabled) {
-  color: #3730a3;
-  border-color: #a5b4fc;
-  background-color: #e0e7ff;
+.header-actions-bar .el-button .el-icon:first-child {
+  margin-right: 6px;
+  font-size: 16px;
+}
+
+.header-actions-bar .el-button:focus-visible {
+  outline: 2px solid var(--wb-brand);
+  outline-offset: 2px;
 }
 
 .matrix-search-btn {
+  box-shadow: none;
   font-weight: 700;
-  box-shadow: 0 2px 8px rgba(37, 99, 235, 0.25);
+}
+
+.matrix-search-btn:hover:not(:disabled) {
+  box-shadow: 0 3px 10px rgba(79, 70, 229, 0.16);
+}
+
+.outreach-action-btn {
+  color: var(--wb-brand);
+  border-color: var(--wb-border);
+  background-color: var(--wb-brand-soft);
+}
+
+.outreach-action-btn:hover:not(:disabled) {
+  color: var(--wb-brand);
+  border-color: var(--wb-brand);
+  background-color: var(--wb-brand-soft);
+}
+
+.library-tools-btn,
+.refresh-tool-btn {
+  color: var(--wb-text);
+  border-color: var(--wb-border);
+  background-color: var(--wb-surface);
+}
+
+.library-tools-btn:hover,
+.refresh-tool-btn:hover {
+  color: var(--wb-brand);
+  border-color: var(--wb-brand);
+  background-color: var(--wb-surface-soft);
+}
+
+.library-tools-count,
+.dropdown-item-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 22px;
+  height: 20px;
+  padding: 0 5px;
+  border-radius: 10px;
+  background: var(--wb-brand-soft);
+  color: var(--wb-brand);
+  font-size: 11px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.library-tools-count { margin-left: 6px; }
+.dropdown-item-count { margin-left: auto; }
+.dropdown-chevron { margin-left: 8px; font-size: 12px; }
+
+.header-actions-bar .refresh-tool-btn {
+  width: 38px;
+  padding: 0;
+}
+
+.header-actions-bar .refresh-tool-btn .el-icon {
+  margin: 0;
 }
 
 /* 主体分栏布局 */
@@ -1280,13 +1312,13 @@ onMounted(() => {
   box-sizing: border-box;
 }
 
-/* 左侧职位分库导航侧栏 (紧凑 256px，黑字高对比) */
+/* 左侧职位分库导航侧栏 */
 .job-repositories-sidebar {
   width: 256px;
   min-width: 256px;
   max-width: 256px;
-  background-color: #ffffff;
-  border: 1px solid #e2e8f0;
+  background-color: var(--wb-surface);
+  border: 1px solid var(--wb-border);
   border-radius: 12px;
   padding: 14px;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.02);
@@ -1308,7 +1340,7 @@ onMounted(() => {
 .repo-title {
   font-size: 14px;
   font-weight: 700;
-  color: #0f172a;
+  color: var(--wb-text);
 }
 
 .add-repo-link {
@@ -1335,17 +1367,17 @@ onMounted(() => {
   border-radius: 8px;
   cursor: pointer;
   transition: all 0.15s ease;
-  background-color: #ffffff;
+  background-color: transparent;
   border-left: 3px solid transparent;
 }
 
 .repo-item:hover {
-  background-color: #f8fafc;
+  background-color: var(--wb-surface-soft);
 }
 
 .repo-item.active {
-  background-color: #eff6ff;
-  border-left-color: #2563eb;
+  background-color: var(--wb-brand-soft);
+  border-left-color: var(--wb-brand);
 }
 
 .all-repo-icon {
@@ -1389,7 +1421,7 @@ onMounted(() => {
 .repo-name {
   font-size: 13px;
   font-weight: 700;
-  color: #0f172a;
+  color: var(--wb-text);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1398,7 +1430,7 @@ onMounted(() => {
 .repo-sub {
   font-size: 11px;
   font-weight: 500;
-  color: #475569;
+  color: var(--wb-muted);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1409,8 +1441,8 @@ onMounted(() => {
   font-weight: 700;
   padding: 2px 7px;
   border-radius: 10px;
-  background-color: #f1f5f9;
-  color: #475569;
+  background-color: var(--wb-surface-soft);
+  color: var(--wb-muted);
   flex-shrink: 0;
 }
 
@@ -1551,11 +1583,11 @@ onMounted(() => {
 
 .count-summary {
   font-size: 13px;
-  color: #475569;
+  color: var(--wb-muted);
 }
 
 .count-summary strong {
-  color: #0f172a;
+  color: var(--wb-text);
 }
 
 .view-mode-toggle {
@@ -1578,8 +1610,8 @@ onMounted(() => {
 .talent-card {
   transition: transform 0.15s ease, box-shadow 0.15s ease;
   min-width: 0; /* 核心：防止卡片内部文字溢出把 CSS Grid 轨道撑爆 */
-  background: #ffffff;
-  border: 1px solid #e2e8f0;
+  background: var(--wb-surface);
+  border: 1px solid var(--wb-border);
   border-radius: 12px;
   padding: 14px 16px;
   display: flex;
@@ -1734,8 +1766,8 @@ onMounted(() => {
 
 /* 高密数据表格视图 (Table View) */
 .talent-table-container {
-  background: #ffffff;
-  border: 1px solid #e2e8f0;
+  background: var(--wb-surface);
+  border: 1px solid var(--wb-border);
   border-radius: 12px;
   overflow: hidden;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.02);
@@ -1838,13 +1870,13 @@ onMounted(() => {
   margin: 0 0 8px;
   font-size: 16px;
   font-weight: 700;
-  color: #0f172a;
+  color: var(--wb-text);
 }
 
 .empty-subtitle {
   margin: 0 0 20px;
   font-size: 13px;
-  color: #64748b;
+  color: var(--wb-muted);
   max-width: 480px;
   line-height: 1.5;
 }
@@ -2164,5 +2196,18 @@ onMounted(() => {
   margin: 0;
   font-size: 12px;
   color: #475569;
+}
+
+@media (max-width: 1180px) {
+  .talent-page-header { align-items: flex-start; }
+  .header-actions-bar { justify-content: flex-start; margin-left: 0; }
+}
+
+@media (max-width: 760px) {
+  .talent-pool-page { padding-right: 16px; padding-left: 16px; }
+  .talent-page-header { padding-right: 16px; }
+  .talent-workbench-layout { flex-direction: column; }
+  .job-repositories-sidebar { position: static; width: 100%; min-width: 0; max-width: none; max-height: 240px; }
+  .header-actions-bar { width: 100%; }
 }
 </style>
