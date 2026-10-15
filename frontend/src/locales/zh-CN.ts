@@ -91,6 +91,18 @@ export default {
   },
 
   providers: {
+    'aliyun-glm': {
+      guideTitle: '使用阿里云百炼接入 GLM-5.3-Flash',
+      steps: [
+        '进入阿里云百炼华北2（北京）地域的业务空间',
+        '确认该业务空间已开通 ZHIPU/GLM-5.3-Flash',
+        '在同一业务空间创建或获取 API Key；智谱开放平台的 Key 不适用',
+        '核对下方业务空间专属 API 地址，粘贴 API Key',
+        '点击测试连接，成功后保存配置'
+      ],
+      pricing: '按阿里云百炼账户实际用量计费，需有可用额度',
+      openConsole: '打开阿里云百炼控制台'
+    },
     deepseek: {
       name: 'DeepSeek',
       description: '国产模型，性价比高',

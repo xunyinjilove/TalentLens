@@ -91,6 +91,18 @@ export default {
   },
 
   providers: {
+    'aliyun-glm': {
+      guideTitle: 'Connect GLM-5.3-Flash through Alibaba Cloud Model Studio',
+      steps: [
+        'Open your Model Studio workspace in the China (Beijing) region',
+        'Enable ZHIPU/GLM-5.3-Flash in that workspace',
+        'Create or obtain an API key for the same workspace; a Zhipu platform key will not work',
+        'Check the workspace-specific API URL below and enter the API key',
+        'Test the connection, then save the settings'
+      ],
+      pricing: 'Billed by Alibaba Cloud Model Studio usage; available balance is required',
+      openConsole: 'Open Model Studio console'
+    },
     deepseek: {
       name: 'DeepSeek',
       description: 'Cost-effective Chinese AI model',

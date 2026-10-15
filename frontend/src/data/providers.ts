@@ -1,4 +1,4 @@
-// AI 服务商预设数据 (更新于 2026-02)
+// AI 服务商预设数据
 export interface ProviderGuide {
   title: string
   steps: string[]
@@ -86,6 +86,27 @@ export const providers: Provider[] = [
       ],
       link: 'https://open.bigmodel.cn/usercenter/apikeys',
       pricing: 'providers.zhipu.pricing'
+    }
+  },
+  {
+    id: 'aliyun-glm',
+    name: '阿里云百炼 · GLM-5.3-Flash',
+    baseURL: 'https://llm-37wjzlv5q9qogtmi.cn-beijing.maas.aliyuncs.com/compatible-mode/v1',
+    models: [
+      { id: 'ZHIPU/GLM-5.3-Flash', name: '智谱 GLM-5.3-Flash', recommended: true }
+    ],
+    defaultModel: 'ZHIPU/GLM-5.3-Flash',
+    guide: {
+      title: 'providers.aliyun-glm.guideTitle',
+      steps: [
+        'providers.aliyun-glm.steps.0',
+        'providers.aliyun-glm.steps.1',
+        'providers.aliyun-glm.steps.2',
+        'providers.aliyun-glm.steps.3',
+        'providers.aliyun-glm.steps.4'
+      ],
+      link: 'https://bailian.console.aliyun.com/',
+      pricing: 'providers.aliyun-glm.pricing'
     }
   },
   {

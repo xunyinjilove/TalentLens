@@ -33,6 +33,78 @@ func TestChatWithAIAssistantPaymentRequiredDoesNotRetryOrInventAnswer(t *testing
 	}
 }
 
+func TestGLMFlashConnectionUsesWorkspaceChatEndpointAndThinkingBudget(t *testing.T) {
+	type requestDetails struct {
+		path, authorization, model, effort string
+		maxTokens                          int
+	}
+	seen := make(chan requestDetails, 1)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			Model           string `json:"model"`
+			MaxTokens       int    `json:"max_tokens"`
+			ReasoningEffort string `json:"reasoning_effort"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		seen <- requestDetails{r.URL.Path, r.Header.Get("Authorization"), body.Model, body.ReasoningEffort, body.MaxTokens}
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"role":"assistant","content":"OK"}}]}`))
+	}))
+	defer server.Close()
+
+	app := NewApp()
+	ok, message := app.TestAIConnection(&AIConfig{Provider: "aliyun-glm", BaseURL: server.URL + "/compatible-mode/v1", APIKey: "workspace-test-key", Model: "ZHIPU/GLM-5.3-Flash", Timeout: 30})
+	if !ok {
+		t.Fatalf("GLM Flash connection test failed: %s", message)
+	}
+	request := <-seen
+	if request.path != "/compatible-mode/v1/chat/completions" || request.authorization != "Bearer workspace-test-key" || request.model != "ZHIPU/GLM-5.3-Flash" || request.effort != "low" || request.maxTokens < 2048 {
+		t.Fatalf("unexpected GLM Flash request: %+v", request)
+	}
+}
+
+func TestGLMFlashConnectionDoesNotAcceptThinkingOnlyResponse(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"role":"assistant","reasoning_content":"thinking","content":""}}]}`))
+	}))
+	defer server.Close()
+	app := NewApp()
+	ok, message := app.TestAIConnection(&AIConfig{BaseURL: server.URL, APIKey: "test-key", Model: "ZHIPU/GLM-5.3-Flash", Timeout: 30})
+	if ok || !strings.Contains(message, "回答") {
+		t.Fatalf("thinking-only response should not pass connection test: ok=%v message=%q", ok, message)
+	}
+}
+
+func TestGLMFlashConnectionExplainsInsufficientBalance(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusPaymentRequired)
+		_, _ = w.Write([]byte(`{"code":30001,"message":"Sorry, your account balance is insufficient"}`))
+	}))
+	defer server.Close()
+	app := NewApp()
+	ok, message := app.TestAIConnection(&AIConfig{BaseURL: server.URL, APIKey: "test-key", Model: "ZHIPU/GLM-5.3-Flash", Timeout: 30})
+	if ok || !strings.Contains(message, "余额不足") || strings.Contains(message, "30001") {
+		t.Fatalf("HTTP 402 should explain the next action without raw details: ok=%v message=%q", ok, message)
+	}
+}
+
+func TestGLMFlashChatReservesOutputBeyondThinking(t *testing.T) {
+	seen := make(chan int, 1)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			MaxTokens int `json:"max_tokens"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		seen <- body.MaxTokens
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"role":"assistant","content":"可以继续分析简历"}}]}`))
+	}))
+	defer server.Close()
+	app := NewApp()
+	reply, err := app.callAIChatMessages(&AIConfig{BaseURL: server.URL, APIKey: "test-key", Model: "ZHIPU/GLM-5.3-Flash", MaxRetries: 1}, []ChatMessage{{Role: "user", Content: "你好"}}, 0.4)
+	if err != nil || reply != "可以继续分析简历" || <-seen < 8192 {
+		t.Fatalf("GLM Flash chat response=%q error=%v", reply, err)
+	}
+}
+
 func TestChatWithAIAssistantOfflineKnowledge(t *testing.T) {
 	app := &App{
 		config: Config{
