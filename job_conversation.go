@@ -364,6 +364,33 @@ func (a *App) Start51JobConversation(resumeID, action, message string) JobConver
 	return result
 }
 
+// Send51JobOutreachMessage sends the HR-approved second message only after the
+// platform's default first HiChat has been verified. The script checks the
+// exact candidate chat and a new success marker for this text.
+func (a *App) Send51JobOutreachMessage(resumeID, message string) JobConversationResult {
+	if len([]rune(strings.TrimSpace(message))) == 0 || len([]rune(message)) > 500 {
+		return JobConversationResult{Status: "error", Message: "定制招呼语需为 1–500 字"}
+	}
+	a.contactMutex.Lock()
+	defer a.contactMutex.Unlock()
+	resume, err := a.load51JobContactResume(resumeID)
+	if err != nil {
+		return JobConversationResult{Status: "error", Message: err.Error()}
+	}
+	if resume.ContactStatus != "greeted" {
+		return JobConversationResult{Status: "error", Message: "尚未核实平台默认 Hi聊已发送，定制招呼语未发送"}
+	}
+	result := a.run51JobConversation(resume, "send_outreach", message, nil)
+	if result.Status != "sent" {
+		return result
+	}
+	resume.ContactUpdatedAt = time.Now().Format(time.RFC3339)
+	if err := a.save51JobContactResume(resume); err != nil {
+		return JobConversationResult{Status: "uncertain", Message: "平台显示定制文案已发出，但本地记录保存失败；请核对聊天记录"}
+	}
+	return result
+}
+
 // Check51JobResumeReply 只导入该候选人聊天记录里的完整文件；未收到时保持等待，不虚报成功。
 func (a *App) Check51JobResumeReply(resumeID string) JobConversationResult {
 	a.contactMutex.Lock()

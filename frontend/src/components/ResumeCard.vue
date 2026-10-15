@@ -63,7 +63,7 @@
         <!-- 错误状态 -->
         <div v-else-if="resume.status === 'error'" class="error">
           <el-icon><CircleClose /></el-icon>
-          <span>{{ $t('analysis.failed') }}</span>
+          <span>{{ failureSummary }}</span>
         </div>
 
         <!-- 待分析状态 -->
@@ -114,6 +114,15 @@ const props = defineProps<{
   sequence: number
   selected?: boolean
 }>()
+
+const failureSummary = computed(() => {
+  const message = props.resume.errorMessage || ''
+  if (message.includes('解析AI返回失败')) return 'AI 返回格式错误 · 点击查看详情'
+  if (message.includes('余额不足')) return 'AI 服务余额不足 · 点击查看详情'
+  if (message.includes('429') || message.includes('请求过于频繁')) return 'AI 服务限流 · 点击查看详情'
+  if (message.includes('认证失败') || message.includes('API Key')) return 'AI 配置或认证错误 · 点击查看详情'
+  return '分析失败 · 点击查看原因'
+})
 
 defineEmits<{
   (e: 'click'): void
