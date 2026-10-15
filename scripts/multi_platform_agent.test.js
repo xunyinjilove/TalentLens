@@ -11,6 +11,12 @@ test('quota preserves total and zero weight', () => {
   assert.deepEqual(agent.allocateQuota(10, [{ ratio: 99 }, { ratio: 1 }, { ratio: 0 }]), [10, 0, 0]);
 });
 
+test('51job candidate identity ignores changing link parameters', () => {
+  assert.equal(agent.extract51JobResumeId('https://ehire.51job.com/Revision/talent/resume/detail?resumeId=123&source=a'), '123');
+  assert.equal(agent.extract51JobResumeId('https://ehire.51job.com/Revision/talent/resume/detail?source=b&resumeId=123'), '123');
+  assert.equal(agent.extract51JobResumeId('https://ehire.51job.com/Revision/talent/search?resumeId=123'), '');
+});
+
 test('minimized search scrolls the list without mouse wheel events', async () => {
   const body = {};
   const scroller = { parentElement: body, scrollTop: 0, scrollHeight: 2000, clientHeight: 500 };
@@ -35,7 +41,7 @@ test('background search enables page focus emulation', async () => {
 
 test('existing browser connection retries a CDP timeout without replacing the browser', async () => {
   let attempts = 0;
-  const browser = { pages: async () => [] };
+  const browser = { pages: async () => { throw Error('old tabs are busy'); } };
   const result = await agent.connectToExistingBrowser(
     { debugPort: 9503, name: '前程无忧' },
     {
@@ -92,6 +98,25 @@ test('persistent CDP timeout reports a resumable error without closing existing 
   assert.equal(attempts, 2);
 });
 
+test('occupied browser profile falls back to a separate persistent search profile', async () => {
+  const launches = [];
+  const browser = { pages: async () => { throw Error('unrelated page must remain untouched'); } };
+  const result = await agent.launchPlatformBrowser(
+    { code: '51job', name: '前程无忧', debugPort: 9503, homeUrl: 'https://ehire.51job.com/Revision/talent/search' },
+    'msedge.exe', 'C:\\TalentLens\\51job_isolated_profile',
+    {
+      connect: async cfg => cfg.debugPort === 9603 && launches.length === 2 ? browser : null,
+      spawn: (_path, args) => { launches.push(args); return { unref() {} }; },
+      wait: async () => {}
+    }
+  );
+  assert.equal(result.browser, browser);
+  assert.equal(result.reused, false);
+  assert.equal(launches.length, 2);
+  assert.ok(launches[1].some(arg => arg === '--remote-debugging-port=9603'));
+  assert.ok(launches[1].some(arg => arg.includes('51job_isolated_profile_automation')));
+});
+
 test('search opens its own background tab and leaves existing pages untouched', async () => {
   let detached = false;
   let navigations = 0;
@@ -112,7 +137,8 @@ test('search opens its own background tab and leaves existing pages untouched', 
     target: () => ({ createCDPSession: async () => session })
   };
   const browser = {
-    pages: async () => [existingPage],
+    pages: async () => { throw Error('old tabs are busy'); },
+    target: () => ({ createCDPSession: async () => session }),
     waitForTarget: async predicate => {
       const target = { _targetId: 'search-target', page: async () => searchPage };
       assert.equal(predicate(target), true);
@@ -123,6 +149,34 @@ test('search opens its own background tab and leaves existing pages untouched', 
   assert.equal(navigations, 0);
   assert.equal(closes, 0);
   assert.equal(detached, true);
+});
+
+test('document scrolling counts as progress even when visible card identities are unchanged', async () => {
+  const card = {
+    parentElement: null,
+    offsetParent: {},
+    querySelector: () => null,
+    getAttribute: () => '',
+    getClientRects: () => [1]
+  };
+  const scroller = { scrollTop: 0, scrollHeight: 3000, clientHeight: 600 };
+  global.document = {
+    body: {}, documentElement: scroller, scrollingElement: scroller,
+    querySelector: () => card,
+    querySelectorAll: selector => selector.includes('card') ? [card] : []
+  };
+  global.location = { pathname: '/Revision/talent/search' };
+  const page = {
+    frames: () => [page],
+    evaluate: async (fn, ...args) => fn(...args)
+  };
+  try {
+    assert.equal(await agent.advanceSearchResults(page, { waitStepMs: 0, maxChecks: 1 }), true);
+    assert.equal(scroller.scrollTop, 600);
+  } finally {
+    delete global.document;
+    delete global.location;
+  }
 });
 
 test('reused browser window stays visible while its search tab runs', async () => {

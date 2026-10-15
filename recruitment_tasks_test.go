@@ -60,6 +60,27 @@ func TestSourcingTaskRetainsPlatformShortfallReason(t *testing.T) {
 	}
 }
 
+func TestSourcingTaskExplainsDeduplicatedShortfall(t *testing.T) {
+	app := NewApp()
+	app.dataDirOverride = t.TempDir()
+	defer app.closeRecruitmentDB()
+	project := app.CreateProject("测试岗位", "", 1, "", "", &JobConfig{})
+	id, err := app.createSourcingTask(SourcingTaskConfig{ProjectID: project.ID, Keyword: "工程师", Count: 30})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !app.finishSourcingTaskFromDone(id, map[string]interface{}{"total": float64(30)}, 6, 24, 30) {
+		t.Fatal("matching engine and saved counts should finalize")
+	}
+	tasks, err := app.ListSourcingTasks(project.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(tasks) != 1 || tasks[0].Status != "partial" || tasks[0].Message != "未达目标：平台返回了 24 条已入库记录；已保留本次 6 位新候选人，可手动继续检索" {
+		t.Fatalf("duplicate shortfall reason was lost: %+v", tasks)
+	}
+}
+
 func TestSourcingTaskDeletionKeepsCandidatesAndSkipsActiveTasks(t *testing.T) {
 	app := NewApp()
 	app.dataDirOverride = t.TempDir()

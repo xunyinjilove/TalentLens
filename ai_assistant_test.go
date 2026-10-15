@@ -105,6 +105,35 @@ func TestGLMFlashChatReservesOutputBeyondThinking(t *testing.T) {
 	}
 }
 
+func TestGLMFlashRetriesThinkingOnlyAnswerWithLargerBudget(t *testing.T) {
+	var calls atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			MaxTokens       int    `json:"max_tokens"`
+			ReasoningEffort string `json:"reasoning_effort"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Errorf("decode request: %v", err)
+		}
+		n := calls.Add(1)
+		if body.ReasoningEffort != "low" || (n == 1 && body.MaxTokens < 16384) || (n == 2 && body.MaxTokens < 32768) {
+			t.Errorf("unexpected GLM request %d: %+v", n, body)
+		}
+		if n == 1 {
+			_, _ = w.Write([]byte(`{"choices":[{"message":{"role":"assistant","reasoning_content":"thinking","content":""}}]}`))
+		} else {
+			_, _ = w.Write([]byte(`{"choices":[{"message":{"role":"assistant","content":"评估完成"}}]}`))
+		}
+	}))
+	defer server.Close()
+	app := NewApp()
+	reply, err := app.callAIChatMessages(&AIConfig{BaseURL: server.URL, APIKey: "test-key", Model: "ZHIPU/GLM-5.3-Flash", MaxRetries: 1},
+		[]ChatMessage{{Role: "user", Content: "请评估"}}, 0.2)
+	if err != nil || reply != "评估完成" || calls.Load() != 2 {
+		t.Fatalf("retry answer=%q error=%v calls=%d", reply, err, calls.Load())
+	}
+}
+
 func TestChatWithAIAssistantOfflineKnowledge(t *testing.T) {
 	app := &App{
 		config: Config{

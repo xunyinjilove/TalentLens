@@ -36,7 +36,7 @@ import (
 )
 
 // 版本信息
-const AppVersion = "1.8.11"
+const AppVersion = "1.8.12"
 const GitHubRepo = "xunyinjilove/TalentLens"
 
 //go:embed all:frontend/dist

@@ -162,7 +162,11 @@ func (a *App) finishSourcingTaskFromDone(taskID string, done map[string]interfac
 		reason, _ := done["shortfallReason"].(string)
 		reason = strings.TrimSpace(reason)
 		if reason == "" {
-			reason = "当前筛选条件下没有足够的新候选人"
+			if deduplicatedCount > 0 {
+				reason = fmt.Sprintf("平台返回了 %d 条已入库记录；已保留本次 %d 位新候选人，可手动继续检索", deduplicatedCount, persistedCount)
+			} else {
+				reason = "检索提前结束，平台未提供具体停止原因；可手动继续检索"
+			}
 		}
 		message := "未达目标：" + reason
 		if len([]rune(message)) > 400 {
