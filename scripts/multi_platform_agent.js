@@ -269,7 +269,11 @@ if (options.excludeFile && fs.existsSync(options.excludeFile)) {
     if (Array.isArray(parsed.urls)) {
       parsed.urls.forEach(u => {
         const c = (u || '').trim();
-        if (c) projectExcludedUrls.add(c);
+        if (c) {
+          projectExcludedUrls.add(c);
+          const resumeId = extract51JobResumeId(c);
+          if (resumeId) seenCandidateKeys.add(`id:51job:${resumeId}`);
+        }
       });
     }
     if (Array.isArray(parsed.cards)) {
@@ -297,6 +301,16 @@ function candidateCardKey(candidate) {
     .replace(/已读|未读|刚刚活跃|今日活跃|3日内活跃|半年前活跃/g, '')
     .replace(/[\s\*()（）某]/g, '');
   return `${clean(candidate.name)}_${clean(candidate.workText)}_${clean(candidate.infoText)}`;
+}
+
+function extract51JobResumeId(candidateUrl) {
+  try {
+    const url = new URL(candidateUrl);
+    if (url.hostname.toLowerCase() !== 'ehire.51job.com' ||
+        !/^\/Revision\/talent\/resume\/detail$/i.test(url.pathname)) return '';
+    const id = url.searchParams.get('resumeId') || '';
+    return /^\d+$/.test(id) ? id : '';
+  } catch { return ''; }
 }
 
 function selectFreshCandidates(candidates, limit, excludedUrls = new Set(), seenKeys = new Set()) {
@@ -813,7 +827,9 @@ async function searchPageFingerprint(page) {
           break;
         }
       }
-      return JSON.stringify([location.pathname, activePage, cards.length, identities, scrollState]);
+      const documentScroll = document.scrollingElement || document.documentElement;
+      return JSON.stringify([location.pathname, activePage, cards.length, identities, scrollState,
+        documentScroll?.scrollTop || 0, documentScroll?.scrollHeight || 0]);
     }).catch(() => '');
     if (part) parts.push(part);
   }
@@ -1166,7 +1182,6 @@ async function connectToExistingBrowser(cfg, dependencies = {}) {
         defaultViewport: null,
         protocolTimeout: 120000
       });
-      await browser.pages();
       return browser;
     } catch (error) {
       lastError = error;
@@ -1180,10 +1195,9 @@ async function connectToExistingBrowser(cfg, dependencies = {}) {
 }
 
 async function openDedicatedSearchPage(browser, cfg) {
-  const pages = await browser.pages();
-  if (!pages.length) return browser.newPage();
-
-  const session = await pages[0].target().createCDPSession();
+  // A busy pre-existing tab can time out during pages()/Network.enable.
+  // Use the browser target so existing tabs never have to initialize.
+  const session = await browser.target().createCDPSession();
   try {
     const { targetId } = await session.send('Target.createTarget', { url: cfg.homeUrl, background: true });
     const target = await browser.waitForTarget(item => item._targetId === targetId, { timeout: 15000 });
@@ -1196,28 +1210,61 @@ async function openDedicatedSearchPage(browser, cfg) {
 }
 
 // 优先复用已有调试会话；连接超时只重试，不关闭现有窗口。
-async function launchPlatformBrowser(cfg, browserPath, profileDir) {
-  const debugPort = cfg.debugPort;
-
-  const existing = await connectToExistingBrowser(cfg);
+async function launchPlatformBrowser(cfg, browserPath, profileDir, dependencies = {}) {
+  const connect = dependencies.connect || connectToExistingBrowser;
+  const start = dependencies.spawn || spawn;
+  const wait = dependencies.wait || (ms => new Promise(resolve => setTimeout(resolve, ms)));
+  let existing = null;
+  let primaryUnavailable = false;
+  try {
+    existing = await connect(cfg);
+  } catch (error) {
+    primaryUnavailable = true;
+    sendMsg('status', { platform: cfg.code, message: `【${cfg.name}】原浏览器连接繁忙，尝试独立检索窗口。` });
+  }
   if (existing) {
     preserveBrowserWindow(existing);
     sendMsg('status', { platform: cfg.code, message: `♻️ 已复用【${cfg.name}】已打开的浏览器窗口` });
     return { browser: existing, reused: true };
   }
 
-  sendMsg('status', { platform: cfg.code, message: `正在启动【${cfg.name}】专用浏览器；其他窗口和网页保持打开。` });
-  const child = spawn(browserPath, browserLaunchArgs(cfg, profileDir, options.testLoginPlatform === cfg.code),
-    { detached: true, stdio: 'ignore', windowsHide: true });
-  child.unref();
+  if (!primaryUnavailable) {
+    sendMsg('status', { platform: cfg.code, message: `正在启动【${cfg.name}】专用浏览器；其他窗口和网页保持打开。` });
+    const child = start(browserPath, browserLaunchArgs(cfg, profileDir, options.testLoginPlatform === cfg.code),
+      { detached: true, stdio: 'ignore', windowsHide: true });
+    child.unref();
 
-  for (let i = 0; i < 20; i++) {
-    await new Promise(r => setTimeout(r, 800));
-    const browser = await connectToExistingBrowser(cfg);
-    if (browser) return { browser, reused: false };
+    for (let i = 0; i < 20; i++) {
+      await wait(800);
+      try {
+        const browser = await connect(cfg);
+        if (browser) return { browser, reused: false };
+      } catch (error) {
+        break;
+      }
+    }
   }
 
-  throw new Error(`无法连接【${cfg.name}】专用浏览器 (profile: ${path.basename(profileDir)})；现有窗口未关闭，请检查该专用配置是否被占用后手动继续`);
+  // Chromium forwards a second launch to an already-running profile. If that
+  // window was opened without CDP, its port cannot be enabled in place.
+  // A persistent fallback profile lets HR log in without closing that window.
+  const fallbackCfg = { ...cfg, debugPort: cfg.debugPort + 100 };
+  const fallbackProfile = `${profileDir}_automation`;
+  const fallbackExisting = await connect(fallbackCfg);
+  if (fallbackExisting) {
+    preserveBrowserWindow(fallbackExisting);
+    return { browser: fallbackExisting, reused: true };
+  }
+  sendMsg('status', { platform: cfg.code, message: `【${cfg.name}】原浏览器配置已被占用，正在打开独立检索窗口；原网页保持打开。首次使用请在新窗口登录。` });
+  const fallbackChild = start(browserPath, browserLaunchArgs(fallbackCfg, fallbackProfile, true),
+    { detached: true, stdio: 'ignore', windowsHide: true });
+  fallbackChild.unref();
+  for (let i = 0; i < 20; i++) {
+    await wait(800);
+    const browser = await connect(fallbackCfg);
+    if (browser) return { browser, reused: false };
+  }
+  throw new Error(`无法连接【${cfg.name}】独立检索窗口；现有网页已保留，请检查浏览器是否允许远程调试后手动继续`);
 }
 
 // 统一抓取单个平台 (返回 null 表示启动/连接失败，返回 [] 表示成功连接但无结果)
@@ -1255,11 +1302,10 @@ async function scrapePlatform(platformKey, browserPath, targetCount, keywordPlan
   // 等待浏览器进程就绪
   await new Promise(r => setTimeout(r, 1500));
 
-  const pages = await browser.pages();
-
   // 检索始终使用新标签，避免启动与连接的竞态误导航 HR 原有的页面。
   const domainHint = cfg.code === '51job' ? '51job.com' : cfg.code;
   const isLoginTest = options.testLoginPlatform === cfg.code;
+  const pages = isLoginTest ? await browser.pages() : [];
   let page;
   if (!isLoginTest) {
     page = await openDedicatedSearchPage(browser, cfg);
@@ -1767,6 +1813,7 @@ async function autoNavigateAndSearch(page, platformKey, cfg, searchKeyword) {
       if (stopRequested()) return outcome(allPlatformSavedList, 'HR 已停止');
 
       // 整理并存储
+      const savedBeforePass = allPlatformSavedList.length;
       for (let i = 0; i < scraped.length; i++) {
         if (allPlatformSavedList.length >= targetCount || stopRequested()) break;
 
@@ -1778,8 +1825,10 @@ async function autoNavigateAndSearch(page, platformKey, cfg, searchKeyword) {
         const urlLower = urlText.toLowerCase();
         const candidateUrl = urlText && !/\/talent\/search|\/search|\/recommend|\/navigate/.test(urlLower) &&
           /id=|seq=|user|resume|detail|geek/.test(urlLower) ? urlText : '';
+        const platformCandidateId = platformKey === '51job' ? extract51JobResumeId(candidateUrl) : '';
         const isDup = candidateUrl
-          ? projectExcludedUrls.has(candidateUrl) || seenCandidateKeys.has(`url:${candidateUrl}`)
+          ? projectExcludedUrls.has(candidateUrl) || seenCandidateKeys.has(`url:${candidateUrl}`) ||
+            (platformCandidateId && seenCandidateKeys.has(`id:${platformKey}:${platformCandidateId}`))
           : false;
         if (isDup) {
           if (item.cardKey) seenCandidateKeys.add(item.cardKey);
@@ -1819,15 +1868,15 @@ ${cleanedRawText}
 `;
 
         const fileName = `【${cfg.name}】${item.name}_${currentKeyword}.txt`;
-        const filePath = path.join(options.dataDir, fileName);
+        // Masked names can repeat; keep the display name while giving each
+        // captured resume its own file so later scans cannot overwrite it.
+        const filePath = path.join(options.dataDir, `${candID}.txt`);
         fs.writeFileSync(filePath, formattedContent, 'utf8');
 
         const candData = {
           id: candID,
           platform: platformKey,
-          platformCandidateId: platformKey === '51job' && candidateUrl
-            ? (() => { try { const u = new URL(candidateUrl); return u.hostname === 'ehire.51job.com' && u.pathname === '/Revision/talent/resume/detail' && /^\d+$/.test(u.searchParams.get('resumeId') || '') ? u.searchParams.get('resumeId') : ''; } catch { return ''; } })()
-            : '',
+          platformCandidateId,
           platformName: cfg.name,
           fileName,
           filePath,
@@ -1854,6 +1903,7 @@ ${cleanedRawText}
           projectExcludedUrls.add(candData.url.trim());
           seenCandidateKeys.add(`url:${candData.url.trim()}`);
         }
+        if (platformCandidateId) seenCandidateKeys.add(`id:${platformKey}:${platformCandidateId}`);
 
         sendMsg('candidate', {
           platform: platformKey,
@@ -1864,6 +1914,16 @@ ${cleanedRawText}
         });
 
         await new Promise(r => setTimeout(r, 300));
+      }
+      if (allPlatformSavedList.length === savedBeforePass) {
+        sendMsg('status', { platform: platformKey,
+          message: `【${cfg.name}】本轮卡片均已收录，继续翻页寻找新候选人（${pageAttempts}/${maxPageAttempts}）。` });
+        if (pageAttempts >= maxPageAttempts || !await advanceSearchResults(page)) {
+          exhaustedKeywords.add(currentKeyword);
+          break;
+        }
+        pageAttempts++;
+        continue;
       }
       if (allPlatformSavedList.length - taskStartCount < currentTarget) {
         sendMsg('status', {
@@ -2189,4 +2249,4 @@ if (require.main === module) {
   });
 }
 
-module.exports = { allocateQuota, planChannelQuota, smoothScroll, keepPageActiveInBackground, setBrowserWindowState, preserveBrowserWindow, connectToExistingBrowser, openDedicatedSearchPage, createBackgroundPage, capture51jobDetailUrl, isBrowserStartPage, browserLaunchArgs, closeUnusedStartPages, isPlatformPageUrl, ensurePlatformPage, submit51jobSearch, detectCaptcha, extractCandidatesAcrossFrames, selectFreshCandidates, advanceSearchResults, main };
+module.exports = { allocateQuota, planChannelQuota, smoothScroll, keepPageActiveInBackground, setBrowserWindowState, preserveBrowserWindow, connectToExistingBrowser, launchPlatformBrowser, openDedicatedSearchPage, createBackgroundPage, capture51jobDetailUrl, extract51JobResumeId, isBrowserStartPage, browserLaunchArgs, closeUnusedStartPages, isPlatformPageUrl, ensurePlatformPage, submit51jobSearch, detectCaptcha, extractCandidatesAcrossFrames, selectFreshCandidates, advanceSearchResults, main };

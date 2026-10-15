@@ -129,12 +129,10 @@ func (a *App) callAIChatMessages(cfg *AIConfig, messages []ChatMessage, temperat
 		MaxTokens:   4000,
 	}
 	if isGLM53Flash(model) {
-		reqBody.MaxTokens = 8192
-	}
-
-	body, err := json.Marshal(reqBody)
-	if err != nil {
-		return "", fmt.Errorf("序列化请求失败: %w", err)
+		// This model defaults to maximum reasoning. A resume can exhaust the
+		// output budget before it produces any final answer.
+		reqBody.MaxTokens = 16384
+		reqBody.ReasoningEffort = "low"
 	}
 
 	url := strings.TrimSuffix(baseURL, "/") + "/chat/completions"
@@ -144,8 +142,18 @@ func (a *App) callAIChatMessages(cfg *AIConfig, messages []ChatMessage, temperat
 	if maxRetries < 1 {
 		maxRetries = 2
 	}
+	if isGLM53Flash(model) && maxRetries < 2 {
+		maxRetries = 2
+	}
 
 	for attempt := 0; attempt < maxRetries; attempt++ {
+		if isGLM53Flash(model) && attempt > 0 {
+			reqBody.MaxTokens = 32768
+		}
+		body, err := json.Marshal(reqBody)
+		if err != nil {
+			return "", fmt.Errorf("序列化请求失败: %w", err)
+		}
 		if attempt > 0 {
 			time.Sleep(time.Duration(attempt) * 1500 * time.Millisecond)
 		}
@@ -215,7 +223,11 @@ func (a *App) callAIChatMessages(cfg *AIConfig, messages []ChatMessage, temperat
 
 		answer := strings.TrimSpace(chatResp.Choices[0].Message.Content)
 		if answer == "" {
-			return "", fmt.Errorf("模型没有生成回答；思考可能用尽输出 Token，请重试")
+			lastErr = fmt.Errorf("模型只返回思考内容，没有生成可用回答；输出长度可能不足")
+			if isGLM53Flash(model) && attempt+1 < maxRetries {
+				continue
+			}
+			return "", lastErr
 		}
 		return answer, nil
 	}
