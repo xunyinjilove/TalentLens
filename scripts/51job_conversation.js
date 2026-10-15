@@ -555,7 +555,7 @@ async function main(argv = process.argv.slice(2)) {
   const args = readArgs(argv);
   try {
     const expected = parseCandidateUrl(args.url);
-    if (!['list_jobs', 'preview_hi', 'confirm_hi', 'ask_resume', 'check_resume'].includes(args.action)) throw new Error('不支持的 51job 沟通操作');
+    if (!['verify_candidate', 'list_jobs', 'preview_hi', 'confirm_hi', 'ask_resume', 'send_outreach', 'check_resume'].includes(args.action)) throw new Error('不支持的 51job 沟通操作');
     if (!/^[A-Za-z0-9_-]+$/.test(args.recordID)) throw new Error('候选人档案编号无效');
     if (args.action === 'confirm_hi' && (!args.name || !args.jobTitle || !args.expectedJobID || !args.targetID ||
         !Number.isSafeInteger(Number(args.expectedPoints)) || Number(args.expectedPoints) <= 0)) {
@@ -579,6 +579,10 @@ async function main(argv = process.argv.slice(2)) {
       return;
     }
     const page = await candidatePage(browser, expected, args.name);
+    if (args.action === 'verify_candidate') {
+      process.stdout.write(JSON.stringify({ status: 'verified', targetId: expected.resumeId, message: '51job 详情页与候选人姓名已核对' }) + '\n');
+      return;
+    }
     const manualJobSelection = args.action === 'list_jobs' || (args.action === 'preview_hi' && !!args.expectedJobID);
     const chat = await openCandidateChat(page, args.name,
       args.action === 'check_resume' ? '' : args.jobTitle, !manualJobSelection);

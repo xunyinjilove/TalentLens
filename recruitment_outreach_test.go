@@ -79,3 +79,46 @@ func TestArchivedCandidateCannotBeConfirmedFromOldOutreachPreview(t *testing.T) 
 		t.Fatalf("archived candidate must not remain eligible: %v", err)
 	}
 }
+
+func TestOutreachQueuesOnlyVerified51JobDetailIdentity(t *testing.T) {
+	app := NewApp()
+	app.dataDirOverride = t.TempDir()
+	defer app.closeRecruitmentDB()
+	project := app.CreateProject("Synthetic role", "Test", 1, "HR", "", &JobConfig{Title: "Synthetic role"})
+	for _, candidate := range []struct{ id, url string }{
+		{"verified", "https://ehire.51job.com/Revision/talent/resume/detail?resumeId=123456"},
+		{"legacy", "https://ehire.51job.com/Candidate/ResumeView.aspx?hidUserID=987654"},
+	} {
+		resume := &Resume{ID: candidate.id, ProjectID: project.ID, FileName: candidate.id, SourcePlatform: "51job", URL: candidate.url,
+			Content: "Synthetic project experience", Status: "done", Score: 80,
+			Analysis: &AnalysisResult{CandidateName: candidate.id, AbilityScore: 80, CoreMatch: 80, RedLineStatus: "passed"}}
+		if err := app.persistSearchCandidate(resume); err != nil {
+			t.Fatal(err)
+		}
+	}
+	batch, err := app.PreviewTopTenOutreach(project.ID)
+	if err != nil || len(batch.Items) != 2 {
+		t.Fatalf("preview: items=%d err=%v", len(batch.Items), err)
+	}
+	approvals := make([]OutreachApproval, 0, len(batch.Items))
+	for _, item := range batch.Items {
+		approvals = append(approvals, OutreachApproval{ItemID: item.ID, Include: true, Message: item.Message})
+	}
+	confirmed, err := app.ConfirmOutreachBatch(batch.ID, approvals)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, item := range confirmed.Items {
+		if item.ResumeID == "verified" && (item.Status != "queued" || item.PlatformCandidateID != "123456") {
+			t.Fatalf("verified detail must queue with exact ID: %+v", item)
+		}
+		if item.ResumeID == "legacy" && item.Status != "needs_manual" {
+			t.Fatalf("legacy URL must not be guessed into a sendable ID: %+v", item)
+		}
+		if item.ResumeID == "legacy" {
+			if _, err := app.VerifyOutreachCandidateDetail(item.ID, "https://example.com/Revision/talent/resume/detail?resumeId=987654"); err == nil {
+				t.Fatal("untrusted detail URL must not be bound to a candidate")
+			}
+		}
+	}
+}

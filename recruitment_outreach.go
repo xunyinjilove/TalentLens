@@ -4,6 +4,8 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 	"sync"
@@ -12,6 +14,7 @@ import (
 
 type OutreachItem struct {
 	ID                  string `json:"id"`
+	ResumeID            string `json:"resumeId"`
 	ProjectCandidateID  string `json:"projectCandidateId"`
 	CandidateName       string `json:"candidateName"`
 	Platform            string `json:"platform"`
@@ -319,6 +322,11 @@ func (a *App) PreviewTopTenOutreach(projectID string) (OutreachBatch, error) {
 			sourcePlatform = ""
 			sourceID = ""
 		}
+		if is51JobCandidateDetailURL(resume.URL) {
+			if platform, id := resumeSourceIdentity(resume); platform == "51job" && id != "" {
+				sourcePlatform, sourceID = platform, id
+			}
+		}
 		var jobID string
 		_ = db.QueryRow(`SELECT platform_job_id FROM platform_job_mappings WHERE platform=? AND project_id=? LIMIT 1`, sourcePlatform, projectID).Scan(&jobID)
 		name := conversationCandidateName(resume)
@@ -348,6 +356,7 @@ func (a *App) PreviewTopTenOutreach(projectID string) (OutreachBatch, error) {
 			msg, evi := a.generateAIOutreachGreeting(target.resume, project.JobConfig.Title, project.Name)
 			items[idx] = OutreachItem{
 				ID:                  recruitmentID("outreach_item"),
+				ResumeID:            target.resume.ID,
 				ProjectCandidateID:  target.linkID,
 				CandidateName:       target.name,
 				Platform:            target.sourcePlatform,
@@ -469,20 +478,25 @@ func (a *App) ConfirmOutreachBatch(batchID string, approvals []OutreachApproval)
 			if strings.TrimSpace(approval.Message) == "" {
 				return batch, fmt.Errorf("候选人 %s 的招呼语为空", item.CandidateName)
 			}
+			if len([]rune(approval.Message)) > 500 {
+				return batch, fmt.Errorf("候选人 %s 的招呼语超过 500 字，请先缩短文案", item.CandidateName)
+			}
 			var sent int
 			err = tx.QueryRow(`SELECT COUNT(*) FROM outreach_items oi JOIN outreach_batches b ON b.id=oi.batch_id
-				WHERE b.project_id=? AND oi.status='sent' AND
+				WHERE b.project_id=? AND oi.status IN ('sent','partial','uncertain') AND
 				(oi.project_candidate_id=? OR (?<>'' AND oi.platform=? AND oi.platform_candidate_id=? AND oi.platform_job_id=?))`,
 				batch.ProjectID, item.ProjectCandidateID, item.PlatformCandidateID, item.Platform, item.PlatformCandidateID, item.PlatformJobID).Scan(&sent)
 			if err != nil {
 				return batch, err
 			}
 			if sent > 0 {
-				return batch, fmt.Errorf("候选人 %s 已有成功沟通记录，请核对平台会话", item.CandidateName)
+				return batch, fmt.Errorf("候选人 %s 已有发送或待核查记录，请先核对平台会话", item.CandidateName)
 			}
-			status, result = "needs_manual", "平台首次定制招呼缺少可核实的自动发送能力；请在平台逐人发送并登记回执"
-			if item.PlatformCandidateID == "" {
-				result = "缺少稳定的平台候选人 ID；请人工核对目标后发送"
+			status, result = "needs_manual", "此平台暂不支持核验定制文案发送；请逐人打开档案发送并登记回执"
+			if item.Platform == "51job" && is51JobCandidateDetailURL(item.ProfileURL) && item.PlatformCandidateID != "" && item.ResumeID != "" {
+				status, result = "queued", "已纳入 51job 逐人发送队列；发送前仍须核对职位与点数"
+			} else if item.PlatformCandidateID == "" {
+				result = "缺少可核验的 51job 详情 ID；请打开档案核对后人工发送"
 			}
 		}
 		meta := item
@@ -501,6 +515,238 @@ func (a *App) ConfirmOutreachBatch(batchID string, approvals []OutreachApproval)
 		return batch, err
 	}
 	return a.GetOutreachBatch(batchID)
+}
+
+func (a *App) loadOutreachItem(itemID string) (OutreachItem, error) {
+	var item OutreachItem
+	db, err := a.getRecruitmentDB()
+	if err != nil {
+		return item, err
+	}
+	var raw, status, message string
+	err = db.QueryRow(`SELECT result_json,status,message FROM outreach_items WHERE id=?`, itemID).Scan(&raw, &status, &message)
+	if err != nil {
+		return item, err
+	}
+	if err = json.Unmarshal([]byte(raw), &item); err != nil {
+		return item, err
+	}
+	item.ID, item.Status, item.Message = itemID, status, message
+	return item, nil
+}
+
+func (a *App) setOutreachItemStatus(item OutreachItem, status, result string) (OutreachItem, error) {
+	item.Status, item.Result = status, result
+	raw, err := json.Marshal(item)
+	if err != nil {
+		return item, err
+	}
+	db, err := a.getRecruitmentDB()
+	if err != nil {
+		return item, err
+	}
+	_, err = db.Exec(`UPDATE outreach_items SET status=?,result_json=?,updated_at=? WHERE id=?`,
+		status, string(raw), time.Now().UTC().Format(time.RFC3339Nano), item.ID)
+	return item, err
+}
+
+func (a *App) verified51JobOutreachResume(item OutreachItem) (*Resume, error) {
+	if item.Platform != "51job" || item.PlatformCandidateID == "" || !is51JobCandidateDetailURL(item.ProfileURL) {
+		return nil, fmt.Errorf("缺少可核验的 51job 详情地址和候选人 ID")
+	}
+	resume, err := a.load51JobContactResume(item.ResumeID)
+	if err != nil {
+		return nil, err
+	}
+	platform, id := resumeSourceIdentity(resume)
+	if platform != "51job" || id != item.PlatformCandidateID || resume.URL != item.ProfileURL {
+		return nil, fmt.Errorf("候选人详情链接或平台 ID 已变化，请重新核对")
+	}
+	db, err := a.getRecruitmentDB()
+	if err != nil {
+		return nil, err
+	}
+	var active int
+	if err = db.QueryRow(`SELECT COUNT(*) FROM project_candidates WHERE id=? AND archived_at=''`, item.ProjectCandidateID).Scan(&active); err != nil || active == 0 {
+		return nil, fmt.Errorf("候选人已不在当前人才库，未发送")
+	}
+	return resume, nil
+}
+
+// PrepareOutreachItem only reads a 51job quote. It never clicks HiChat.
+func (a *App) PrepareOutreachItem(itemID string) JobConversationResult {
+	a.outreachMutex.Lock()
+	defer a.outreachMutex.Unlock()
+	item, err := a.loadOutreachItem(itemID)
+	if err != nil || (item.Status != "queued" && item.Status != "awaiting_confirmation") {
+		return JobConversationResult{Status: "error", Message: "该候选人不在待发送队列"}
+	}
+	resume, err := a.verified51JobOutreachResume(item)
+	if err != nil {
+		_, _ = a.setOutreachItemStatus(item, "needs_manual", err.Error())
+		return JobConversationResult{Status: "needs_manual", Message: err.Error()}
+	}
+	result := a.Prepare51JobHiChat(resume.ID)
+	if result.Status != "needs_confirmation" {
+		if result.Status != "needs_login" {
+			_, _ = a.setOutreachItemStatus(item, "needs_manual", result.Message)
+		}
+		return result
+	}
+	if item.PlatformJobID != "" {
+		a.contactMutex.Lock()
+		quote := a.contactPending[result.QuoteID]
+		if quote.JobID != item.PlatformJobID {
+			delete(a.contactPending, result.QuoteID)
+		}
+		a.contactMutex.Unlock()
+		if quote.JobID != item.PlatformJobID {
+			message := "平台沟通职位与当前项目映射的职位 ID 不一致；请人工核对，未发送"
+			_, _ = a.setOutreachItemStatus(item, "needs_manual", message)
+			return JobConversationResult{Status: "needs_manual", Message: message}
+		}
+	}
+	_, err = a.setOutreachItemStatus(item, "awaiting_confirmation", fmt.Sprintf("等待 HR 确认 %s 的 %d 个 Hi聊点数", result.JobTitle, result.Points))
+	if err != nil {
+		return JobConversationResult{Status: "error", Message: "点数报价状态无法保存；本次未发送"}
+	}
+	return result
+}
+
+// ConfirmOutreachItem sends the platform's first HiChat, then the approved
+// personalized message. The intermediate partial state is durable and never
+// replayed automatically when the second step is uncertain.
+func (a *App) ConfirmOutreachItem(itemID, quoteID string) (OutreachItem, error) {
+	a.outreachMutex.Lock()
+	defer a.outreachMutex.Unlock()
+	item, err := a.loadOutreachItem(itemID)
+	if err != nil {
+		return item, err
+	}
+	if item.Status != "awaiting_confirmation" || strings.TrimSpace(quoteID) == "" {
+		return item, fmt.Errorf("本次点数报价未确认或已处理，请重新查看平台记录")
+	}
+	if _, err = a.verified51JobOutreachResume(item); err != nil {
+		return a.setOutreachItemStatus(item, "needs_manual", err.Error())
+	}
+	first := a.Confirm51JobHiChat(item.ResumeID, quoteID)
+	if first.Status != "sent" {
+		status := "failed"
+		if first.Status == "uncertain" {
+			status = "uncertain"
+		}
+		return a.setOutreachItemStatus(item, status, first.Message)
+	}
+	item, err = a.setOutreachItemStatus(item, "partial", "平台默认 Hi聊已发出，定制文案尚未取得发送回执；请勿重复发起Hi聊")
+	if err != nil {
+		return item, fmt.Errorf("默认 Hi聊已发出，但本地状态保存失败；请核对平台会话，暂勿重复发送")
+	}
+	second := a.Send51JobOutreachMessage(item.ResumeID, item.Message)
+	if second.Status != "sent" {
+		return a.setOutreachItemStatus(item, "partial", "默认 Hi聊已发出；定制文案发送结果待核查："+second.Message)
+	}
+	return a.setOutreachItemStatus(item, "sent", "51job 已核实默认 Hi聊及此人的定制文案发送成功")
+}
+
+func (a *App) DeferOutreachItem(itemID, reason string) (OutreachItem, error) {
+	a.outreachMutex.Lock()
+	defer a.outreachMutex.Unlock()
+	item, err := a.loadOutreachItem(itemID)
+	if err != nil {
+		return item, err
+	}
+	if item.Status != "queued" && item.Status != "awaiting_confirmation" {
+		return item, fmt.Errorf("该候选人当前不可转人工")
+	}
+	if strings.TrimSpace(reason) == "" {
+		reason = "HR 暂未确认平台职位或点数；未发送，转人工处理"
+	}
+	return a.setOutreachItemStatus(item, "needs_manual", reason)
+}
+
+// VerifyOutreachCandidateDetail lets HR supply the actual 51job detail URL
+// after opening an old link. The browser verifies that page's exact displayed
+// candidate name before a stable platform ID is attached to the existing
+// candidate. Another candidate's existing ID is never merged by guesswork.
+func (a *App) VerifyOutreachCandidateDetail(itemID, detailURL string) (OutreachItem, error) {
+	a.outreachMutex.Lock()
+	defer a.outreachMutex.Unlock()
+	item, err := a.loadOutreachItem(itemID)
+	if err != nil {
+		return item, err
+	}
+	if item.Status != "needs_manual" || (item.Platform != "" && item.Platform != "51job") ||
+		!strings.HasPrefix(item.ProfileURL, "https://ehire.51job.com/") || !is51JobCandidateDetailURL(detailURL) {
+		return item, fmt.Errorf("请输入从该候选人 51job 页面复制的新版详情链接")
+	}
+	if !interviewIDPattern.MatchString(item.ResumeID) {
+		return item, fmt.Errorf("候选人本地档案编号无效")
+	}
+	path := filepath.Join(a.getDataDir(), "resumes", item.ResumeID+".json")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return item, err
+	}
+	var resume Resume
+	if err = json.Unmarshal(data, &resume); err != nil {
+		return item, err
+	}
+	copyForVerification := resume
+	copyForVerification.URL = detailURL
+	verified := a.run51JobConversation(&copyForVerification, "verify_candidate", "", nil)
+	if verified.Status != "verified" || verified.TargetID == "" {
+		return item, fmt.Errorf("51job 页面核验未完成：%s", verified.Message)
+	}
+	db, err := a.getRecruitmentDB()
+	if err != nil {
+		return item, err
+	}
+	tx, err := db.Begin()
+	if err != nil {
+		return item, err
+	}
+	defer tx.Rollback()
+	var candidateID string
+	if err = tx.QueryRow(`SELECT candidate_id FROM project_candidates WHERE id=? AND archived_at=''`, item.ProjectCandidateID).Scan(&candidateID); err != nil {
+		return item, fmt.Errorf("候选人已从人才库移除，未绑定平台 ID")
+	}
+	var existingCandidate, sourceID string
+	err = tx.QueryRow(`SELECT candidate_id,id FROM candidate_sources WHERE platform='51job' AND platform_account='' AND platform_candidate_id=?`, verified.TargetID).Scan(&existingCandidate, &sourceID)
+	if err == nil && existingCandidate != candidateID {
+		return item, fmt.Errorf("该平台 ID 已关联另一候选人，请先核对疑似重复记录")
+	}
+	if err != nil && err != sql.ErrNoRows {
+		return item, err
+	}
+	if err == sql.ErrNoRows {
+		sourceID = recruitmentID("verified_source")
+		now := time.Now().UTC().Format(time.RFC3339Nano)
+		if _, err = tx.Exec(`INSERT INTO candidate_sources(id,candidate_id,platform,platform_candidate_id,profile_url,source_kind,first_seen_at,last_seen_at)
+			VALUES(?,?,'51job',?,?,'verified_profile',?,?)`, sourceID, candidateID, verified.TargetID, detailURL, now, now); err != nil {
+			return item, err
+		}
+	}
+	if _, err = tx.Exec(`UPDATE resume_versions SET source_id=? WHERE legacy_resume_id=?`, sourceID, item.ResumeID); err != nil {
+		return item, err
+	}
+	item.Platform, item.PlatformCandidateID, item.ProfileURL = "51job", verified.TargetID, detailURL
+	item.Status, item.Result = "queued", "51job 真实详情页与候选人姓名已核验；等待逐人报价"
+	raw, err := json.Marshal(item)
+	if err != nil {
+		return item, err
+	}
+	if _, err = tx.Exec(`UPDATE outreach_items SET platform='51job',platform_candidate_id=?,status='queued',result_json=?,updated_at=? WHERE id=?`,
+		verified.TargetID, string(raw), time.Now().UTC().Format(time.RFC3339Nano), item.ID); err != nil {
+		return item, err
+	}
+	if err = tx.Commit(); err != nil {
+		return item, err
+	}
+	resume.URL, resume.SourcePlatform, resume.PlatformCandidateID = detailURL, "51job", verified.TargetID
+	if err = a.save51JobContactResume(&resume); err != nil {
+		return a.setOutreachItemStatus(item, "needs_manual", "平台身份已核验，但本地简历文件保存失败；请核对后重试")
+	}
+	return item, nil
 }
 
 func (a *App) RecordOutreachResult(itemID, status, platformReceipt, actor string) error {
@@ -524,7 +770,7 @@ func (a *App) RecordOutreachResult(itemID, status, platformReceipt, actor string
 	if err != nil {
 		return err
 	}
-	if current != "needs_manual" && current != "uncertain" {
+	if current != "needs_manual" && current != "uncertain" && current != "partial" {
 		return fmt.Errorf("当前状态不可登记发送结果")
 	}
 	var item OutreachItem

@@ -163,6 +163,10 @@
               </button>
             </div>
             <div class="tab-actions" v-if="rightTab === 'ranking'">
+              <button class="action-btn primary" :disabled="!projectId || !rankedResumes.length" @click="showOutreach = true">
+                <el-icon><Message /></el-icon>
+                前十名打招呼
+              </button>
               <button class="action-btn" @click="handleExport">
                 <el-icon><Document /></el-icon>
                 {{ $t('project.exportExcel') }}
@@ -784,11 +788,34 @@
             </div>
             <div v-else class="content-viewer">
               <div class="content-header">
-                <span class="content-filename">{{ resumeStore.selectedResume.fileName }}</span>
-                <span class="content-stats">{{ $t('home.contentLength', { count: parsedContent.length }) }}</span>
+                <div class="content-heading">
+                  <span class="content-filename">{{ resumeStore.selectedResume.fileName }}</span>
+                  <span class="content-stats">{{ $t('home.contentLength', { count: parsedContent.length }) }}</span>
+                </div>
+                <el-button size="small" plain @click="showRawContent = !showRawContent">
+                  {{ showRawContent ? '查看分区排版' : '查看完整原文' }}
+                </el-button>
               </div>
-              <div class="content-hint">{{ $t('home.parsedContentHint') }}</div>
-              <pre class="content-text">{{ parsedContent }}</pre>
+              <div class="content-hint">以下内容只调整排版，不改写简历原文；原文可随时切换查看。</div>
+              <pre v-if="showRawContent" class="content-text">{{ parsedContent }}</pre>
+              <div v-else class="parsed-sections">
+                <section v-for="(section, index) in parsedSections" :key="index" class="parsed-section">
+                  <div class="parsed-section-heading">
+                    <span class="parsed-section-number">{{ String(index + 1).padStart(2, '0') }}</span>
+                    <h3>{{ section.title }}</h3>
+                  </div>
+                  <div class="parsed-section-body">
+                    <template v-for="(line, lineIndex) in section.lines" :key="lineIndex">
+                      <div v-if="line.kind === 'field'" class="parsed-field">
+                        <span class="parsed-field-label">{{ line.label }}</span>
+                        <span class="parsed-field-value">{{ line.value }}</span>
+                      </div>
+                      <div v-else-if="line.kind === 'bullet'" class="parsed-bullet"><span aria-hidden="true">•</span>{{ line.text }}</div>
+                      <p v-else class="parsed-paragraph">{{ line.text }}</p>
+                    </template>
+                  </div>
+                </section>
+              </div>
             </div>
           </div>
 
@@ -841,6 +868,7 @@
       @refresh="handleRefreshProject"
     />
     <AIInterviewDialog v-model="showInterviewDialog" :resume-id="resumeStore.selectedResume?.id || ''" />
+    <TopTenOutreachDialog v-model="showOutreach" :project-id="projectId" />
 
     <el-dialog v-model="jobPickerVisible" title="选择 51job 沟通职位" width="640px" destroy-on-close>
       <p class="job-picker-hint">招聘项目岗位：{{ projectStore.currentProject?.job_config?.title || '未设置' }}。请从当前 51job 企业账号返回的职位中选择；点数会在下一步单独确认。</p>
@@ -931,6 +959,7 @@ import AIConfigGuide from '../components/AIConfigGuide.vue'
 import DevPanel from '../components/DevPanel.vue'
 import BossSearchDialog from '../components/BossSearchDialog.vue'
 import AIInterviewDialog from '../components/AIInterviewDialog.vue'
+import TopTenOutreachDialog from '../components/TopTenOutreachDialog.vue'
 import SvgDonutRing from '../components/charts/SvgDonutRing.vue'
 import SvgRadarChart from '../components/charts/SvgRadarChart.vue'
 import WorkTimeline from '../components/WorkTimeline.vue'
@@ -948,6 +977,7 @@ const projectStore = useProjectStore()
 // 项目上下文
 const projectId = computed(() => (route.params.id as string) || projectStore.currentProjectId || '')
 const projectName = computed(() => projectStore.currentProject?.name || '')
+const showOutreach = ref(false)
 const rightTab = ref<'detail' | 'ranking' | 'content'>('detail')
 const detailSubTab = ref<'summary' | 'competency' | 'water' | 'interview'>('summary')
 
@@ -1061,6 +1091,29 @@ const interviewQACount = computed(() => {
 
 const parsedContent = ref('')
 const contentLoading = ref(false)
+const showRawContent = ref(false)
+type ParsedLine = { kind: 'field' | 'bullet' | 'text'; text?: string; label?: string; value?: string }
+type ParsedSection = { title: string; lines: ParsedLine[] }
+const parsedSections = computed<ParsedSection[]>(() => {
+  const sections: ParsedSection[] = []
+  let current: ParsedSection = { title: '基本信息', lines: [] }
+  for (const rawLine of parsedContent.value.replace(/\r\n?/g, '\n').split('\n')) {
+    const line = rawLine.trim()
+    if (!line) continue
+    const heading = line.match(/^[【\[]([^】\]]{2,60})[】\]]$/) || line.match(/^#{1,4}\s+(.+)$/)
+    if (heading) {
+      if (current.lines.length) sections.push(current)
+      current = { title: heading[1].trim(), lines: [] }
+      continue
+    }
+    const field = line.match(/^([^：:]{2,20})[：:]\s*(.+)$/)
+    if (field) current.lines.push({ kind: 'field', label: field[1].trim(), value: field[2].trim() })
+    else if (/^[•●·*\-]\s*/.test(line)) current.lines.push({ kind: 'bullet', text: line.replace(/^[•●·*\-]\s*/, '') })
+    else current.lines.push({ kind: 'text', text: line })
+  }
+  if (current.lines.length) sections.push(current)
+  return sections.length ? sections : [{ title: '原文内容', lines: [{ kind: 'text', text: parsedContent.value }] }]
+})
 const contactBusy = ref(false)
 interface JobCommunicationOption {
   id: string
@@ -3538,15 +3591,20 @@ details.candidate-portal-bar[open] > summary.portal-header { margin-bottom: 12px
       display: flex;
       justify-content: space-between;
       align-items: center;
+      gap: 12px;
+      flex-wrap: wrap;
       padding: 12px 16px;
       background: $bg-primary;
       border: 1px solid $separator;
       border-radius: $radius-lg $radius-lg 0 0;
 
+      .content-heading { display: flex; align-items: center; gap: 10px; min-width: 0; flex-wrap: wrap; }
+
       .content-filename {
         font-size: 13px;
         font-weight: 600;
         color: $text-primary;
+        overflow-wrap: anywhere;
       }
 
       .content-stats {
@@ -3561,11 +3619,65 @@ details.candidate-portal-bar[open] > summary.portal-header { margin-bottom: 12px
 
     .content-hint {
       padding: 8px 16px;
-      font-size: 11px;
+      font-size: 12px;
       color: $text-tertiary;
-      background: rgba(255, 149, 0, 0.06);
+      background: $bg-primary;
       border-left: 1px solid $separator;
       border-right: 1px solid $separator;
+    }
+
+    .parsed-sections {
+      display: grid;
+      gap: 12px;
+      padding: 12px;
+      background: $bg-primary;
+      border: 1px solid $separator;
+      border-top: none;
+      border-radius: 0 0 $radius-lg $radius-lg;
+    }
+
+    .parsed-section {
+      min-width: 0;
+      padding: 16px 18px;
+      border: 1px solid $separator;
+      border-radius: $radius-lg;
+      background: $bg-secondary;
+    }
+
+    .parsed-section-heading {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 12px;
+      color: $text-primary;
+
+      h3 { margin: 0; font-size: 15px; line-height: 1.4; overflow-wrap: anywhere; }
+    }
+
+    .parsed-section-number {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 28px;
+      height: 28px;
+      flex: none;
+      border-radius: 8px;
+      background: rgba(79, 70, 229, 0.10);
+      color: $system-blue;
+      font-size: 11px;
+      font-weight: 700;
+    }
+
+    .parsed-section-body { display: grid; gap: 9px; max-width: 78ch; }
+    .parsed-field { display: grid; grid-template-columns: minmax(110px, 160px) minmax(0, 1fr); gap: 12px; line-height: 1.65; }
+    .parsed-field-label { color: $text-secondary; font-size: 12px; font-weight: 600; }
+    .parsed-field-value, .parsed-paragraph, .parsed-bullet { color: $text-primary; font-size: 13px; line-height: 1.7; overflow-wrap: anywhere; }
+    .parsed-paragraph { margin: 0; }
+    .parsed-bullet { display: flex; gap: 9px; }
+    .parsed-bullet > span { color: $system-blue; font-weight: 700; }
+
+    @media (max-width: 620px) {
+      .parsed-field { grid-template-columns: 1fr; gap: 1px; }
     }
 
     .content-text {

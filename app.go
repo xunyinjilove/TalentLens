@@ -36,7 +36,8 @@ import (
 )
 
 // 版本信息
-const AppVersion = "1.8.15"
+const AppVersion = "1.8.16"
+const analysisFormatRetryVersion = "model-json-repair-v1"
 const GitHubRepo = "xunyinjilove/TalentLens"
 
 //go:embed all:frontend/dist
@@ -145,6 +146,7 @@ type Resume struct {
 	ContactUpdatedAt          string          `json:"contact_updated_at,omitempty"`
 	ContactAttachmentBaseline []string        `json:"contact_attachment_baseline,omitempty"`
 	ErrorMessage              string          `json:"error_message,omitempty"`
+	AnalysisAutoRetryVersion  string          `json:"analysis_auto_retry_version,omitempty"`
 	Analysis                  *AnalysisResult `json:"analysis,omitempty"`
 	AnalysisRuleVersion       int             `json:"analysis_rule_version,omitempty"`
 	CreatedAt                 time.Time       `json:"created_at"`
@@ -298,6 +300,7 @@ type App struct {
 	bossMutex          sync.Mutex
 	interviewMutex     sync.Mutex
 	contactMutex       sync.Mutex
+	outreachMutex      sync.Mutex
 	contactPending     map[string]pending51JobHiQuote
 	analysisMutex      sync.Mutex
 	activeAnalyses     map[string]bool
@@ -480,6 +483,55 @@ func (a *App) startup(ctx context.Context) {
 	})
 
 	log.Println("TalentLens 已启动")
+	go a.retryLegacyFormatFailuresOnce()
+}
+
+func shouldAutoRetryFormatFailure(resume *Resume) bool {
+	return resume != nil && resume.Status == "error" &&
+		strings.HasPrefix(resume.ErrorMessage, "解析AI返回失败") &&
+		resume.AnalysisAutoRetryVersion != analysisFormatRetryVersion
+}
+
+// retryLegacyFormatFailuresOnce revisits only the old model-format failures.
+// The marker is saved before the AI request so a crash or uncertain response
+// cannot spend model credits again on every application start.
+func (a *App) retryLegacyFormatFailuresOnce() {
+	cfg := a.config.AI
+	if cfg.APIKey == "" || cfg.BaseURL == "" {
+		return
+	}
+	dir := filepath.Join(a.getDataDir(), "resumes")
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return
+	}
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".json") {
+			continue
+		}
+		path := filepath.Join(dir, entry.Name())
+		data, err := os.ReadFile(path)
+		if err != nil {
+			continue
+		}
+		var resume Resume
+		if json.Unmarshal(data, &resume) != nil || !shouldAutoRetryFormatFailure(&resume) {
+			continue
+		}
+		project := a.GetProject(resume.ProjectID)
+		if project == nil {
+			continue
+		}
+		resume.AnalysisAutoRetryVersion = analysisFormatRetryVersion
+		marked, err := json.MarshalIndent(&resume, "", "  ")
+		if err != nil || os.WriteFile(path, marked, 0600) != nil {
+			continue
+		}
+		a.syncRecruitmentResume(&resume)
+		if _, err := a.AnalyzeResume(resume.ID, &cfg, &project.JobConfig); err != nil {
+			log.Printf("[AnalysisAutoRetry] 旧格式失败记录自动重试未成功: %v", err)
+		}
+	}
 }
 
 // SetActiveProject 前端告知后端当前活跃项目
@@ -2796,7 +2848,7 @@ func (a *App) AnalyzeResume(resumeID string, cfg *AIConfig, jobCfg *JobConfig) (
 		"status":   "analyzing",
 		"progress": 50,
 	})
-	result, err := a.callAI(cfg, prompt)
+	analysis, err := a.analyzeModelWithFormatRetry(cfg, prompt)
 	if err != nil {
 		resume.Status = "error"
 		resume.ErrorMessage = err.Error()
@@ -2815,18 +2867,6 @@ func (a *App) AnalyzeResume(resumeID string, cfg *AIConfig, jobCfg *JobConfig) (
 		"status":   "analyzing",
 		"progress": 80,
 	})
-	analysis, err := a.parseAnalysisResult(result)
-	if err != nil {
-		resume.Status = "error"
-		resume.ErrorMessage = fmt.Sprintf("解析AI返回失败: %v", err)
-		a.saveResume(&resume)
-		a.logError(resume.FileName, resume.ErrorMessage, prompt, result)
-		runtime.EventsEmit(a.ctx, "analysis:error", map[string]interface{}{
-			"id":    resumeID,
-			"error": resume.ErrorMessage,
-		})
-		return nil, err
-	}
 	a.applyJobDecision(analysis, jobCfg, &resume)
 
 	if analysis.WaterCheck == nil {
@@ -2863,6 +2903,29 @@ func (a *App) AnalyzeResume(resumeID string, cfg *AIConfig, jobCfg *JobConfig) (
 		"analysis": analysis,
 	})
 
+	return analysis, nil
+}
+
+// analyzeModelWithFormatRetry repairs predictable schema deviations locally,
+// then asks the model once more only if its JSON is still unusable.
+func (a *App) analyzeModelWithFormatRetry(cfg *AIConfig, prompt string) (*AnalysisResult, error) {
+	result, err := a.callAI(cfg, prompt)
+	if err != nil {
+		return nil, err
+	}
+	analysis, parseErr := a.parseAnalysisResult(result)
+	if parseErr == nil {
+		return analysis, nil
+	}
+	strictPrompt := prompt + "\n\n上一次返回内容无法解析。请重新生成完整分析，只返回合法 JSON：对象键必须使用双引号，字符串内换行必须转义，gaps、vague_claims、advise_questions 等列表必须是字符串数组。"
+	result, err = a.callAI(cfg, strictPrompt)
+	if err != nil {
+		return nil, fmt.Errorf("解析AI返回失败；格式重试请求失败: %w", err)
+	}
+	analysis, err = a.parseAnalysisResult(result)
+	if err != nil {
+		return nil, fmt.Errorf("解析AI返回失败（已自动重试 1 次）: %w", err)
+	}
 	return analysis, nil
 }
 
@@ -3194,10 +3257,11 @@ func (a *App) parseAnalysisResult(content string) (*AnalysisResult, error) {
 
 	// 5. 修复模型在 JSON 字符串内部输出的字面换行与控制符
 	jsonStr = repairJSONLiteralNewlines(jsonStr)
+	jsonStr = normalizeAnalysisListFields(jsonStr)
 
 	var result AnalysisResult
 	if err := json.Unmarshal([]byte(jsonStr), &result); err != nil {
-		log.Printf("[parseAnalysisResult] 解析失败: %v, 内容片段: %s", err, jsonStr[:min(300, len(jsonStr))])
+		log.Printf("[parseAnalysisResult] 解析失败: %v", err)
 		return nil, fmt.Errorf("JSON解析失败: %v", err)
 	}
 
@@ -3253,6 +3317,52 @@ func (a *App) parseAnalysisResult(content string) (*AnalysisResult, error) {
 	result.AnalyzedAt = time.Now().Format(time.RFC3339)
 
 	return &result, nil
+}
+
+// normalizeAnalysisListFields accepts a single string where the model should
+// have returned a list, without rewriting any résumé facts or malformed JSON.
+func normalizeAnalysisListFields(raw string) string {
+	var root map[string]json.RawMessage
+	if json.Unmarshal([]byte(raw), &root) != nil {
+		return raw
+	}
+	changed := normalizeStringListFields(root, "strengths", "weaknesses", "risks", "red_line_violations")
+	if waterRaw, ok := root["water_check"]; ok && len(waterRaw) > 0 && string(waterRaw) != "null" {
+		var water map[string]json.RawMessage
+		if json.Unmarshal(waterRaw, &water) == nil && normalizeStringListFields(water, "gaps", "vague_claims", "advise_questions") {
+			root["water_check"], _ = json.Marshal(water)
+			changed = true
+		}
+	}
+	if !changed {
+		return raw
+	}
+	encoded, err := json.Marshal(root)
+	if err != nil {
+		return raw
+	}
+	return string(encoded)
+}
+
+func normalizeStringListFields(fields map[string]json.RawMessage, names ...string) bool {
+	changed := false
+	for _, name := range names {
+		value, ok := fields[name]
+		if !ok || len(value) == 0 || value[0] != '"' {
+			continue
+		}
+		var text string
+		if json.Unmarshal(value, &text) != nil {
+			continue
+		}
+		items := []string{}
+		if strings.TrimSpace(text) != "" {
+			items = append(items, text)
+		}
+		fields[name], _ = json.Marshal(items)
+		changed = true
+	}
+	return changed
 }
 
 // repairJSONLiteralNewlines 修复模型输出在 JSON 字符串内部未转义的字面换行与制表符
