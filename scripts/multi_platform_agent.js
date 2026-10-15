@@ -3,9 +3,10 @@
  */
 
 const fs = require('fs');
+const http = require('http');
 const os = require('os');
 const path = require('path');
-const { spawn, execSync } = require('child_process');
+const { spawn } = require('child_process');
 const puppeteer = require('puppeteer-core');
 const agentStartedAt = Date.now();
 
@@ -313,29 +314,6 @@ function selectFreshCandidates(candidates, limit, excludedUrls = new Set(), seen
   return selected;
 }
 
-// 杀死占用指定 profile 目录的 Edge/Chrome 进程
-function killBrowserByProfile(profileDir) {
-  const normalizedDir = profileDir.replace(/\\/g, '\\\\');
-  for (const procName of ['msedge.exe', 'chrome.exe']) {
-    try {
-      const cmd = `wmic process where "name='${procName}' and CommandLine like '%${normalizedDir}%'" call terminate 2>nul`;
-      execSync(cmd, { stdio: 'ignore', timeout: 5000, windowsHide: true });
-    } catch (e) {
-      // 静默 — WMIC 在没有匹配进程时返回非零退出码
-    }
-  }
-}
-
-// 清除浏览器 profile 目录下的锁文件
-function clearProfileLocks(profileDir) {
-  for (const lockName of ['SingletonLock', 'SingletonSocket', 'SingletonCookie']) {
-    try {
-      const f = path.join(profileDir, lockName);
-      if (fs.existsSync(f)) fs.unlinkSync(f);
-    } catch (e) {}
-  }
-}
-
 // 模拟真人分段随机打字（汲取 GoodHR 拟人输入设计）
 async function humanType(page, selectorOrElement, text) {
   try {
@@ -443,6 +421,9 @@ function planChannelQuota(remaining, channelsLeft, strategy) {
 }
 
 // 设置浏览器窗口状态（'minimized' 最小化至任务栏沙盒 | 'normal' 正常还原窗口 | 'maximized' 最大化）
+const preserveVisibleBrowsers = new WeakSet();
+function preserveBrowserWindow(browser) { preserveVisibleBrowsers.add(browser); }
+
 function manualViewFileForPage(page) {
   const pageURL = typeof page?.url === 'function' ? page.url() : '';
   let host = '';
@@ -457,6 +438,8 @@ function manualViewFileForPage(page) {
 }
 
 async function setBrowserWindowState(browserOrPage, state = 'minimized', manualContext = null) {
+  const browser = typeof browserOrPage?.browser === 'function' ? browserOrPage.browser() : browserOrPage;
+  if (state === 'minimized' && browser && preserveVisibleBrowsers.has(browser)) return true;
   for (let attempt = 0; attempt < 3; attempt++) {
     let session = null;
     try {
@@ -1133,52 +1116,108 @@ async function enrichCandidatesWithFullDetail(page, browser, candidates, platfor
   return enriched;
 }
 
-// 优先复用已有调试会话；没有会话时只启动一次 Edge，避免直启失败后再次启动产生第二个窗口。
+// 只把明确的“端口未监听”当成没有浏览器；超时可能是现有窗口繁忙，不能因此终止它。
+function probeBrowserDevTools(port) {
+  return new Promise((resolve, reject) => {
+    const request = http.get(`http://127.0.0.1:${port}/json/version`, response => {
+      let body = '';
+      response.setEncoding('utf8');
+      response.on('data', chunk => { body += chunk; });
+      response.on('end', () => {
+        try {
+          const version = JSON.parse(body);
+          if (response.statusCode !== 200 || !version.webSocketDebuggerUrl) {
+            throw new Error(`端口 ${port} 未返回浏览器调试端点`);
+          }
+          resolve(true);
+        } catch (error) { reject(error); }
+      });
+    });
+    request.setTimeout(3000, () => request.destroy(new Error(`浏览器调试端口 ${port} 响应超时`)));
+    request.on('error', error => {
+      if (error.code === 'ECONNREFUSED') resolve(false);
+      else reject(error);
+    });
+  });
+}
+
+async function connectToExistingBrowser(cfg, dependencies = {}) {
+  const probe = dependencies.probe || probeBrowserDevTools;
+  const connect = dependencies.connect || (config => puppeteer.connect(config));
+  const wait = dependencies.wait || (ms => new Promise(resolve => setTimeout(resolve, ms)));
+  let available;
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      available = await probe(cfg.debugPort);
+      break;
+    } catch (error) {
+      if (attempt === 1) throw new Error(`【${cfg.name}】浏览器调试端口无响应，现有窗口已保留；可稍后手动继续。原因：${error.message}`);
+      await wait(1000);
+    }
+  }
+  if (!available) return null;
+
+  let lastError;
+  for (let attempt = 0; attempt < 2; attempt++) {
+    let browser;
+    try {
+      browser = await connect({
+        browserURL: `http://127.0.0.1:${cfg.debugPort}`,
+        defaultViewport: null,
+        protocolTimeout: 120000
+      });
+      await browser.pages();
+      return browser;
+    } catch (error) {
+      lastError = error;
+      if (browser) {
+        try { await browser.disconnect(); } catch (disconnectError) {}
+      }
+      if (attempt === 0) await wait(1000);
+    }
+  }
+  throw new Error(`已有【${cfg.name}】浏览器连接超时或无响应，窗口和网页已保留；可稍后手动继续。原因：${lastError?.message || '未知错误'}`);
+}
+
+async function openDedicatedSearchPage(browser, cfg) {
+  const pages = await browser.pages();
+  if (!pages.length) return browser.newPage();
+
+  const session = await pages[0].target().createCDPSession();
+  try {
+    const { targetId } = await session.send('Target.createTarget', { url: cfg.homeUrl, background: true });
+    const target = await browser.waitForTarget(item => item._targetId === targetId, { timeout: 15000 });
+    const page = await target.page();
+    if (!page) throw new Error('专用检索标签页未就绪');
+    return page;
+  } finally {
+    await session.detach().catch(() => {});
+  }
+}
+
+// 优先复用已有调试会话；连接超时只重试，不关闭现有窗口。
 async function launchPlatformBrowser(cfg, browserPath, profileDir) {
   const debugPort = cfg.debugPort;
-  const isLoginTest = options.testLoginPlatform === cfg.code;
 
-  // 先连接已经在跑的浏览器实例。
-  try {
-    const browser = await puppeteer.connect({
-      browserURL: `http://127.0.0.1:${debugPort}`,
-      defaultViewport: null
-    });
+  const existing = await connectToExistingBrowser(cfg);
+  if (existing) {
+    preserveBrowserWindow(existing);
     sendMsg('status', { platform: cfg.code, message: `♻️ 已复用【${cfg.name}】已打开的浏览器窗口` });
-    if (!isLoginTest) {
-      await setBrowserWindowState(browser, 'minimized');
-    }
-    return browser;
-  } catch (e) {
-    // 没有在跑的实例，继续下面的流程
+    return { browser: existing, reused: true };
   }
 
-  // 清理仅属于当前平台隔离 profile 的残留进程与锁文件。
-  sendMsg('status', { platform: cfg.code, message: `🧹 清理【${cfg.name}】残留浏览器进程...` });
-  killBrowserByProfile(profileDir);
-  await new Promise(r => setTimeout(r, 1500)); // 等进程完全退出
-  clearProfileLocks(profileDir);
-
-  // Edge 只启动一次，并直接打开平台网址；不先打开新标签页再启动第二个 Edge。
-  const child = spawn(browserPath, browserLaunchArgs(cfg, profileDir, isLoginTest),
+  sendMsg('status', { platform: cfg.code, message: `正在启动【${cfg.name}】专用浏览器；其他窗口和网页保持打开。` });
+  const child = spawn(browserPath, browserLaunchArgs(cfg, profileDir, options.testLoginPlatform === cfg.code),
     { detached: true, stdio: 'ignore', windowsHide: true });
   child.unref();
 
   for (let i = 0; i < 20; i++) {
     await new Promise(r => setTimeout(r, 800));
-    try {
-      const browser = await puppeteer.connect({
-        browserURL: `http://127.0.0.1:${debugPort}`,
-        defaultViewport: null
-      });
-      if (!isLoginTest) {
-        await setBrowserWindowState(browser, 'minimized');
-      }
-      return browser;
-    } catch (e) {}
+    const browser = await connectToExistingBrowser(cfg);
+    if (browser) return { browser, reused: false };
   }
 
-  throw new Error(`无法连接刚启动的浏览器 (profile: ${path.basename(profileDir)})，请检查该配置文件是否被其他 Edge 窗口占用`);
+  throw new Error(`无法连接【${cfg.name}】专用浏览器 (profile: ${path.basename(profileDir)})；现有窗口未关闭，请检查该专用配置是否被占用后手动继续`);
 }
 
 // 统一抓取单个平台 (返回 null 表示启动/连接失败，返回 [] 表示成功连接但无结果)
@@ -1196,8 +1235,11 @@ async function scrapePlatform(platformKey, browserPath, targetCount, keywordPlan
   if (!fs.existsSync(profileDir)) fs.mkdirSync(profileDir, { recursive: true });
 
   let browser = null;
+  let reusedBrowser = false;
   try {
-    browser = await launchPlatformBrowser(cfg, browserPath, profileDir);
+    const connection = await launchPlatformBrowser(cfg, browserPath, profileDir);
+    browser = connection.browser;
+    reusedBrowser = connection.reused;
   } catch (err) {
     sendMsg('error', {
       platform: platformKey,
@@ -1207,22 +1249,27 @@ async function scrapePlatform(platformKey, browserPath, targetCount, keywordPlan
   }
 
   let backgroundSession = null;
+  let dedicatedSearchPage = null;
   // 断开自动化连接后，后台浏览器仍保留给 HR 使用，Node 进程才能正常退出。
   try {
   // 等待浏览器进程就绪
   await new Promise(r => setTimeout(r, 1500));
 
-  let pages = await browser.pages();
+  const pages = await browser.pages();
 
-  // 优先选择已经在平台域名上的 tab（避免选错 about:blank tab）
+  // 检索始终使用新标签，避免启动与连接的竞态误导航 HR 原有的页面。
   const domainHint = cfg.code === '51job' ? '51job.com' : cfg.code;
-  let page = pages.find(p => {
-    const u = p.url() || '';
-    return u.includes(domainHint) && !u.includes('about:blank');
-  });
-
-  if (!page) {
-    page = pages[0] || (await browser.newPage());
+  const isLoginTest = options.testLoginPlatform === cfg.code;
+  let page;
+  if (!isLoginTest) {
+    page = await openDedicatedSearchPage(browser, cfg);
+    dedicatedSearchPage = page;
+  } else {
+    const existingPlatformPage = pages.find(p => {
+      const u = p.url() || '';
+      return u.includes(domainHint) && !u.includes('about:blank');
+    });
+    page = existingPlatformPage || await openDedicatedSearchPage(browser, cfg);
   }
 
   if (options.testLoginPlatform !== cfg.code) {
@@ -1233,12 +1280,11 @@ async function scrapePlatform(platformKey, browserPath, targetCount, keywordPlan
   }
 
   // 自动清理隔离 profile 中多余的 Edge 新标签页，避免额外窗口留在前台。
-  try {
-    await closeUnusedStartPages(browser, page);
-  } catch (e) {}
+  if (!reusedBrowser) {
+    try { await closeUnusedStartPages(browser, page); } catch (e) {}
+  }
 
   // 仅在扫码登录测试时激活置顶窗口，常规寻才检索时维持后台沙盒最小化
-  const isLoginTest = options.testLoginPlatform === cfg.code;
   if (isLoginTest) {
     try { await page.bringToFront(); } catch (e) {}
   } else {
@@ -1302,7 +1348,7 @@ async function scrapePlatform(platformKey, browserPath, targetCount, keywordPlan
 
   // 导航完成后再次清理新标签页；常规检索保持最小化。
   try {
-    await closeUnusedStartPages(browser, page);
+    if (!reusedBrowser) await closeUnusedStartPages(browser, page);
     if (isLoginTest) await page.bringToFront();
     else await setBrowserWindowState(page, 'minimized');
   } catch (e) {}
@@ -1867,11 +1913,18 @@ ${cleanedRawText}
   });
 
   return outcome(allPlatformSavedList, stopReason);
+  } catch (error) {
+    sendMsg('error', {
+      platform: platformKey,
+      message: `【${cfg.name}】检索标签页连接异常，已抓取结果保留；可在任务中手动继续。原因：${error.message}`
+    });
+    return null;
   } finally {
     if (backgroundSession) {
       await backgroundSession.send('Emulation.setFocusEmulationEnabled', { enabled: false }).catch(() => {});
       await backgroundSession.detach().catch(() => {});
     }
+    if (dedicatedSearchPage) await dedicatedSearchPage.close().catch(() => {});
     try { await browser.disconnect(); } catch (e) {}
   }
 }
@@ -2106,9 +2159,11 @@ async function main() {
     sendMsg('error', { message: '安全验证未完成，检索已暂停。已采集的候选人保留，请处理验证后重新搜索。' });
   } else if (errorCount > 0 && connectedPlatforms.length === 0) {
     // 所有平台都失败了 → 不发 done，发 error
-    sendMsg('error', {
-      message: `❌ 所有选定平台 (${options.platforms.length} 个) 均连接失败。请先关闭所有已打开的 Edge 浏览器窗口，然后重试。`
-    });
+    if (options.platforms.length > 1) {
+      sendMsg('error', {
+        message: `❌ 所有选定平台 (${options.platforms.length} 个) 均连接失败。原有浏览器窗口和网页已保留，请查看各平台的连接错误并在任务中手动继续。`
+      });
+    }
   } else {
     const shortfallReason = allResults.length < options.count ? shortfallReasons.join('；') : '';
     const keywordProgress = globalKeywordTargets
@@ -2134,4 +2189,4 @@ if (require.main === module) {
   });
 }
 
-module.exports = { allocateQuota, planChannelQuota, smoothScroll, keepPageActiveInBackground, setBrowserWindowState, createBackgroundPage, capture51jobDetailUrl, isBrowserStartPage, browserLaunchArgs, closeUnusedStartPages, isPlatformPageUrl, ensurePlatformPage, submit51jobSearch, detectCaptcha, extractCandidatesAcrossFrames, selectFreshCandidates, advanceSearchResults, main };
+module.exports = { allocateQuota, planChannelQuota, smoothScroll, keepPageActiveInBackground, setBrowserWindowState, preserveBrowserWindow, connectToExistingBrowser, openDedicatedSearchPage, createBackgroundPage, capture51jobDetailUrl, isBrowserStartPage, browserLaunchArgs, closeUnusedStartPages, isPlatformPageUrl, ensurePlatformPage, submit51jobSearch, detectCaptcha, extractCandidatesAcrossFrames, selectFreshCandidates, advanceSearchResults, main };

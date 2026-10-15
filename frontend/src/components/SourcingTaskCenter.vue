@@ -1,10 +1,16 @@
 <template>
   <div v-if="tasks.length" class="sourcing-task-center">
-    <button class="sourcing-task-trigger" @click="open = true">
+    <button class="sourcing-task-trigger" @click="store.taskCenterOpen = true">
       <span class="task-dot" :class="{ running: runningCount > 0 }"></span>
       寻才任务 <strong>{{ runningCount > 0 ? `${runningCount} 运行中` : `${tasks.length} 条记录` }}</strong>
     </button>
-    <el-drawer v-model="open" title="寻才任务与分析进度" size="430px" class="sourcing-drawer">
+    <el-drawer v-model="store.taskCenterOpen" size="min(430px, 100%)" class="sourcing-drawer">
+      <template #header>
+        <div class="sourcing-drawer-header">
+          <strong>寻才任务与分析进度</strong>
+          <el-button size="small" text @click="openAIAssistant">AI 招聘助理</el-button>
+        </div>
+      </template>
       <div class="task-toolbar">
         <p class="wb-muted">检索和 AI 分析分别计数。关闭面板或切换页面不会停止任务。</p>
         <el-button size="small" plain type="danger" :disabled="finishedCount === 0" @click="clearTasks">清空已结束</el-button>
@@ -27,20 +33,22 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { useRecruitmentStore } from '../composables/useRecruitmentStore'
+import { useAIAssistantStore } from '../composables/useAIAssistantStore'
 
 const store = useRecruitmentStore()
+const assistantStore = useAIAssistantStore()
 const router = useRouter()
-const open = ref(false)
 const tasks = computed(() => store.sourcingTasks)
 const runningCount = computed(() => tasks.value.filter(task => task.status === 'running').length)
 const finishedCount = computed(() => tasks.value.filter(task => !['queued', 'running'].includes(task.status)).length)
 const labels: Record<string, string> = { queued: '排队中', running: '检索中', completed: '检索完成', partial: '部分完成', failed: '检索失败', stopped: '已停止', interrupted: '任务已中断' }
 function statusText(status: string) { return labels[status] || status }
-function viewTalent(projectId: string) { open.value = false; void router.push({ path: '/talent', query: { project: projectId } }) }
+function viewTalent(projectId: string) { store.taskCenterOpen = false; void router.push({ path: '/talent', query: { project: projectId } }) }
+function openAIAssistant() { store.taskCenterOpen = false; assistantStore.openDrawer() }
 async function resumeTask(id: string) {
   try { await store.resumeSourcingTask(id); ElMessage.success('已启动剩余目标的检索') }
   catch (err: any) { ElMessage.error(err?.message || String(err)) }
@@ -74,6 +82,7 @@ onMounted(() => { void store.loadSourcingTasks() })
 .sourcing-task-center { position: fixed; right: 18px; bottom: 22px; z-index: 1000; }
 .sourcing-task-trigger { border: 1px solid var(--wb-border); background: var(--wb-surface); color: var(--wb-text); box-shadow: 0 12px 32px rgba(31,41,80,.16); border-radius: 999px; padding: 11px 17px; cursor: pointer; display: flex; align-items: center; gap: 8px; }
 .sourcing-task-trigger strong { color: var(--wb-brand); }
+.sourcing-drawer-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; width: 100%; }
 .task-dot { width: 8px; height: 8px; border-radius: 50%; background: #94a3b8; }
 .task-dot.running { background: #10b981; box-shadow: 0 0 0 4px rgba(16,185,129,.15); }
 .sourcing-task-card { margin-top: 12px; display: flex; flex-direction: column; gap: 12px; }

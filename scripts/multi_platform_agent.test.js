@@ -33,6 +33,108 @@ test('background search enables page focus emulation', async () => {
   assert.deepEqual(commands, [{ command: 'Emulation.setFocusEmulationEnabled', args: { enabled: true } }]);
 });
 
+test('existing browser connection retries a CDP timeout without replacing the browser', async () => {
+  let attempts = 0;
+  const browser = { pages: async () => [] };
+  const result = await agent.connectToExistingBrowser(
+    { debugPort: 9503, name: '前程无忧' },
+    {
+      probe: async () => true,
+      connect: async config => {
+        attempts++;
+        assert.equal(config.protocolTimeout, 120000);
+        if (attempts === 1) throw new Error('Network.enable timed out');
+        return browser;
+      },
+      wait: async () => {}
+    }
+  );
+  assert.equal(result, browser);
+  assert.equal(attempts, 2);
+});
+
+test('busy browser debug endpoint is probed again before reporting failure', async () => {
+  let probes = 0;
+  const browser = { pages: async () => [] };
+  const result = await agent.connectToExistingBrowser(
+    { debugPort: 9503, name: '前程无忧' },
+    {
+      probe: async () => { if (++probes === 1) throw Error('endpoint timed out'); return true; },
+      connect: async () => browser,
+      wait: async () => {}
+    }
+  );
+  assert.equal(result, browser);
+  assert.equal(probes, 2);
+});
+
+test('an unavailable debug endpoint does not attach to an unrelated browser', async () => {
+  const result = await agent.connectToExistingBrowser(
+    { debugPort: 9503, name: '前程无忧' },
+    { probe: async () => false, connect: async () => { throw Error('must not connect'); } }
+  );
+  assert.equal(result, null);
+});
+
+test('persistent CDP timeout reports a resumable error without closing existing pages', async () => {
+  let attempts = 0;
+  await assert.rejects(
+    agent.connectToExistingBrowser(
+      { debugPort: 9503, name: '前程无忧' },
+      {
+        probe: async () => true,
+        connect: async () => { attempts++; throw Error('Network.enable timed out'); },
+        wait: async () => {}
+      }
+    ),
+    /窗口和网页已保留；可稍后手动继续/
+  );
+  assert.equal(attempts, 2);
+});
+
+test('search opens its own background tab and leaves existing pages untouched', async () => {
+  let detached = false;
+  let navigations = 0;
+  let closes = 0;
+  const searchPage = { url: () => 'https://ehire.51job.com/Revision/talent/search' };
+  const session = {
+    send: async (command, args) => {
+      assert.equal(command, 'Target.createTarget');
+      assert.deepEqual(args, { url: searchPage.url(), background: true });
+      return { targetId: 'search-target' };
+    },
+    detach: async () => { detached = true; }
+  };
+  const existingPage = {
+    url: () => 'https://example.test/important',
+    goto: async () => { navigations++; },
+    close: async () => { closes++; },
+    target: () => ({ createCDPSession: async () => session })
+  };
+  const browser = {
+    pages: async () => [existingPage],
+    waitForTarget: async predicate => {
+      const target = { _targetId: 'search-target', page: async () => searchPage };
+      assert.equal(predicate(target), true);
+      return target;
+    }
+  };
+  assert.equal(await agent.openDedicatedSearchPage(browser, { homeUrl: searchPage.url() }), searchPage);
+  assert.equal(navigations, 0);
+  assert.equal(closes, 0);
+  assert.equal(detached, true);
+});
+
+test('reused browser window stays visible while its search tab runs', async () => {
+  const browser = {};
+  agent.preserveBrowserWindow(browser);
+  const page = {
+    browser: () => browser,
+    target: () => { throw Error('reused window must not be minimized'); }
+  };
+  assert.equal(await agent.setBrowserWindowState(page, 'minimized'), true);
+});
+
 test('browser minimization targets a page window and releases its CDP session', async () => {
   const commands = [];
   let detached = false;
