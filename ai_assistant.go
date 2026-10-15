@@ -128,6 +128,9 @@ func (a *App) callAIChatMessages(cfg *AIConfig, messages []ChatMessage, temperat
 		Temperature: temperature,
 		MaxTokens:   4000,
 	}
+	if isGLM53Flash(model) {
+		reqBody.MaxTokens = 8192
+	}
 
 	body, err := json.Marshal(reqBody)
 	if err != nil {
@@ -210,7 +213,11 @@ func (a *App) callAIChatMessages(cfg *AIConfig, messages []ChatMessage, temperat
 			continue
 		}
 
-		return chatResp.Choices[0].Message.Content, nil
+		answer := strings.TrimSpace(chatResp.Choices[0].Message.Content)
+		if answer == "" {
+			return "", fmt.Errorf("模型没有生成回答；思考可能用尽输出 Token，请重试")
+		}
+		return answer, nil
 	}
 
 	return "", fmt.Errorf("重试 %d 次后失败: %v", maxRetries, lastErr)

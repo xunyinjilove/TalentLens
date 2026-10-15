@@ -65,7 +65,7 @@
           <ProviderGuide :provider="currentProvider" />
 
           <div class="form-card">
-            <div v-if="aiForm.provider === 'custom'" class="form-item">
+            <div v-if="aiForm.provider === 'custom' || aiForm.provider === 'aliyun-glm'" class="form-item">
               <label>{{ $t('ai.baseUrl') }}</label>
               <el-input v-model="aiForm.baseURL" :placeholder="$t('ai.baseUrlPlaceholder')" class="full-width" />
             </div>
@@ -561,6 +561,8 @@ async function saveSettings() {
       }
     } catch (syncErr) {
       console.warn('同步 AI 配置到后端失败:', syncErr)
+      ElMessage.error('AI 配置未写入桌面程序；请重试保存')
+      return
     }
 
     ElMessage.success(t('settings.saved'))

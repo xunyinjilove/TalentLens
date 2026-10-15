@@ -36,7 +36,7 @@ import (
 )
 
 // 版本信息
-const AppVersion = "1.7.0"
+const AppVersion = "1.8.10"
 const GitHubRepo = "xunyinjilove/TalentLens"
 
 //go:embed all:frontend/dist
@@ -260,10 +260,15 @@ type InterviewQuestion struct {
 
 // OpenAI API 请求/响应结构
 type ChatRequest struct {
-	Model       string        `json:"model"`
-	Messages    []ChatMessage `json:"messages"`
-	Temperature float64       `json:"temperature,omitempty"`
-	MaxTokens   int           `json:"max_tokens,omitempty"`
+	Model           string        `json:"model"`
+	Messages        []ChatMessage `json:"messages"`
+	Temperature     float64       `json:"temperature,omitempty"`
+	MaxTokens       int           `json:"max_tokens,omitempty"`
+	ReasoningEffort string        `json:"reasoning_effort,omitempty"`
+}
+
+func isGLM53Flash(model string) bool {
+	return strings.EqualFold(strings.TrimSpace(model), "ZHIPU/GLM-5.3-Flash")
 }
 
 type ChatMessage struct {
@@ -2623,6 +2628,9 @@ func (a *App) OpenExportDir() {
 
 // TestAIConnection 测试AI连接
 func (a *App) TestAIConnection(cfg *AIConfig) (bool, string) {
+	if cfg == nil {
+		return false, "请先填写 AI 配置"
+	}
 	if cfg.APIKey == "" {
 		return false, "API Key 不能为空"
 	}
@@ -2630,13 +2638,21 @@ func (a *App) TestAIConnection(cfg *AIConfig) (bool, string) {
 		return false, "Base URL 不能为空"
 	}
 
+	// GLM-5.3-Flash 始终思考；10 个输出 Token 可能全部用于思考。
+	maxTokens := 10
+	reasoningEffort := ""
+	if isGLM53Flash(cfg.Model) {
+		maxTokens = 2048
+		reasoningEffort = "low"
+	}
 	// 构造测试请求
 	reqBody := ChatRequest{
 		Model: cfg.Model,
 		Messages: []ChatMessage{
 			{Role: "user", Content: "Hello, this is a connection test. Please respond with 'OK'."},
 		},
-		MaxTokens: 10,
+		MaxTokens:       maxTokens,
+		ReasoningEffort: reasoningEffort,
 	}
 
 	body, _ := json.Marshal(reqBody)
@@ -2650,7 +2666,14 @@ func (a *App) TestAIConnection(cfg *AIConfig) (bool, string) {
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+cfg.APIKey)
 
-	client := &http.Client{Timeout: time.Duration(cfg.Timeout) * time.Second}
+	timeoutSec := cfg.Timeout
+	if timeoutSec < 30 {
+		timeoutSec = 30
+	}
+	if isGLM53Flash(cfg.Model) && timeoutSec < 90 {
+		timeoutSec = 90
+	}
+	client := &http.Client{Timeout: time.Duration(timeoutSec) * time.Second}
 	resp, err := client.Do(req)
 	if err != nil {
 		return false, fmt.Sprintf("连接失败: %v", err)
@@ -2658,6 +2681,12 @@ func (a *App) TestAIConnection(cfg *AIConfig) (bool, string) {
 	defer resp.Body.Close()
 
 	respBody, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode == http.StatusPaymentRequired {
+		if isGLM53Flash(cfg.Model) {
+			return false, "AI 服务账户余额不足，请在阿里云百炼处理后重试"
+		}
+		return false, "AI 服务账户余额不足，请在模型服务商平台处理后重试"
+	}
 
 	if resp.StatusCode == 401 {
 		return false, "API Key 无效或已过期"
@@ -2683,6 +2712,9 @@ func (a *App) TestAIConnection(cfg *AIConfig) (bool, string) {
 
 	if len(chatResp.Choices) == 0 {
 		return false, "AI 没有返回任何响应"
+	}
+	if strings.TrimSpace(chatResp.Choices[0].Message.Content) == "" {
+		return false, "模型未返回可显示的回答（可能只生成了思考过程）；请重试或检查模型输出限制"
 	}
 
 	return true, "连接成功！AI 服务正常"
