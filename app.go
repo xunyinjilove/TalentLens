@@ -3080,7 +3080,7 @@ func (a *App) buildAnalysisPrompt(resume *Resume, jobCfg *JobConfig) string {
 			"      \"reference_answer\": \"面试官考察要点与简历中对应疑点/短板的分析说明\"\n"+
 			"    }\n"+
 			"  ],\n"+
-			"  \"manager_pitch\": \"【候选人极简推介卡】（用于HR发给业务主管微信/钉钉）：\n👤 姓名：张三 | 现任：高级Go开发工程师\n📌 背景：5年经验 | 本科-武汉大学-计算机科学\n🎯 综合评估：85分（强力推荐）\n✨ 核心亮点：\n  1. 具备日活千万级高并发电商微服务经验；\n  2. 深入精通Go/MySQL分库分表/K8s容器化；\n  3. 贴合目前高并发岗位诉求，架构实战经验扎实。\n⚠️ 关注点：有4个月换工作空窗期，初试建议核实原因。\",\n"+
+			"  \"manager_pitch\": \"【候选人极简推介卡】（用于HR发给业务主管微信/钉钉）：\\n👤 姓名：张三 | 现任：高级Go开发工程师\\n📌 背景：5年经验 | 本科-武汉大学-计算机科学\\n🎯 综合评估：85分（强力推荐）\\n✨ 核心亮点：\\n  1. 具备日活千万级高并发电商微服务经验；\\n  2. 深入精通Go/MySQL分库分表/K8s容器化；\\n  3. 贴合目前高并发岗位诉求，架构实战经验扎实。\\n⚠️ 关注点：有4个月换工作空窗期，初试建议核实原因。\",\n"+
 			"  \"water_check\": {\n"+
 			"    \"water_score\": 18,\n"+
 			"    \"risk_level\": \"low\",\n"+
@@ -3192,6 +3192,9 @@ func (a *App) parseAnalysisResult(content string) (*AnalysisResult, error) {
 	reTrailingComma := regexp.MustCompile(`,(\s*[}\]])`)
 	jsonStr = reTrailingComma.ReplaceAllString(jsonStr, "$1")
 
+	// 5. 修复模型在 JSON 字符串内部输出的字面换行与控制符
+	jsonStr = repairJSONLiteralNewlines(jsonStr)
+
 	var result AnalysisResult
 	if err := json.Unmarshal([]byte(jsonStr), &result); err != nil {
 		log.Printf("[parseAnalysisResult] 解析失败: %v, 内容片段: %s", err, jsonStr[:min(300, len(jsonStr))])
@@ -3250,6 +3253,53 @@ func (a *App) parseAnalysisResult(content string) (*AnalysisResult, error) {
 	result.AnalyzedAt = time.Now().Format(time.RFC3339)
 
 	return &result, nil
+}
+
+// repairJSONLiteralNewlines 修复模型输出在 JSON 字符串内部未转义的字面换行与制表符
+func repairJSONLiteralNewlines(s string) string {
+	var b strings.Builder
+	b.Grow(len(s) + 64)
+	inString := false
+	escaped := false
+	for i := 0; i < len(s); i++ {
+		ch := s[i]
+		if inString {
+			if escaped {
+				escaped = false
+				b.WriteByte(ch)
+				continue
+			}
+			if ch == '\\' {
+				escaped = true
+				b.WriteByte(ch)
+				continue
+			}
+			if ch == '"' {
+				inString = false
+				b.WriteByte(ch)
+				continue
+			}
+			if ch == '\n' {
+				b.WriteString(`\n`)
+				continue
+			}
+			if ch == '\r' {
+				b.WriteString(`\r`)
+				continue
+			}
+			if ch == '\t' {
+				b.WriteString(`\t`)
+				continue
+			}
+			b.WriteByte(ch)
+		} else {
+			if ch == '"' {
+				inString = true
+			}
+			b.WriteByte(ch)
+		}
+	}
+	return b.String()
 }
 
 // redLineRuleID 为旧版自由文本规则生成稳定标识；修改规则文本会产生新的标识。
