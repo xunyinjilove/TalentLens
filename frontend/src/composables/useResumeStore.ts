@@ -173,6 +173,9 @@ export const useResumeStore = defineStore('resume', () => {
     return resumes.value.filter(r => r.status === 'pending').length
   })
 
+  const failedCount = computed(() => resumes.value.filter(r => r.status === 'error').length)
+  const analysisReadyCount = computed(() => pendingCount.value + failedCount.value)
+
   const doneCount = computed(() => {
     return resumes.value.filter(r => r.status === 'done').length
   })
@@ -373,8 +376,13 @@ export const useResumeStore = defineStore('resume', () => {
 
     // Wails 环境：调用后端分析
     if (isWailsEnv && WailsApp) {
-      const jobConfig = getJobConfig()
+      let jobConfig = getJobConfig()
       try {
+        if (resume.projectId) {
+          const project = await WailsApp.GetProject(resume.projectId)
+          if (!project?.job_config) throw new Error('当前项目岗位配置不存在')
+          jobConfig = project.job_config
+        }
         resume.status = 'analyzing'
         devLog('info', `重新分析简历: ${resume.fileName}`)
         await WailsApp.AnalyzeResume(id, aiConfig, jobConfig)
@@ -495,12 +503,13 @@ export const useResumeStore = defineStore('resume', () => {
   }
 
   // 开始分析所有待分析的简历
-  async function startAnalysis() {
+  async function startAnalysis(includeDone = false) {
     if (isAnalyzing.value) return
 
     isAnalyzing.value = true
 
-    const pendingResumes = resumes.value.filter(r => r.status === 'pending')
+    const pendingResumes = resumes.value.filter(r => r.status === 'pending' || r.status === 'error' || (includeDone && r.status === 'done'))
+    if (!pendingResumes.length) { isAnalyzing.value = false; return }
 
     // 如果在 Wails 环境下，使用后端 API
     if (isWailsEnv && WailsApp) {
@@ -517,12 +526,15 @@ export const useResumeStore = defineStore('resume', () => {
       const resumeIds = pendingResumes.map(r => r.id)
       devLog('info', `启动后端批量分析: ${resumeIds.length} 份简历`)
       try {
-        // 如果有项目上下文，使用项目分析（自动使用项目岗位配置）
+        // Submit this explicit snapshot of IDs. New captures stay pending for
+        // the next HR action; the batch must not rewrite a stale project list.
         const firstResume = pendingResumes[0]
-        const projId = (firstResume as any).projectId
+        const projId = firstResume?.projectId
         if (projId) {
-          await WailsApp.StartProjectAnalysis(projId, aiConfig)
-          devLog('info', `项目分析已启动: ${projId}`)
+          const project = await WailsApp.GetProject(projId)
+          if (!project?.job_config) throw new Error('当前项目岗位配置不存在')
+          await WailsApp.StartBatchAnalysis(resumeIds, aiConfig, project.job_config)
+          devLog('info', `手动分析已启动，本批 ${resumeIds.length} 份；后续抓取简历继续待分析`)
         } else {
           await WailsApp.StartBatchAnalysis(resumeIds, aiConfig, jobConfig)
           devLog('info', 'StartBatchAnalysis 调用成功')
@@ -605,7 +617,7 @@ export const useResumeStore = defineStore('resume', () => {
     batchProgress.value = { current: 0, total: 0, currentResumeId: null }
   }
 
-  // 批量重新分析所有简历（将 done/error 状态重置为 pending，然后启动分析）
+  // HR 明确触发时，将已完成记录一并交给后端重新分析。
   async function reAnalyzeAll(): Promise<boolean> {
     if (isAnalyzing.value) return false
 
@@ -615,26 +627,9 @@ export const useResumeStore = defineStore('resume', () => {
       return false
     }
 
-    // 将所有 done/error 简历重置为 pending
-    let resetCount = 0
-    for (const resume of resumes.value) {
-      if (resume.status === 'done' || resume.status === 'error') {
-        resume.status = 'pending'
-        resume.score = undefined
-        resume.analysis = undefined
-        resetCount++
-      }
-    }
-
-    if (resetCount === 0) {
-      devLog('warn', '没有需要重新分析的简历')
-      return false
-    }
-
-    devLog('info', `已重置 ${resetCount} 份简历，准备重新分析`)
-
-    // 启动分析（startAnalysis 会处理所有 pending 简历）
-    await startAnalysis()
+    if (!resumes.value.some(r => r.status === 'done' || r.status === 'error')) return false
+    // Do not clear a previous evaluation before the backend accepts this action.
+    await startAnalysis(true)
     return true
   }
 
@@ -838,6 +833,8 @@ export const useResumeStore = defineStore('resume', () => {
     // 计算属性
     selectedResume,
     pendingCount,
+    failedCount,
+    analysisReadyCount,
     doneCount,
     // 方法
     addResumes,

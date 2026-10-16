@@ -44,6 +44,8 @@
                 <span v-if="resumeStore.resumes.length > 0 && resumeStore.pendingCount > 0" class="status-pill pending">
                   {{ resumeStore.pendingCount }} 待分析
                 </span>
+                <span v-else-if="resumeStore.failedCount > 0" class="status-pill pending">{{ resumeStore.failedCount }} 分析失败</span>
+                <span v-else-if="resumeStore.resumes.some(r => r.status === 'analyzing')" class="status-pill pending">分析中</span>
                 <span v-else-if="resumeStore.resumes.length > 0" class="status-pill done">
                   已全部分析
                 </span>
@@ -101,16 +103,16 @@
               </button>
               <button
                 class="action-btn primary analysis-action"
-                :class="{ 'is-all-done': resumeStore.pendingCount === 0 && !resumeStore.isAnalyzing && resumeStore.resumes.length > 0 }"
+                :class="{ 'is-all-done': resumeStore.analysisReadyCount === 0 && !resumeStore.isAnalyzing && resumeStore.resumes.length > 0 }"
                 @click="handleStartAnalysis"
-                :disabled="resumeStore.isAnalyzing || resumeStore.pendingCount === 0 || resumeStore.resumes.length === 0"
-                :title="resumeStore.pendingCount === 0 && resumeStore.resumes.length > 0 ? '所有简历已全部分析完毕。如需重新分析，请从右上角「更多」菜单选择「全部重新分析」' : ''"
+                :disabled="resumeStore.isAnalyzing || resumeStore.analysisReadyCount === 0 || resumeStore.resumes.length === 0"
+                :title="resumeStore.analysisReadyCount === 0 && resumeStore.resumes.length > 0 ? '所有简历已全部分析完毕。如需重新分析，请从右上角「更多」菜单选择「全部重新分析」' : ''"
               >
                 <el-icon v-if="resumeStore.isAnalyzing" class="spin"><Loading /></el-icon>
-                <el-icon v-else-if="resumeStore.pendingCount > 0"><VideoPlay /></el-icon>
+                <el-icon v-else-if="resumeStore.analysisReadyCount > 0"><VideoPlay /></el-icon>
                 <el-icon v-else><CircleCheck /></el-icon>
                 <span v-if="resumeStore.isAnalyzing">{{ $t('home.analyzing') }}</span>
-                <span v-else-if="resumeStore.pendingCount > 0">{{ $t('home.analyzeCount', { count: resumeStore.pendingCount }) }}</span>
+                <span v-else-if="resumeStore.analysisReadyCount > 0">手动分析（{{ resumeStore.analysisReadyCount }}）</span>
                 <span v-else>{{ $t('home.allAnalyzed') }}</span>
               </button>
             </div>
@@ -1833,7 +1835,7 @@ async function handleSelectFiles() {
 }
 
 function handleStartAnalysis() {
-  const pendingCount = resumeStore.resumes.filter(r => r.status === 'pending').length
+  const pendingCount = resumeStore.analysisReadyCount
   if (pendingCount === 0) { ElMessage.warning(t('guide.noResumesToAnalyze')); return }
   if (!checkAIConfig()) { showConfigGuide.value = true; return }
   resumeStore.startAnalysis()

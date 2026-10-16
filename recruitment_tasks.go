@@ -43,6 +43,7 @@ type SourcingTask struct {
 var sourcingAnalysisSlots = make(chan struct{}, 3)
 
 func (a *App) createSourcingTask(config SourcingTaskConfig) (string, error) {
+	config.AutoAnalyze = false
 	db, err := a.getRecruitmentDB()
 	if err != nil {
 		return "", err
@@ -174,7 +175,7 @@ func (a *App) finishSourcingTaskFromDone(taskID string, done map[string]interfac
 		}
 		a.setSourcingTaskStatus(taskID, "partial", message)
 	} else {
-		a.setSourcingTaskStatus(taskID, "completed", "检索已完成，分析可能仍在进行")
+		a.setSourcingTaskStatus(taskID, "completed", "检索已完成；简历已保存，请手动启动分析")
 	}
 	return true
 }
@@ -351,6 +352,7 @@ func (a *App) ResumeSourcingTask(taskID string) (bool, error) {
 		return false, err
 	}
 	config.Count = remaining
+	config.AutoAnalyze = false
 	started := a.startQuotaMatrixSearch(config.ProjectID, config.Keyword, config.City, config.ExpYears,
 		config.EduLevel, config.Count, config.Platforms, config.QuotaMatrixJSON, config.AutoAnalyze,
 		config.ActivityDays, config.ChannelStrategy)

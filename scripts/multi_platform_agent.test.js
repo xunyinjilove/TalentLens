@@ -188,6 +188,11 @@ test('an unmet target schedules another search pass after an unchanged result pa
   assert.equal(continued, true);
   assert.equal(waited, 6000);
   assert.equal(await agent.waitForSearchRetry(6000, () => true, async () => { throw Error('must stop'); }), false);
+  const now = Date.parse('2026-10-16T06:00:00Z');
+  const message = agent.searchRetryMessage(11, 30, 60000, now);
+  assert.ok(message.includes(new Date(now + 60000).toLocaleTimeString('zh-CN', { hour12: false })));
+  assert.match(message, /11\/30/);
+  assert.match(message, /分析需手动启动/);
 });
 
 test('reused browser window stays visible while its search tab runs', async () => {

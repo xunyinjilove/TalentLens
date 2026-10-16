@@ -7,6 +7,28 @@ import (
 	"time"
 )
 
+func TestSourcingTaskIgnoresLegacyAutomaticAnalysisFlag(t *testing.T) {
+	app := NewApp()
+	app.dataDirOverride = t.TempDir()
+	defer app.closeRecruitmentDB()
+	project := app.CreateProject("Synthetic search", "", 1, "", "", &JobConfig{})
+	id, err := app.createSourcingTask(SourcingTaskConfig{ProjectID: project.ID, Count: 30, AutoAnalyze: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	app.recordSourcingCandidate(id)
+	tasks, err := app.ListSourcingTasks(project.ID)
+	if err != nil || len(tasks) != 1 {
+		t.Fatalf("task read: %+v %v", tasks, err)
+	}
+	if tasks[0].Config.AutoAnalyze {
+		t.Fatal("capture-only search must override legacy auto-analysis=true")
+	}
+	if tasks[0].CapturedCount != 1 || tasks[0].AnalyzedCount != 0 || tasks[0].FailedCount != 0 {
+		t.Fatalf("capture must remain independent of analysis: %+v", tasks[0])
+	}
+}
+
 func TestSourcingTaskPersistsProgressAndInterruptsOnRestart(t *testing.T) {
 	dir := t.TempDir()
 	now := time.Now().UTC()

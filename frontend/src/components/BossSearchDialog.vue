@@ -233,10 +233,10 @@
             </span>
           </div>
           <div class="form-item flex-1">
-            <label class="form-label">自动 AI 深度评估</label>
+            <label class="form-label">分析方式</label>
             <div class="switch-box">
-              <el-switch v-model="form.autoAnalyze" />
-              <span class="switch-text">抓取后即刻初筛与出题</span>
+              <el-tag type="info">手动分析</el-tag>
+              <span class="switch-text">仅检索入库，之后点击单条或批量分析</span>
             </div>
           </div>
         </div>
@@ -715,7 +715,7 @@ const form = reactive({
   keyword: '',
   city: '上海',
   countPerPlatform: 30,
-  autoAnalyze: true,
+  autoAnalyze: false,
   keywordStrategy: 'precise',
   channelStrategy: 'balanced',
   activeDays: 0
@@ -1026,7 +1026,7 @@ onMounted(async () => {
     currentStatusText.value = stopped
       ? `已停止，已保存 ${candidateCount.value} 人`
       : reachedTarget
-      ? (form.autoAnalyze ? '全渠道检索完成，正在启动 AI 分析' : '全渠道检索完成')
+      ? '全渠道检索完成，已保存为待分析简历'
       : `检索结束，已导入 ${candidateCount.value}/${expectedTotalCount.value} 人${shortfallReason ? `；${shortfallReason}` : ''}`
     addLog(reachedTarget ? 'done' : 'status', evt.message || currentStatusText.value)
     if (Array.isArray(evt?.keywordProgress)) {
@@ -1038,7 +1038,7 @@ onMounted(async () => {
     if (stopped) {
       ElMessage.info(`已停止，本次保存 ${candidateCount.value} 位人选`)
     } else if (reachedTarget) {
-      ElMessage.success(`多平台候选人采集完成 (共 ${candidateCount.value} 人)${form.autoAnalyze ? '，正在进行 AI 智能打分' : ''}`)
+      ElMessage.success(`候选人采集完成，共 ${candidateCount.value} 人；请手动启动分析`)
     } else {
       ElMessage.warning(`本次找到 ${candidateCount.value}/${expectedTotalCount.value} 位人选。${shortfallReason || '可调整关键词或平台继续搜索'}`)
     }

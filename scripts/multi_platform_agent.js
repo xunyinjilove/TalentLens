@@ -30,7 +30,7 @@ const options = {
   activeDays: 0,         // 0 不按活跃度过滤；1 今日；3 三日内
   channelStrategy: 'balanced', // balanced 均衡补缺；priority 按 HR 勾选顺序优先
   stopFile: '',          // Go 写入此标记后，脚本在当前安全边界完成并上报已保存人数
-  autoAnalyze: true,
+  autoAnalyze: false,
   dataDir: path.join(process.cwd(), 'data', 'candidates_multi')
 };
 
@@ -66,7 +66,8 @@ for (let i = 0; i < args.length; i++) {
       options.quotaMatrix = null;
     }
   } else if (args[i] === '--auto-analyze' && args[i + 1]) {
-    options.autoAnalyze = args[++i] === 'true';
+    ++i; // Legacy CLI flag is accepted, but sourcing never initiates AI.
+    options.autoAnalyze = false;
   } else if (args[i] === '--active-days' && args[i + 1]) {
     const days = parseInt(args[++i], 10);
     options.activeDays = [0, 1, 3].includes(days) ? days : 0;
@@ -894,6 +895,11 @@ async function advanceSearchResults(page, options = {}) {
 // Retry with a bounded backoff while the desktop app remains open.
 function searchRetryDelay(idlePasses) {
   return Math.min(600000, 60000 * 2 ** Math.max(0, Math.min(4, idlePasses)));
+}
+
+function searchRetryMessage(captured, target, delayMs, now = Date.now()) {
+  const nextTime = new Date(now + delayMs).toLocaleTimeString('zh-CN', { hour12: false });
+  return `未达目标（${captured}/${target}）：当前页面暂无可确认的新候选人，下次检索 ${nextTime}（约 ${Math.ceil(delayMs / 60000)} 分钟后）；可随时停止，已抓取档案保留，分析需手动启动。`;
 }
 
 async function waitForSearchRetry(delayMs, stopRequested, wait = ms => new Promise(resolve => setTimeout(resolve, ms))) {
@@ -1989,7 +1995,7 @@ ${cleanedRawText}
       idlePasses = allPlatformSavedList.length > passStartCount ? 0 : idlePasses + 1;
       const delayMs = searchRetryDelay(idlePasses);
       sendMsg('status', { platform: platformKey,
-        message: `未达目标（${allPlatformSavedList.length}/${targetCount}）：当前页面暂无可确认的新候选人，等待约 ${Math.ceil(delayMs / 60000)} 分钟后重新检索；可随时停止，已抓取档案保留。` });
+        message: searchRetryMessage(allPlatformSavedList.length, targetCount, delayMs) });
       if (!await waitForSearchRetry(delayMs, stopRequested)) break;
       exhaustedKeywords.clear();
       activeKeyword = '';
@@ -2302,3 +2308,4 @@ if (require.main === module) {
 
 module.exports = { allocateQuota, planChannelQuota, smoothScroll, keepPageActiveInBackground, setBrowserWindowState, preserveBrowserWindow, connectToExistingBrowser, launchPlatformBrowser, openDedicatedSearchPage, createBackgroundPage, capture51jobDetailUrl, extract51JobResumeId, isBrowserStartPage, browserLaunchArgs, closeUnusedStartPages, isPlatformPageUrl, ensurePlatformPage, submit51jobSearch, detectCaptcha, extractCandidatesAcrossFrames, selectFreshCandidates, advanceSearchResults, searchRetryDelay, waitForSearchRetry, main };
 module.exports.claimResumeSnapshot = claimResumeSnapshot;
+module.exports.searchRetryMessage = searchRetryMessage;
