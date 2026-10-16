@@ -291,7 +291,7 @@
                       </button>
                       <button
                         class="hero-act-btn platform"
-                        :disabled="contactBusy || resumeStore.selectedResume.contact_status !== 'resume_requested'"
+                        :disabled="contactBusy || !is51JobCandidate"
                         @click="check51JobReply(resumeStore.selectedResume.id, true)"
                       >
                         检查回复
@@ -519,13 +519,26 @@
                         <el-icon><Histogram /></el-icon>
                         <span>核心能力维度全景雷达 ({{ resumeStore.selectedResume.analysis.abilityScore ?? resumeStore.selectedResume.score }} 分)</span>
                       </div>
-                      <el-button size="small" type="primary" plain :loading="competencyBusy" @click="supplementCompetencies">按经历补全雷达</el-button>
+                      <el-button size="small" type="primary" plain :loading="competencyBusy" @click="supplementCompetencies">
+                        <el-icon style="margin-right: 4px"><RefreshRight /></el-icon>
+                        {{ competencyButtonText }}
+                      </el-button>
                     </div>
+
+                    <el-alert v-if="resumeStore.selectedResume.analysis.competencyMessage" :title="resumeStore.selectedResume.analysis.competencyMessage" :type="resumeStore.selectedResume.analysis.competencyStatus === 'error' ? 'warning' : 'info'" :closable="false" show-icon style="margin:0 0 16px" />
 
                     <div class="competency-mode-bar">
                       <el-radio-group v-model="radarMode" size="small">
                         <el-radio-button label="job">岗位评分卡</el-radio-button>
-                        <el-radio-button label="experience" :disabled="!resumeStore.selectedResume.analysis.experienceCompetencies?.length">履历能力补充</el-radio-button>
+                        <el-radio-button label="experience" :disabled="!resumeStore.selectedResume.analysis.experienceCompetencies?.length">
+                          履历能力补充
+                          <span
+                            v-if="resumeStore.selectedResume.analysis.experienceCompetencies?.length"
+                            class="competency-count-badge"
+                          >
+                            ({{ resumeStore.selectedResume.analysis.experienceCompetencies.length }})
+                          </span>
+                        </el-radio-button>
                       </el-radio-group>
                       <span class="header-tip">{{ radarMode === 'experience' ? '根据实际经历提炼，逐项展示依据；补充维度不计入岗位能力分。' : '对照岗位要求，未取得原文依据的项目保留为未体现。' }}</span>
                     </div>
@@ -882,7 +895,14 @@
       @refresh="handleRefreshProject"
     />
     <AIInterviewDialog v-model="showInterviewDialog" :resume-id="resumeStore.selectedResume?.id || ''" />
-    <TopTenOutreachDialog v-model="showOutreach" :project-id="projectId" />
+    <el-dialog v-model="replyDialogOpen" title="51job 候选人回复" width="min(640px,92vw)">
+      <p>{{ replyResult.message }}</p>
+      <p v-if="!replyResult.replies?.length">当前已加载会话中暂无文字回复。</p>
+      <article v-for="(text,index) in replyResult.replies || []" :key="index" style="white-space:pre-wrap;overflow-wrap:anywhere;padding:16px;margin:12px 0;border:1px solid var(--wb-border);border-radius:12px">{{ text }}</article>
+      <div v-if="replyResult.attachmentNames?.length"><strong>会话中的简历附件</strong><p v-for="(name,index) in replyResult.attachmentNames" :key="index">{{ name }}</p></div>
+      <template #footer><el-button type="primary" @click="replyDialogOpen=false">关闭</el-button></template>
+    </el-dialog>
+    <TopTenOutreachDialog v-model="showOutreach" :project-id="projectId" @updated="resumeStore.loadProjectResumes(projectId)" />
     <el-dialog v-model="snapshotHistoryOpen" title="相同简历快照 · 历史评测" width="min(760px,94vw)">
       <p>相同文本曾被分别采集和评测，模型输出或当时岗位配置可能不同。列表已折叠相同快照；原文件、历史分数及沟通记录保留。</p>
       <el-table :data="snapshotHistory" max-height="420">
@@ -1005,6 +1025,15 @@ const competencyBusy = ref(false)
 const snapshotHistoryOpen = ref(false)
 const snapshotHistory = ref<any[]>([])
 const radarMode = ref<'job' | 'experience'>('job')
+const competencyButtonText = computed(() => {
+  const analysis = resumeStore.selectedResume?.analysis
+  if (!analysis) return '按经历补全雷达'
+  if (analysis.competencyStatus === 'error') return '重试雷达补全'
+  if (analysis.experienceCompetencies && analysis.experienceCompetencies.length > 0) {
+    return '重新核验经历雷达'
+  }
+  return '补充提炼经历雷达'
+})
 const activeRadarChecks = computed(() => radarMode.value === 'experience'
   ? resumeStore.selectedResume?.analysis?.experienceCompetencies || []
   : resumeStore.selectedResume?.analysis?.coreCriterionChecks || [])
@@ -1360,7 +1389,7 @@ async function supplementCompetencies() {
     if (resumeStore.selectedResume?.analysis?.experienceCompetencies?.length) radarMode.value = 'experience'
     selectedRadarIndex.value = null
     ElMessage.success('能力维度已按简历经历更新，请结合原文核实')
-  } catch (err: any) { ElMessage.error(err?.message || String(err)) }
+  } catch (err: any) { await resumeStore.loadProjectResumes(projectId.value); ElMessage.error(err?.message || String(err)) }
   finally { competencyBusy.value = false }
 }
 
@@ -1484,17 +1513,24 @@ async function check51JobReply(resumeId: string, interactive = false) {
       ? await runWith51JobBrowser(App, () => App.Check51JobResumeReply(resumeId),
         { onWaiting: message => { ElMessage.info(message) } })
       : await App.Check51JobResumeReply(resumeId)
+    if (interactive && ['reply','waiting','downloaded'].includes(result.status)) {
+      replyResult.value=result
+      replyDialogOpen.value=true
+    }
+    if (interactive && projectId.value) await resumeStore.loadProjectResumes(projectId.value)
     if (result.status === 'downloaded') {
       if (projectId.value) await resumeStore.loadProjectResumes(projectId.value)
       ElMessage.success(result.message)
     } else if (interactive) {
-      if (result.status === 'waiting') ElMessage.info(result.message)
+      if (result.status === 'waiting' || result.status === 'reply') { /* 展示已核验会话的回复面板 */ }
       else ElMessage.warning(result.message || '尚未取得完整简历')
     }
   } catch (err: any) { if (interactive) ElMessage.error(`检查 51job 回复失败：${err.message || err}`) }
   finally { contactBusy.value = false }
 }
 
+const replyDialogOpen=ref(false)
+const replyResult=ref<{message?:string; replies?:string[]; attachmentNames?:string[]}>({})
 let contactPollTimer: number | null = null
 let contactPollCursor = 0
 let contactPollRunning = false
@@ -1936,6 +1972,23 @@ onUnmounted(() => {
 <style scoped lang="scss">
 .competency-mode-bar { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; margin: 12px 0; }
 .competency-mode-bar .header-tip { color: var(--wb-muted); font-size: 12px; line-height: 1.6; }
+.competency-count-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin-left: 4px;
+  padding: 0 5px;
+  font-size: 11px;
+  font-weight: 600;
+  border-radius: 10px;
+  background: rgba(22, 119, 255, 0.1);
+  color: #1677ff;
+  line-height: 16px;
+}
+:deep(.el-radio-button.is-active) .competency-count-badge {
+  background: rgba(255, 255, 255, 0.25);
+  color: #fff;
+}
 .criterion-assessment { width: 100%; margin: 6px 0 0; color: var(--wb-muted); font-size: 12px; line-height: 1.6; }
 @import '../styles/macos-theme.scss';
 

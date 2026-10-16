@@ -242,7 +242,9 @@ const progressLabel = computed(() => {
   if (p <= 10) return t('analysis.analyzing') + '...'
   if (p <= 30) return t('analysis.preparingPrompt') || '准备分析...'
   if (p <= 70) return t('analysis.callingAI') || 'AI 分析中...'
-  return t('analysis.parsingResult') || '解析结果...'
+  if (p <= 84) return t('analysis.parsingResult') || '解析结果...'
+  if (p < 100) return t('analysis.extractingCompetencies') || '提炼履历能力雷达...'
+  return t('analysis.done') || '已完成'
 })
 
 // 推荐等级样式

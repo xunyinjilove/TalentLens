@@ -132,6 +132,13 @@ CREATE TABLE IF NOT EXISTS outreach_items (
   platform_job_id TEXT NOT NULL DEFAULT '', message TEXT NOT NULL,
   status TEXT NOT NULL, result_json TEXT NOT NULL DEFAULT '', updated_at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS outreach_authorizations (
+  batch_id TEXT PRIMARY KEY REFERENCES outreach_batches(id) ON DELETE CASCADE,
+  job_id TEXT NOT NULL, job_title TEXT NOT NULL,
+  per_person_limit INTEGER NOT NULL, total_limit INTEGER NOT NULL,
+  reserved_points INTEGER NOT NULL DEFAULT 0, status TEXT NOT NULL,
+  message TEXT NOT NULL DEFAULT '', confirmed_at TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS follow_up_events (
   id TEXT PRIMARY KEY, project_candidate_id TEXT NOT NULL REFERENCES project_candidates(id),
   event_type TEXT NOT NULL, from_stage TEXT NOT NULL DEFAULT '',

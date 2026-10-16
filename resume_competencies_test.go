@@ -53,3 +53,34 @@ func TestSupplementCapabilitiesPreservesConcurrentContactAndHRReview(t *testing.
 		t.Fatal("only grounded capabilities should be retained")
 	}
 }
+
+func TestInitialAnalysisAutomaticallyCompletesMissingRadarWithoutChangingSummary(t *testing.T) {
+	app := NewApp()
+	calls := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		answer := `{"core_criterion_checks":[{"criterion":"Go","level":2,"evidence":"负责 Go 服务开发。"}],"experience_competencies":[{"criterion":"服务开发","level":2,"evidence":"负责 Go 服务开发。"}]}`
+		_ = json.NewEncoder(w).Encode(map[string]any{"choices": []any{map[string]any{"message": map[string]any{"content": answer}}}})
+	}))
+	defer server.Close()
+	cfg := &AIConfig{BaseURL: server.URL, APIKey: "synthetic", Model: "test"}
+	result := &AnalysisResult{Summary: "main evaluation", OverallScore: 80}
+	app.completeInitialCompetencies(result, &Resume{Content: "负责 Go 服务开发。"}, &JobConfig{CoreCriteria: []string{"Go", "PyTorch"}}, cfg)
+	if calls != 1 || len(result.CoreCriterionChecks) != 2 || result.CoreCriterionChecks[1].Level != 0 || len(result.ExperienceCompetencies) != 1 || result.CompetencyStatus != "insufficient" || result.Summary != "main evaluation" || result.OverallScore != 80 {
+		t.Fatalf("initial enrichment: calls=%d result=%+v", calls, result)
+	}
+}
+
+func TestOptionalRadarFailurePreservesMainEvaluationAndExistingRubric(t *testing.T) {
+	app := NewApp()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusPaymentRequired)
+		_, _ = w.Write([]byte(`{"error":{"message":"insufficient balance"}}`))
+	}))
+	defer server.Close()
+	result := &AnalysisResult{Summary: "retained", SkillMatch: 80, ExperienceMatch: 70}
+	app.completeInitialCompetencies(result, &Resume{Content: "synthetic"}, &JobConfig{RequiredSkills: []string{"Go"}}, &AIConfig{BaseURL: server.URL, APIKey: "synthetic", Model: "test"})
+	if result.CompetencyStatus != "error" || result.Summary != "retained" || result.SkillMatch != 80 || len(result.CoreCriterionChecks) != 0 {
+		t.Fatalf("optional failure destroyed main result: %+v", result)
+	}
+}

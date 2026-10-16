@@ -699,7 +699,7 @@
     </el-dialog>
 
     <!-- 寻才与打招呼对话框 -->
-    <TopTenOutreachDialog v-model="showOutreach" :project-id="selectedProjectId" />
+    <TopTenOutreachDialog v-model="showOutreach" :project-id="selectedProjectId" @updated="refresh" />
     <BossSearchDialog
       v-if="selectedProject"
       v-model="showSearch"

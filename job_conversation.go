@@ -14,21 +14,26 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
 type JobConversationResult struct {
-	Status   string                   `json:"status"`
-	Message  string                   `json:"message"`
-	FilePath string                   `json:"filePath,omitempty"`
-	FileName string                   `json:"fileName,omitempty"`
-	Baseline []string                 `json:"baseline,omitempty"`
-	JobID    string                   `json:"jobId,omitempty"`
-	JobTitle string                   `json:"jobTitle,omitempty"`
-	TargetID string                   `json:"targetId,omitempty"`
-	Points   int                      `json:"points,omitempty"`
-	QuoteID  string                   `json:"quoteId,omitempty"`
-	Jobs     []JobCommunicationOption `json:"jobs,omitempty"`
-	HasMore  bool                     `json:"hasMore,omitempty"`
+	Status          string                   `json:"status"`
+	Message         string                   `json:"message"`
+	FilePath        string                   `json:"filePath,omitempty"`
+	FileName        string                   `json:"fileName,omitempty"`
+	Baseline        []string                 `json:"baseline,omitempty"`
+	JobID           string                   `json:"jobId,omitempty"`
+	JobTitle        string                   `json:"jobTitle,omitempty"`
+	TargetID        string                   `json:"targetId,omitempty"`
+	Points          int                      `json:"points,omitempty"`
+	QuoteID         string                   `json:"quoteId,omitempty"`
+	Jobs            []JobCommunicationOption `json:"jobs,omitempty"`
+	HasMore         bool                     `json:"hasMore,omitempty"`
+	SuggestedJobID  string                   `json:"suggestedJobId,omitempty"`
+	Replies         []string                 `json:"replies,omitempty"`
+	AttachmentNames []string                 `json:"attachmentNames,omitempty"`
 }
 
 type JobCommunicationOption struct {
@@ -65,6 +70,22 @@ func (a *App) load51JobContactResume(resumeID string) (*Resume, error) {
 	if !is51JobCandidateDetailURL(resume.URL) {
 		return nil, fmt.Errorf("该候选人没有可核对的 51job 详情地址")
 	}
+	// A verified platform identity may have several local document versions.
+	// Reuse contact state only for that exact identity, never by display name.
+	copies := []*Resume{&resume}
+	if entries, err := os.ReadDir(filepath.Join(a.getDataDir(), "resumes")); err == nil {
+		for _, entry := range entries {
+			if entry.IsDir() || filepath.Ext(entry.Name()) != ".json" || entry.Name() == resumeID+".json" {
+				continue
+			}
+			data, err := os.ReadFile(filepath.Join(a.getDataDir(), "resumes", entry.Name()))
+			var other Resume
+			if err == nil && json.Unmarshal(data, &other) == nil {
+				copies = append(copies, &other)
+			}
+		}
+	}
+	merge51JobContactStates(copies)
 	return &resume, nil
 }
 
@@ -77,6 +98,9 @@ func (a *App) save51JobContactResume(resume *Resume) error {
 		return err
 	}
 	a.syncRecruitmentResume(resume)
+	if a.ctx != nil {
+		runtime.EventsEmit(a.ctx, "resume:contact_updated", map[string]string{"id": resume.ID, "projectId": resume.ProjectID})
+	}
 	return nil
 }
 
@@ -139,8 +163,8 @@ func (a *App) run51JobConversation(resume *Resume, action, message string, quote
 		return JobConversationResult{Status: "error", Message: "缺少 51job 沟通脚本，请检查 scripts 目录"}
 	}
 	timeout := 30 * time.Second
-	if action == "preview_hi" || action == "list_jobs" {
-		timeout = 45 * time.Second // 首次详情页加载、职位搜索和平台点数查询均包含在预览内。
+	if action == "preview_hi" || action == "list_jobs" || action == "check_resume" || action == "check_replies" {
+		timeout = 75 * time.Second // 包括候选人入口就绪重试与职位、点数读取。
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
@@ -148,7 +172,7 @@ func (a *App) run51JobConversation(resume *Resume, action, message string, quote
 	args := []string{script, "--action", action, "--candidate-url", resume.URL,
 		"--candidate-name", conversationCandidateName(resume), "--resume-record", resume.ID,
 		"--data-dir", dataDir}
-	if action != "check_resume" {
+	if action != "check_resume" && action != "check_replies" {
 		jobTitle := a.conversationJobTitle(resume)
 		if quote != nil && quote.JobTitle != "" {
 			jobTitle = quote.JobTitle
@@ -167,7 +191,7 @@ func (a *App) run51JobConversation(resume *Resume, action, message string, quote
 			args = append(args, "--target-id", quote.TargetID)
 		}
 	}
-	if action == "check_resume" {
+	if action == "check_resume" || action == "check_replies" {
 		baseline, _ := json.Marshal(resume.ContactAttachmentBaseline)
 		args = append(args, "--known-links", string(baseline))
 	}
@@ -399,10 +423,11 @@ func (a *App) Check51JobResumeReply(resumeID string) JobConversationResult {
 	if err != nil {
 		return JobConversationResult{Status: "error", Message: err.Error()}
 	}
-	if resume.ContactStatus != "resume_requested" {
-		return JobConversationResult{Status: "error", Message: "请先向这位候选人索要完整简历"}
+	action := "check_resume"
+	if resume.HasAttachment {
+		action = "check_replies"
 	}
-	result := a.run51JobConversation(resume, "check_resume", "", nil)
+	result := a.run51JobConversation(resume, action, "", nil)
 	if result.Status != "downloaded" {
 		return result
 	}
@@ -410,7 +435,7 @@ func (a *App) Check51JobResumeReply(resumeID string) JobConversationResult {
 	if err != nil {
 		return JobConversationResult{Status: "error", Message: "附件已下载，但本地候选人档案无法读取"}
 	}
-	if resume.ContactStatus != "resume_requested" || resume.HasAttachment {
+	if resume.HasAttachment {
 		return JobConversationResult{Status: "error", Message: "候选人档案已更新，未覆盖已有完整简历；请核对后再操作"}
 	}
 	root := filepath.Join(a.getDataDir(), "candidates_multi", "51job_received", resume.ID)
@@ -419,13 +444,14 @@ func (a *App) Check51JobResumeReply(resumeID string) JobConversationResult {
 	if pathErr != nil || !strings.HasPrefix(strings.ToLower(absFile), strings.ToLower(absRoot)+string(os.PathSeparator)) {
 		return JobConversationResult{Status: "error", Message: "下载文件不在候选人专用目录，已拒绝导入"}
 	}
+	previousStatus := resume.ContactStatus
 	resume.ContactStatus = "resume_received"
 	resume.ContactUpdatedAt = time.Now().Format(time.RFC3339)
 	if err := a.save51JobContactResume(resume); err != nil {
 		return JobConversationResult{Status: "error", Message: "附件已下载，但本地沟通状态保存失败，未启动分析"}
 	}
 	if _, err := a.AttachResumeFile(resume.ID, absFile); err != nil {
-		resume.ContactStatus = "resume_requested"
+		resume.ContactStatus = previousStatus
 		_ = a.save51JobContactResume(resume)
 		return JobConversationResult{Status: "error", Message: fmt.Sprintf("附件已下载但未能解析：%v", err)}
 	}

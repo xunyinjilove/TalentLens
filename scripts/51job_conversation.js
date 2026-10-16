@@ -54,7 +54,6 @@ function validResumeBytes(buffer, extension) {
 
 async function candidatePage(browser, expected, name) {
   let pages = (await browser.pages()).filter(page => sameCandidatePage(page.url(), expected));
-  let created = false;
   if (!pages.length) {
     const source = (await browser.pages()).find(page => page.url().startsWith('https://ehire.51job.com/'));
     if (!source) {
@@ -68,9 +67,7 @@ async function candidatePage(browser, expected, name) {
       const target = await browser.waitForTarget(item => item._targetId === targetId, { timeout: 10000 });
       const page = await target.page();
       if (!page) throw new Error('候选人详情页未就绪');
-      await page.waitForFunction(() => document.readyState === 'complete', { timeout: 12000 });
       pages = [page];
-      created = true;
     } finally { await session.detach().catch(() => {}); }
   }
   let page = pages[0];
@@ -79,13 +76,38 @@ async function candidatePage(browser, expected, name) {
       if ((await candidate.title()).trim() === name) { page = candidate; break; }
     }
   }
-  if (name && created) {
-    await page.waitForFunction(expectedName => document.title.trim() === expectedName,
-      { timeout: 10000 }, name).catch(() => {});
-  }
+  // Ads and long-lived requests can keep readyState below complete. Wait for
+  // this candidate's actual UI, retry only the read, and preserve all tabs.
+  await waitCandidateReady(page, expected, name);
   const title = (await page.title()).trim();
   if (name && title !== name) throw new Error('51job 页面姓名与本地候选人不一致，已停止发送');
   return page;
+}
+
+async function waitCandidateReady(page, expected, name) {
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      await page.waitForFunction((resumeID, expectedName) => {
+        const current = new URL(location.href);
+        if (current.pathname !== '/Revision/talent/resume/detail' || current.searchParams.get('resumeId') !== resumeID) return false;
+        if (expectedName && document.title.trim() !== expectedName) return false;
+        const chat = document.querySelector('#chatAreaEmbed');
+        if (chat?.closest('[data-type="embed"]')?.id === 'im-sdk-container' &&
+            chat.querySelector('.input-textarea_self')?.getClientRects().length &&
+            (!expectedName || (chat.querySelector('.username-text')?.textContent || '').trim().replace(/小姐$/, '女士') === expectedName.replace(/小姐$/, '女士'))) return true;
+        return Array.from(document.querySelectorAll('button.store_resume_button, .btn_item_chat .chat_btn'))
+          .some(el => ['立即Hi聊', '继续沟通', 'Hi聊'].includes((el.innerText || '').trim().replace(/\s+/g, '')) && el.getClientRects().length > 0);
+      }, { polling: 250, timeout: 12000 }, expected.resumeId, name || '');
+      return;
+    } catch {
+      if (!sameCandidatePage(page.url(), expected)) throw new Error('候选人详情地址已变化，请检查平台登录状态后重试；未发送');
+      if (attempt === 1) {
+        const title = (await page.title()).trim();
+        if (name && title && title !== name) throw new Error('51job 页面姓名与本地候选人不一致，已停止发送');
+        throw new Error('候选人页面沟通入口未就绪，已自动重试；请检查登录或页面加载后继续，本次未发送');
+      }
+    }
+  }
 }
 
 function sameDisplayedName(left, right) {
@@ -468,6 +490,7 @@ async function conversationMessages(page) {
     document.querySelectorAll('#chatAreaEmbed .message-list .message-item')
   ).map(item => ({
     mine: item.classList.contains('mine'),
+    text: (item.querySelector('.text-content')?.textContent || '').trim().slice(0, 2000),
     links: Array.from(item.querySelectorAll('a[href]')).map(link => ({
       href: link.href, text: (link.textContent || '').trim(), download: link.getAttribute('download') || ''
     }))
@@ -507,10 +530,15 @@ async function sendCandidateMessage(page, message, includeBaseline = false) {
   return { status: 'sent', baseline, message: '51job 聊天记录已显示这条消息发送成功' };
 }
 
-async function inspectReply(page, outputDir, recordID, known = []) {
+async function inspectReply(page, outputDir, recordID, known = [], download = true) {
   const messages = await conversationMessages(page);
+  const replies = messages.filter(item => !item.mine && item.text).slice(-10).map(item => item.text);
+  const attachmentNames = messages.filter(item => !item.mine)
+    .map(item => selectInboundAttachment([item])).filter(Boolean).slice(-10).map(item => item.fileName);
+  const summary = { replies, attachmentNames };
   const attachment = selectInboundAttachment(messages, known);
-  if (!attachment) return { status: 'waiting', message: '尚未在该候选人的回复中看到可下载的 PDF/Word/TXT 简历附件' };
+  if (!attachment || !download) return { ...summary, status: replies.length || attachmentNames.length ? 'reply' : 'waiting',
+    message: replies.length || attachmentNames.length ? '已读取当前已加载会话中的候选人回复与附件；可在平台查看更早记录' : '当前已加载会话中尚未看到候选人的文字回复或可下载简历附件' };
   const encoded = await page.evaluate(async href => {
     const response = await fetch(href, { credentials: 'include' });
     if (!response.ok) throw new Error(`附件读取失败：HTTP ${response.status}`);
@@ -529,7 +557,7 @@ async function inspectReply(page, outputDir, recordID, known = []) {
   const digest = crypto.createHash('sha256').update(file).digest('hex').slice(0, 20);
   const filePath = path.join(directory, `${digest}.${extension}`);
   fs.writeFileSync(filePath, file, { mode: 0o600 });
-  return { status: 'downloaded', filePath, fileName: attachment.fileName, message: '已从该候选人的回复中取得并校验简历附件' };
+  return { ...summary, status: 'downloaded', filePath, fileName: attachment.fileName, message: '已从该候选人的回复中取得并校验简历附件' };
 }
 
 function readArgs(argv) {
@@ -555,7 +583,7 @@ async function main(argv = process.argv.slice(2)) {
   const args = readArgs(argv);
   try {
     const expected = parseCandidateUrl(args.url);
-    if (!['verify_candidate', 'list_jobs', 'preview_hi', 'confirm_hi', 'ask_resume', 'send_outreach', 'check_resume'].includes(args.action)) throw new Error('不支持的 51job 沟通操作');
+    if (!['verify_candidate', 'list_jobs', 'preview_hi', 'confirm_hi', 'ask_resume', 'send_outreach', 'check_resume', 'check_replies'].includes(args.action)) throw new Error('不支持的 51job 沟通操作');
     if (!/^[A-Za-z0-9_-]+$/.test(args.recordID)) throw new Error('候选人档案编号无效');
     if (args.action === 'confirm_hi' && (!args.name || !args.jobTitle || !args.expectedJobID || !args.targetID ||
         !Number.isSafeInteger(Number(args.expectedPoints)) || Number(args.expectedPoints) <= 0)) {
@@ -583,9 +611,14 @@ async function main(argv = process.argv.slice(2)) {
       process.stdout.write(JSON.stringify({ status: 'verified', targetId: expected.resumeId, message: '51job 详情页与候选人姓名已核对' }) + '\n');
       return;
     }
-    const manualJobSelection = args.action === 'list_jobs' || (args.action === 'preview_hi' && !!args.expectedJobID);
+    const readingReply = args.action === 'check_resume' || args.action === 'check_replies';
+    const manualJobSelection = readingReply || args.action === 'list_jobs' || (args.action === 'preview_hi' && !!args.expectedJobID);
     const chat = await openCandidateChat(page, args.name,
-      args.action === 'check_resume' ? '' : args.jobTitle, !manualJobSelection);
+      readingReply ? '' : args.jobTitle, !manualJobSelection);
+    if (readingReply && chat.status) {
+      process.stdout.write(JSON.stringify({status:'waiting',message:'尚未发现可读取的已有会话；可打开平台核查，本次未发起Hi聊或发送消息',replies:[],attachmentNames:[]})+'\n');
+      return;
+    }
     if (args.action === 'list_jobs') {
       const result = chat.status === 'needs_job_selection'
         ? await listCommunicationJobs(page, args.message)
@@ -614,8 +647,8 @@ async function main(argv = process.argv.slice(2)) {
       process.stdout.write(JSON.stringify(chat) + '\n');
       return;
     }
-    const result = args.action === 'check_resume'
-      ? await inspectReply(page, args.outputDir, args.recordID, JSON.parse(args.known || '[]'))
+    const result = readingReply
+      ? await inspectReply(page, args.outputDir, args.recordID, JSON.parse(args.known || '[]'), args.action === 'check_resume')
       : await sendCandidateMessage(page, args.message, args.action === 'ask_resume');
     process.stdout.write(JSON.stringify(result) + '\n');
   } catch (error) {
@@ -631,6 +664,7 @@ async function main(argv = process.argv.slice(2)) {
 
 if (require.main === module) main();
 module.exports = { parseCandidateUrl, sameCandidatePage, sameDisplayedName, findCandidateChatEntry,
+  candidatePage, waitCandidateReady,
   attachmentFingerprint, selectInboundAttachment, validResumeBytes, platformChatGateVisible,
   searchCommunicationJob, clickExactCommunicationJob, selectCommunicationJob, readHiChatQuote,
   readCommunicationJobs, listCommunicationJobs, setCommunicationJobByID, selectCommunicationJobByID,

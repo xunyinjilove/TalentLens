@@ -1,13 +1,20 @@
 <template>
   <el-dialog v-model="visible" title="项目排名前十 · 定制招呼预览" width="min(920px, 94vw)" :close-on-click-modal="!sendingBatch" :close-on-press-escape="!sendingBatch" :show-close="!sendingBatch">
-    <el-alert title="先逐人核对文案，再确认名单。51job 会逐人核对职位与点数；默认 Hi聊和定制文案分别核实回执。红线待核实者须主动勾选。" type="warning" :closable="false" style="margin-bottom:16px" />
+    <el-alert title="核对名单和文案后，确认本批沟通职位与点数预算。软件在预算内逐人实时核点发送；超预算、职位变化或回执不明时暂停。红线待核实者须主动勾选。" type="info" :closable="false" style="margin-bottom:16px" />
     <div v-if="loading" class="wb-empty">正在生成排名快照与 AI 深度定制招呼语…</div>
     <div v-else-if="error" class="wb-empty">{{ error }}</div>
     <div v-else-if="batch">
       <div v-if="batch.status === 'confirmed'" class="outreach-run-state">
         <span>{{ sendingBatch ? '正在逐人处理发送队列…' : '本批已确认；逐人结果如下' }}</span>
-        <el-button v-if="!sendingBatch && batch.items.some(item => item.status === 'queued' || item.status === 'awaiting_confirmation')" size="small" type="primary" @click="runQueuedOutreach">继续处理待发送</el-button>
+        <el-button v-if="!sendingBatch && batch.items.some(item => item.status === 'queued' || item.status === 'awaiting_confirmation')" size="small" type="primary" @click="openBudget">确认预算并继续</el-button>
+        <el-button v-if="sendingBatch" size="small" :disabled="stopRequested" @click="stopRequested=true">{{ stopRequested ? '当前人完成后暂停' : '暂停后续发送' }}</el-button>
         <el-button v-if="!sendingBatch" size="small" @click="preview(true)">重新生成排名预览</el-button>
+      </div>
+      <div v-if="batch.authorization" class="budget-summary" role="status" aria-live="polite">
+        <strong>{{ batch.authorization.jobTitle }}</strong>
+        <span>单人上限 {{ batch.authorization.perPersonLimit }} 点</span>
+        <span>本批预算占用 {{ batch.authorization.reservedPoints }} / {{ batch.authorization.totalLimit }} 点</span>
+        <p v-if="batch.authorization.message">{{ batch.authorization.message }}</p>
       </div>
       <div v-if="batch.status === 'draft'" class="outreach-toolbar">
         <el-button
@@ -58,16 +65,38 @@
           <div class="wb-actions">
             <span class="wb-pill" :class="item.status === 'failed' ? 'danger' : item.status === 'sent' ? 'ok' : 'warn'">{{ statusLabel(item.status) }}</span>
             <span class="wb-muted">{{ item.result }}</span>
-            <el-button v-if="['needs_manual','partial','uncertain'].includes(item.status)" size="small" @click="copyMessage(item.message)">复制文案</el-button>
+            <el-button v-if="['needs_manual','partial','uncertain','sending','failed'].includes(item.status)" size="small" @click="copyMessage(item.message)">复制文案</el-button>
+            <el-button v-if="item.status === 'needs_manual' && item.platformCandidateId && /Waiting failed|timeout|timed out|超时|页面|职位/i.test(item.result)" size="small" :disabled="sendingBatch" @click="retryRead(item)">重新核点</el-button>
             <el-button v-if="item.status === 'needs_manual' && item.profileUrl?.startsWith('https://ehire.51job.com/') && !item.platformCandidateId" size="small" @click="verifyIdentity(item)">核验新版详情链接</el-button>
-            <el-button v-if="['needs_manual','partial','uncertain'].includes(item.status)" size="small" @click="record(item)">登记平台结果</el-button>
+            <el-button v-if="['needs_manual','partial','uncertain','sending','failed'].includes(item.status)" size="small" :disabled="sendingBatch" @click="record(item)">登记平台结果</el-button>
           </div>
         </template>
       </article>
       <div v-if="batch.status === 'draft'" class="wb-actions" style="justify-content:flex-end;margin-top:18px">
-        <el-button type="primary" :loading="confirming" @click="confirm">一次确认本批名单与文案</el-button>
+        <el-button type="primary" :loading="confirming" @click="openBudget">确认名单，设置职位与预算</el-button>
       </div>
     </div>
+    <el-dialog v-model="budgetOpen" title="确认本批职位与点数预算" width="min(640px, 92vw)" append-to-body :close-on-click-modal="false" :close-on-press-escape="!confirming" :show-close="!confirming">
+      <p class="budget-hint">招聘岗位：{{ batch?.projectTitle }}。本批共用一个沟通职位；预选结果仍需你确认。</p>
+      <el-form label-position="top" @submit.prevent>
+        <el-form-item label="搜索 51job 沟通职位">
+          <div class="budget-search"><el-input v-model="jobKeyword" placeholder="职位名称" @keyup.enter="loadJobs" /><el-button :loading="jobsLoading" @click="loadJobs">搜索</el-button></div>
+        </el-form-item>
+        <el-alert v-if="jobsError" :title="jobsError" type="warning" :closable="false" style="margin-bottom:12px" />
+        <el-form-item label="本批沟通职位（来自当前企业账号）">
+          <el-select v-model="selectedJobID" placeholder="请选择真实平台职位" style="width:100%" :loading="jobsLoading">
+            <el-option v-for="job in jobOptions" :key="job.id" :value="job.id" :label="`${job.title} · ${job.workArea || job.company || ''} · ID ${job.id}`" />
+          </el-select>
+          <span v-if="jobsHasMore" class="budget-hint">平台还有更多职位，请输入具体名称搜索。</span>
+        </el-form-item>
+        <div class="budget-fields">
+          <el-form-item label="每人点数上限" for="outreach-person-budget"><input id="outreach-person-budget" v-model.number="perPersonLimit" class="budget-number" type="number" min="1" max="1000000" step="1" placeholder="填写上限" required /></el-form-item>
+          <el-form-item label="本批总点数上限" for="outreach-total-budget"><input id="outreach-total-budget" v-model.number="totalLimit" class="budget-number" type="number" :min="Math.max(1,batch?.authorization?.reservedPoints || 0)" max="10000000" step="1" placeholder="填写总额" required /></el-form-item>
+        </div>
+      </el-form>
+      <el-alert title="确认后将自动逐人发起平台默认 Hi聊，再发送已预览的定制文案。回执不明时停止并保留预算占用；占用不代表实际扣费。" type="warning" :closable="false" />
+      <template #footer><el-button :disabled="confirming" @click="budgetOpen=false">暂不发送</el-button><el-button type="primary" :loading="confirming" :disabled="!selectedJobID || !perPersonLimit || !totalLimit || jobsLoading" @click="confirm">确认职位与预算，开始发送</el-button></template>
+    </el-dialog>
     <el-dialog v-model="receiptOpen" title="登记平台发送结果" width="460px" append-to-body>
       <el-select v-model="receiptStatus" style="width:100%;margin-bottom:12px">
         <el-option label="平台已核实发送成功" value="sent" />
@@ -89,14 +118,25 @@ import { computed, ref, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 
 interface Item { id:string; rank:number; candidateName:string; platform:string; platformCandidateId:string; profileUrl:string; redLineStatus:string; abilityScore:number; evidence:string; message:string; status:string; result:string }
-interface Batch { id:string; status:string; items:Item[] }
+interface JobOption { id:string; title:string; company?:string; workArea?:string }
+interface Batch { id:string; status:string; projectTitle:string; items:Item[]; authorization?:{jobId:string; jobTitle:string; perPersonLimit:number; totalLimit:number; reservedPoints:number; status:string; message:string} }
 const props = defineProps<{ modelValue:boolean; projectId:string }>()
-const emit = defineEmits<{ 'update:modelValue':[value:boolean] }>()
+const emit = defineEmits<{ 'update:modelValue':[value:boolean]; updated:[] }>()
 const visible = computed({ get:()=>props.modelValue, set:value=>emit('update:modelValue',value) })
 const batch=ref<Batch|null>(null)
 const loading=ref(false)
 const confirming=ref(false)
 const sendingBatch=ref(false)
+const stopRequested=ref(false)
+const budgetOpen=ref(false)
+const jobsLoading=ref(false)
+const jobsError=ref('')
+const jobOptions=ref<JobOption[]>([])
+const jobsHasMore=ref(false)
+const jobKeyword=ref('')
+const selectedJobID=ref('')
+const perPersonLimit=ref<number>()
+const totalLimit=ref<number>()
 const regenerating=ref<Record<string, boolean>>({})
 const regeneratingAll=ref(false)
 const error=ref('')
@@ -108,7 +148,7 @@ const receiptItem=ref<Item|null>(null)
 const receiptStatus=ref('sent')
 const receiptText=ref('')
 const receiptActor=ref('HR')
-function statusLabel(status:string){return ({queued:'待发送',awaiting_confirmation:'待确认点数',partial:'部分完成／待核查',needs_manual:'需人工处理',excluded:'未纳入',sent:'已核实发送',failed:'失败',uncertain:'待核查'} as Record<string,string>)[status]||status}
+function statusLabel(status:string){return ({queued:'待发送',awaiting_confirmation:'已核点／待发送',sending:'发送中或中断待核查',partial:'部分完成／待核查',needs_manual:'需人工处理',excluded:'未纳入',sent:'已核实发送',failed:'失败',uncertain:'待核查'} as Record<string,string>)[status]||status}
 async function preview(forceNew=false){
   if(!props.projectId)return
   loading.value=true;error.value='';batch.value=null
@@ -119,7 +159,7 @@ async function preview(forceNew=false){
     if(savedID && !forceNew){
       try{
         const saved:Batch=await api.GetOutreachBatch(savedID)
-        if(saved.status==='confirmed' && saved.items.some(item=>['queued','awaiting_confirmation','needs_manual','partial','uncertain'].includes(item.status))){
+        if(saved.status==='confirmed' && saved.items.some(item=>['queued','awaiting_confirmation','needs_manual','partial','uncertain','sending'].includes(item.status))){
           batch.value=saved
           return
         }
@@ -174,55 +214,83 @@ async function regenerateAll() {
     regeneratingAll.value = false
   }
 }
+async function openBudget(){
+  if(!batch.value || sendingBatch.value)return
+  if(batch.value.status==='draft' && !batch.value.items.some(item=>selected.value[item.id])){ElMessage.warning('请至少选择一位候选人');return}
+  budgetOpen.value=true
+  const auth=batch.value.authorization
+  selectedJobID.value=auth?.jobId||''
+  perPersonLimit.value=auth?.perPersonLimit
+  totalLimit.value=auth?.totalLimit
+  jobKeyword.value=''
+  await loadJobs()
+}
+async function loadJobs(){
+  if(!batch.value || jobsLoading.value)return
+  jobsLoading.value=true; jobsError.value=''
+  try{
+    const api:any=await import('../../wailsjs/go/main/App')
+    const result=await api.ListOutreachCommunicationJobs(batch.value.id,jobKeyword.value.trim())
+    if(result.status!=='jobs')throw new Error(result.message||'无法读取平台职位')
+    jobOptions.value=result.jobs||[]; jobsHasMore.value=!!result.hasMore
+    if(!jobOptions.value.some(job=>job.id===selectedJobID.value))selectedJobID.value=result.suggestedJobId||''
+    if(!jobOptions.value.length)jobsError.value='未找到职位，请调整搜索词。'
+  }catch(err:any){jobsError.value=err?.message||String(err);jobOptions.value=[];selectedJobID.value=''}
+  finally{jobsLoading.value=false}
+}
 async function confirm(){
-  if(!batch.value)return
+  if(!batch.value || !perPersonLimit.value || !totalLimit.value)return
+  const job=jobOptions.value.find(job=>job.id===selectedJobID.value)
+  if(!job)return
   confirming.value=true
   try{
     const api:any=await import('../../wailsjs/go/main/App')
-    batch.value=await api.ConfirmOutreachBatch(batch.value.id,batch.value.items.map(item=>({itemId:item.id,message:messages.value[item.id],include:!!selected.value[item.id],confirmPending:!!pendingConfirmed.value[item.id]})))
-    ElMessage.info('名单与文案已确认，开始逐人核对平台职位与点数')
+    if(batch.value.status==='draft'){
+      batch.value=await api.ConfirmOutreachBatch(batch.value.id,batch.value.items.map(item=>({itemId:item.id,message:messages.value[item.id],include:!!selected.value[item.id],confirmPending:!!pendingConfirmed.value[item.id]})))
+    }
+    batch.value=await api.AuthorizeOutreachBudget(batch.value!.id,job.id,job.title,perPersonLimit.value,totalLimit.value)
+    budgetOpen.value=false
+    ElMessage.info('本批职位与预算已确认，开始逐人实时核点发送')
     await runQueuedOutreach()
   }catch(err:any){ElMessage.error(err?.message||String(err))}finally{confirming.value=false}
 }
 async function runQueuedOutreach(){
   if(!batch.value || sendingBatch.value)return
-  sendingBatch.value=true
+  sendingBatch.value=true;stopRequested.value=false
   try{
     const api:any=await import('../../wailsjs/go/main/App')
     const pending=batch.value.items.filter(item=>item.status==='queued'||item.status==='awaiting_confirmation')
     for(const item of pending){
-      let quote:any
+      if(stopRequested.value)break
       try{
-        quote=await api.PrepareOutreachItem(item.id)
+        const quote=await api.PrepareOutreachItem(item.id)
         batch.value=await api.GetOutreachBatch(batch.value!.id)
-      }catch(err:any){ElMessage.error(`${item.candidateName} 报价失败：${err?.message||String(err)}`);continue}
-      if(quote.status==='needs_login'){
-        ElMessage.warning('51job 企业浏览器需要先登录；待发送项目已保留，请登录后点击“继续处理待发送”')
+        if(quote.status!=='needs_confirmation'){
+          ElMessage.warning(item.candidateName+'：'+(quote.message||'核点未完成，已暂停'))
+          break
+        }
+        const outcome:Item=await api.ConfirmOutreachItem(item.id,quote.quoteId)
+        batch.value=await api.GetOutreachBatch(batch.value!.id)
+        if(outcome.status!=='sent'){
+          ElMessage.warning(item.candidateName+'：'+outcome.result)
+          break
+        }
+      }catch(err:any){
+        ElMessage.error(item.candidateName+'：'+(err?.message||String(err))+'；队列已暂停')
+        batch.value=await api.GetOutreachBatch(batch.value!.id)
         break
       }
-      if(quote.status!=='needs_confirmation'){
-        ElMessage.warning(`${item.candidateName}：${quote.message||'无法核对平台信息，已转人工处理'}`)
-        continue
-      }
-      try{
-        await ElMessageBox.confirm(
-          `候选人：${item.candidateName}\n沟通职位：${quote.jobTitle}\n预计消耗：${quote.points} 个 Hi聊点数。确认后将先发平台默认 Hi聊，再发送此人的定制文案。`,
-          '逐人核对 51job 职位与点数',
-          { confirmButtonText:'确认并发送此人', cancelButtonText:'转人工处理', type:'warning', dangerouslyUseHTMLString:false }
-        )
-      }catch{
-        await api.DeferOutreachItem(item.id,'HR 暂未确认平台职位或点数；此人未发送，转人工处理')
-        batch.value=await api.GetOutreachBatch(batch.value!.id)
-        continue
-      }
-      try{
-        const outcome:Item=await api.ConfirmOutreachItem(item.id,quote.quoteId)
-        if(outcome.status==='sent')ElMessage.success(`${item.candidateName}：定制文案已核实发送`)
-        else ElMessage.warning(`${item.candidateName}：${outcome.result}`)
-      }catch(err:any){ElMessage.error(`${item.candidateName}：${err?.message||String(err)}；请核对平台会话`)}
-      batch.value=await api.GetOutreachBatch(batch.value!.id)
     }
-  }finally{sendingBatch.value=false}
+  }finally{sendingBatch.value=false;emit('updated')}
+}
+async function retryRead(item:Item){
+  if(!batch.value)return
+  try{
+    const api:any=await import('../../wailsjs/go/main/App')
+    await api.RequeueOutreachReadFailure(item.id)
+    batch.value=await api.GetOutreachBatch(batch.value.id)
+    await openBudget()
+  }catch(err:any){ElMessage.error(err?.message||String(err))}
 }
 async function verifyIdentity(item:Item){
   try{
@@ -266,4 +334,12 @@ watch(()=>props.modelValue,value=>{if(value)void preview()})
 .head-actions{margin-left:auto}
 .evidence-line{display:flex;align-items:center;gap:6px;margin:6px 0!important}
 .evidence-tag{display:inline-block;padding:1px 6px;border-radius:4px;background:rgba(79, 70, 229, 0.1);color:#4f46e5;font-weight:600;font-size:11px}
+.budget-summary{display:flex;flex-wrap:wrap;gap:8px 20px;padding:16px;margin-bottom:16px;border:1px solid var(--wb-border);border-radius:12px;background:var(--wb-surface-soft);font-size:13px;color:var(--wb-text)}
+.budget-summary p{flex-basis:100%;margin:0}
+.budget-hint{font-size:13px;line-height:1.6;color:var(--wb-text);margin:0 0 16px}
+.budget-search{display:flex;gap:8px;width:100%}
+.budget-fields{display:flex;gap:24px;flex-wrap:wrap}
+.budget-fields .el-form-item{flex:1;min-width:180px}
+.budget-number{box-sizing:border-box;width:100%;height:40px;border:1px solid var(--el-border-color);border-radius:6px;padding:8px 12px;color:var(--el-text-color-primary);background:var(--el-fill-color-blank);font:inherit}
+.budget-number:focus{outline:2px solid var(--el-color-primary);outline-offset:2px}
 </style>
