@@ -75,15 +75,15 @@
       </div>
 
       <div class="card-footer">
-        <span class="footer-hint">点击查看评测详情</span>
+        <span class="footer-hint">{{ resume.status === 'pending' ? '已入库，等待手动分析' : '点击查看评测详情' }}</span>
         <div class="card-actions">
           <button
-            v-if="resume.status === 'done' || resume.status === 'error'"
+            v-if="resume.status !== 'analyzing'"
             class="action-btn reanalyze-btn"
             @click.stop="$emit('re-analyze', resume.id)"
           >
             <el-icon><RefreshRight /></el-icon>
-            {{ $t('analysis.reAnalyze') }}
+            {{ resume.status === 'pending' ? '分析' : $t('analysis.reAnalyze') }}
           </button>
           <button
             class="action-btn delete-btn"

@@ -12,13 +12,13 @@
         </div>
       </template>
       <div class="task-toolbar">
-        <p class="wb-muted">检索和 AI 分析分别计数。关闭面板或切换页面不会停止任务。</p>
+        <p class="wb-muted">寻才只抓取入库，分析由你手动启动。人数不足时定时补抓，关闭面板不会停止任务。</p>
         <el-button size="small" plain type="danger" :disabled="finishedCount === 0" @click="clearTasks">清空已结束</el-button>
       </div>
       <article v-for="task in tasks" :key="task.id" class="wb-card sourcing-task-card">
         <div class="task-title"><strong>{{ task.projectName }}</strong><span class="wb-pill" :class="task.status === 'failed' ? 'danger' : task.status === 'running' ? 'warn' : ''">{{ statusText(task.status) }}</span></div>
         <div class="wb-muted">{{ task.config.keyword }} · {{ (task.config.platforms || []).join('、') }}</div>
-        <div class="task-metrics"><span>已抓取 <b>{{ task.capturedCount }}/{{ task.targetCount }}</b></span><span>已分析 <b>{{ task.analyzedCount }}</b></span><span>分析失败 <b>{{ task.failedCount }}</b></span></div>
+        <div class="task-metrics"><span>已抓取 <b>{{ task.capturedCount }}/{{ task.targetCount }}</b></span><template v-if="task.config.autoAnalyze"><span>历史已分析 <b>{{ task.analyzedCount }}</b></span><span>历史失败 <b>{{ task.failedCount }}</b></span></template><span v-else>分析方式 <b>手动</b></span></div>
         <el-progress :percentage="task.targetCount ? Math.min(100, Math.round(task.capturedCount / task.targetCount * 100)) : 0" :show-text="false" />
         <p class="wb-muted task-message">{{ task.message || '等待更新' }}</p>
         <div class="wb-actions">

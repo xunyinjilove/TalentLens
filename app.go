@@ -36,7 +36,7 @@ import (
 )
 
 // 版本信息
-const AppVersion = "1.8.19"
+const AppVersion = "1.8.20"
 const analysisFormatRetryVersion = "model-json-repair-v1"
 const GitHubRepo = "xunyinjilove/TalentLens"
 
@@ -488,7 +488,6 @@ func (a *App) startup(ctx context.Context) {
 	})
 
 	log.Println("TalentLens 已启动")
-	go a.retryLegacyFormatFailuresOnce()
 }
 
 func shouldAutoRetryFormatFailure(resume *Resume) bool {
@@ -2177,6 +2176,9 @@ func (a *App) StartSearchWithPolicy(projectID string, keyword string, city strin
 }
 
 func (a *App) startQuotaMatrixSearch(projectID string, keyword string, city string, expYears int, eduLevel string, count int, platforms []string, quotaMatrixJSON string, autoAnalyze bool, activityDays int, channelStrategy string) bool {
+	// Keep the public Wails signature compatible with older clients, but all
+	// sourcing entrances now capture only. AI requires an explicit HR action.
+	autoAnalyze = false
 	if !interviewIDPattern.MatchString(projectID) || a.GetProject(projectID) == nil {
 		runtime.EventsEmit(a.ctx, "platform:error", map[string]interface{}{
 			"type": "error", "message": "招聘项目不存在，请重新选择项目后搜索",
@@ -2459,9 +2461,6 @@ func (a *App) startQuotaMatrixSearch(projectID string, keyword string, city stri
 					}
 					persistedCount++
 					a.recordSourcingCandidate(taskID)
-					if autoAnalyze {
-						a.queueSourcingAnalysis(taskID, projectID, r.ID)
-					}
 
 					runtime.EventsEmit(a.ctx, "resume:dropped", r)
 					runtime.EventsEmit(a.ctx, "boss:candidate_found", evt)
