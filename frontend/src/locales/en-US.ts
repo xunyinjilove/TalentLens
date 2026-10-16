@@ -228,6 +228,7 @@ export default {
     preparingPrompt: 'Preparing...',
     callingAI: 'AI analyzing...',
     parsingResult: 'Parsing result...',
+    extractingCompetencies: 'Extracting experience radar...',
     batchProgress: 'Analyzing {current}/{total} resumes',
     done: 'Completed',
     failed: 'Analysis failed',

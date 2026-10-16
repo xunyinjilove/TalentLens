@@ -228,6 +228,7 @@ export default {
     preparingPrompt: '准备分析...',
     callingAI: 'AI 分析中...',
     parsingResult: '解析结果...',
+    extractingCompetencies: '提炼履历能力雷达...',
     batchProgress: '正在分析 {current}/{total} 份简历',
     done: '已完成',
     failed: '分析失败',

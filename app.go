@@ -36,7 +36,7 @@ import (
 )
 
 // 版本信息
-const AppVersion = "1.8.18"
+const AppVersion = "1.8.19"
 const analysisFormatRetryVersion = "model-json-repair-v1"
 const GitHubRepo = "xunyinjilove/TalentLens"
 
@@ -212,6 +212,8 @@ type AnalysisResult struct {
 	ConfirmedBonusCount    int                  `json:"confirmed_bonus_count,omitempty"`
 	CoreCriterionChecks    []CoreCriterionCheck `json:"core_criterion_checks,omitempty"`
 	ExperienceCompetencies []CoreCriterionCheck `json:"experience_competencies,omitempty"`
+	CompetencyStatus       string               `json:"competency_status,omitempty"` // completed | insufficient | error
+	CompetencyMessage      string               `json:"competency_message,omitempty"`
 
 	// 面试建议
 	InterviewSuggestions []string `json:"interview_suggestions"`
@@ -2878,6 +2880,14 @@ func (a *App) AnalyzeResume(resumeID string, cfg *AIConfig, jobCfg *JobConfig) (
 		"status":   "analyzing",
 		"progress": 80,
 	})
+	// 提炼履历能力雷达画像与岗位评分卡核验 - 进度 85%
+	runtime.EventsEmit(a.ctx, "analysis:progress", map[string]interface{}{
+		"id":       resumeID,
+		"status":   "analyzing",
+		"progress": 85,
+		"phase":    "competencies",
+	})
+	a.completeInitialCompetencies(analysis, &resume, jobCfg, cfg)
 	a.applyJobDecision(analysis, jobCfg, &resume)
 
 	if analysis.WaterCheck == nil {

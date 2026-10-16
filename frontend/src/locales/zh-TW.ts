@@ -226,6 +226,7 @@ export default {
     preparingPrompt: '準備分析...',
     callingAI: 'AI 分析中...',
     parsingResult: '解析結果...',
+    extractingCompetencies: '提煉履歷能力雷達...',
     batchProgress: '正在分析 {current}/{total} 份履歷',
     done: '已完成',
     failed: '分析失敗',

@@ -7,7 +7,8 @@ const { parseCandidateUrl, sameCandidatePage, sameDisplayedName, attachmentFinge
   validResumeBytes, sendCandidateMessage, inspectReply, findCandidateChatEntry, openCandidateChat,
   searchCommunicationJob, clickExactCommunicationJob, selectCommunicationJob, platformChatGateVisible,
   readHiChatQuote, previewHiChat, clickQuotedHiChat, confirmHiChat,
-  readCommunicationJobs, listCommunicationJobs, setCommunicationJobByID, selectCommunicationJobByID } = require('./51job_conversation');
+  readCommunicationJobs, listCommunicationJobs, setCommunicationJobByID, selectCommunicationJobByID,
+  waitCandidateReady, candidatePage } = require('./51job_conversation');
 
 test('51job detail opens chat through its visible div.chat_btn entry', () => {
   const entry = { innerText: '立即Hi聊', className: 'chat_btn', getClientRects: () => [1] };
@@ -410,4 +411,29 @@ test('a candidate reply attachment is saved only after content verification', as
     assert.deepEqual(fs.readFileSync(result.filePath), bytes);
     assert.equal(path.dirname(result.filePath), path.join(root, '51job_received', 'resume_123'));
   } finally { fs.rmSync(root, { recursive: true, force: true }); }
+});
+
+test('candidate readiness retries a read without waiting for complete or reopening tabs', async () => {
+  const expected=parseCandidateUrl('https://ehire.51job.com/Revision/talent/resume/detail?resumeId=123');
+  let attempts=0;
+  const page={url:()=>expected.url,title:async()=> 'Synthetic',waitForFunction:async predicate=>{
+    assert.doesNotMatch(predicate.toString(),/readyState/);
+    if(++attempts===1)throw new Error('timeout');
+  }};
+  await waitCandidateReady(page,expected,'Synthetic');
+  assert.equal(attempts,2);
+  const browser={pages:async()=>[page]};
+  assert.equal(await candidatePage(browser,expected,'Synthetic'),page);
+  page.waitForFunction=async()=>{throw new Error('timeout');};
+  await assert.rejects(waitCandidateReady(page,expected,'Synthetic'),/已自动重试/);
+});
+
+test('reply inspection returns inbound text and attachment names without sending or overwriting files', async () => {
+  const messages=[{mine:true,text:'outgoing',links:[]},{mine:false,text:'方便下午沟通',links:[{href:'https://ehire.51job.com/files/resume.pdf',text:'resume.pdf'}]}];
+  let calls=0;
+  const result=await inspectReply({evaluate:async()=>{calls++;return messages;}},'unused','synthetic',[],false);
+  assert.equal(calls,1);
+  assert.equal(result.status,'reply');
+  assert.deepEqual(result.replies,['方便下午沟通']);
+  assert.deepEqual(result.attachmentNames,['resume.pdf']);
 });

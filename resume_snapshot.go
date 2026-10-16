@@ -131,6 +131,7 @@ func snapshotEvaluationTime(resume *Resume) time.Time {
 }
 
 func foldIdenticalResumeSnapshots(resumes []*Resume) []*Resume {
+	merge51JobContactStates(resumes)
 	result := make([]*Resume, 0, len(resumes))
 	positions := map[string]int{}
 	identities := map[string]map[string]bool{}

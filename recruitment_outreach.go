@@ -28,16 +28,19 @@ type OutreachItem struct {
 	Rank                int    `json:"rank"`
 	Status              string `json:"status"`
 	Result              string `json:"result"`
+	ReservedPoints      int    `json:"reservedPoints,omitempty"`
 }
 
 type OutreachBatch struct {
-	ID          string         `json:"id"`
-	ProjectID   string         `json:"projectId"`
-	ProjectName string         `json:"projectName"`
-	Status      string         `json:"status"`
-	Items       []OutreachItem `json:"items"`
-	CreatedAt   string         `json:"createdAt"`
-	ConfirmedAt string         `json:"confirmedAt"`
+	ID            string                 `json:"id"`
+	ProjectID     string                 `json:"projectId"`
+	ProjectName   string                 `json:"projectName"`
+	Status        string                 `json:"status"`
+	Items         []OutreachItem         `json:"items"`
+	CreatedAt     string                 `json:"createdAt"`
+	ConfirmedAt   string                 `json:"confirmedAt"`
+	ProjectTitle  string                 `json:"projectTitle"`
+	Authorization *OutreachAuthorization `json:"authorization,omitempty"`
 }
 
 type OutreachApproval struct {
@@ -284,6 +287,7 @@ func (a *App) PreviewTopTenOutreach(projectID string) (OutreachBatch, error) {
 		return batch, err
 	}
 	batch.ProjectName = project.Name
+	batch.ProjectTitle = project.JobConfig.Title
 	batch.ID = recruitmentID("outreach")
 	batch.CreatedAt = time.Now().UTC().Format(time.RFC3339Nano)
 	resumes := a.GetProjectRanking(projectID)
@@ -425,13 +429,24 @@ func (a *App) GetOutreachBatch(batchID string) (OutreachBatch, error) {
 		batch.Items = append(batch.Items, item)
 	}
 	sort.Slice(batch.Items, func(i, j int) bool { return batch.Items[i].Rank < batch.Items[j].Rank })
-	return batch, rows.Err()
+	err = rows.Err()
+	rows.Close()
+	if err != nil {
+		return batch, err
+	}
+	if project := a.GetProject(batch.ProjectID); project != nil {
+		batch.ProjectTitle = project.JobConfig.Title
+	}
+	batch.Authorization, err = a.loadOutreachAuthorization(batchID)
+	return batch, err
 }
 
 // All current platform first-message adapters lack verified personalized-send
 // receipts. Confirmation therefore records each chosen item as requiring
 // manual handling; it never converts a click or default greeting into success.
 func (a *App) ConfirmOutreachBatch(batchID string, approvals []OutreachApproval) (OutreachBatch, error) {
+	a.outreachMutex.Lock()
+	defer a.outreachMutex.Unlock()
 	batch, err := a.GetOutreachBatch(batchID)
 	if err != nil {
 		return batch, err
@@ -483,7 +498,7 @@ func (a *App) ConfirmOutreachBatch(batchID string, approvals []OutreachApproval)
 			}
 			var sent int
 			err = tx.QueryRow(`SELECT COUNT(*) FROM outreach_items oi JOIN outreach_batches b ON b.id=oi.batch_id
-				WHERE b.project_id=? AND oi.status IN ('sent','partial','uncertain') AND
+				WHERE b.project_id=? AND oi.status IN ('sent','partial','uncertain','sending') AND
 				(oi.project_candidate_id=? OR (?<>'' AND oi.platform=? AND oi.platform_candidate_id=? AND oi.platform_job_id=?))`,
 				batch.ProjectID, item.ProjectCandidateID, item.PlatformCandidateID, item.Platform, item.PlatformCandidateID, item.PlatformJobID).Scan(&sent)
 			if err != nil {
@@ -545,8 +560,8 @@ func (a *App) setOutreachItemStatus(item OutreachItem, status, result string) (O
 	if err != nil {
 		return item, err
 	}
-	_, err = db.Exec(`UPDATE outreach_items SET status=?,result_json=?,updated_at=? WHERE id=?`,
-		status, string(raw), time.Now().UTC().Format(time.RFC3339Nano), item.ID)
+	_, err = db.Exec(`UPDATE outreach_items SET status=?,platform_job_id=?,result_json=?,updated_at=? WHERE id=?`,
+		status, item.PlatformJobID, string(raw), time.Now().UTC().Format(time.RFC3339Nano), item.ID)
 	return item, err
 }
 
@@ -586,27 +601,45 @@ func (a *App) PrepareOutreachItem(itemID string) JobConversationResult {
 		_, _ = a.setOutreachItemStatus(item, "needs_manual", err.Error())
 		return JobConversationResult{Status: "needs_manual", Message: err.Error()}
 	}
-	result := a.Prepare51JobHiChat(resume.ID)
-	if result.Status != "needs_confirmation" {
-		if result.Status != "needs_login" {
-			_, _ = a.setOutreachItemStatus(item, "needs_manual", result.Message)
+	batchID, err := a.outreachItemBatchID(item.ID)
+	if err != nil {
+		return JobConversationResult{Status: "error", Message: err.Error()}
+	}
+	auth, err := a.loadOutreachAuthorization(batchID)
+	if err != nil || auth == nil || auth.Status != "active" {
+		return JobConversationResult{Status: "paused", Message: "请先确认本批沟通职位与点数预算"}
+	}
+	batch, err := a.GetOutreachBatch(batchID)
+	if err != nil {
+		return JobConversationResult{Status: "error", Message: err.Error()}
+	}
+	for _, other := range batch.Items {
+		if other.Status == "sending" || other.Status == "partial" || other.Status == "uncertain" {
+			message := "本批有发送结果待核查的候选人，请先登记平台结果"
+			a.pauseOutreachBatch(batchID, message)
+			return JobConversationResult{Status: "paused", Message: message}
 		}
+	}
+	result := a.Prepare51JobHiChatForJob(resume.ID, auth.JobID, auth.JobTitle)
+	if result.Status != "needs_confirmation" {
+		// Read failures are retryable and never consume the item or budget.
+		a.pauseOutreachBatch(batchID, result.Message)
+		_, _ = a.setOutreachItemStatus(item, "queued", result.Message)
 		return result
 	}
-	if item.PlatformJobID != "" {
-		a.contactMutex.Lock()
-		quote := a.contactPending[result.QuoteID]
-		if quote.JobID != item.PlatformJobID {
-			delete(a.contactPending, result.QuoteID)
-		}
-		a.contactMutex.Unlock()
-		if quote.JobID != item.PlatformJobID {
-			message := "平台沟通职位与当前项目映射的职位 ID 不一致；请人工核对，未发送"
-			_, _ = a.setOutreachItemStatus(item, "needs_manual", message)
-			return JobConversationResult{Status: "needs_manual", Message: message}
-		}
+	a.contactMutex.Lock()
+	quote := a.contactPending[result.QuoteID]
+	err = checkOutreachBudget(auth, quote)
+	if err != nil {
+		delete(a.contactPending, result.QuoteID)
 	}
-	_, err = a.setOutreachItemStatus(item, "awaiting_confirmation", fmt.Sprintf("等待 HR 确认 %s 的 %d 个 Hi聊点数", result.JobTitle, result.Points))
+	a.contactMutex.Unlock()
+	if err != nil {
+		a.pauseOutreachBatch(batchID, err.Error())
+		return JobConversationResult{Status: "paused", Message: err.Error()}
+	}
+	item.PlatformJobID = auth.JobID
+	_, err = a.setOutreachItemStatus(item, "awaiting_confirmation", fmt.Sprintf("已核对 %s 的 %d 个 Hi聊点数，处于本批授权预算内", result.JobTitle, result.Points))
 	if err != nil {
 		return JobConversationResult{Status: "error", Message: "点数报价状态无法保存；本次未发送"}
 	}
@@ -629,8 +662,25 @@ func (a *App) ConfirmOutreachItem(itemID, quoteID string) (OutreachItem, error) 
 	if _, err = a.verified51JobOutreachResume(item); err != nil {
 		return a.setOutreachItemStatus(item, "needs_manual", err.Error())
 	}
+	batchID, err := a.outreachItemBatchID(item.ID)
+	if err != nil {
+		return item, err
+	}
+	a.contactMutex.Lock()
+	quote, exists := a.contactPending[quoteID]
+	a.contactMutex.Unlock()
+	if !exists || quote.ResumeID != item.ResumeID || time.Now().After(quote.Expires) {
+		a.pauseOutreachBatch(batchID, "点数报价已失效，请重新核点")
+		return item, fmt.Errorf("点数报价已失效，请重新核点；未发送")
+	}
+	item, err = a.reserveOutreachPoints(batchID, item, quote)
+	if err != nil {
+		a.pauseOutreachBatch(batchID, err.Error())
+		return item, err
+	}
 	first := a.Confirm51JobHiChat(item.ResumeID, quoteID)
 	if first.Status != "sent" {
+		a.pauseOutreachBatch(batchID, "发送未完成，请核对平台结果和已占用预算："+first.Message)
 		status := "failed"
 		if first.Status == "uncertain" {
 			status = "uncertain"
@@ -643,6 +693,7 @@ func (a *App) ConfirmOutreachItem(itemID, quoteID string) (OutreachItem, error) 
 	}
 	second := a.Send51JobOutreachMessage(item.ResumeID, item.Message)
 	if second.Status != "sent" {
+		a.pauseOutreachBatch(batchID, "默认招呼已发出，定制文案回执待核查")
 		return a.setOutreachItemStatus(item, "partial", "默认 Hi聊已发出；定制文案发送结果待核查："+second.Message)
 	}
 	return a.setOutreachItemStatus(item, "sent", "51job 已核实默认 Hi聊及此人的定制文案发送成功")
@@ -750,6 +801,8 @@ func (a *App) VerifyOutreachCandidateDetail(itemID, detailURL string) (OutreachI
 }
 
 func (a *App) RecordOutreachResult(itemID, status, platformReceipt, actor string) error {
+	a.outreachMutex.Lock()
+	defer a.outreachMutex.Unlock()
 	if status != "sent" && status != "failed" && status != "uncertain" {
 		return fmt.Errorf("结果状态无效")
 	}
@@ -770,7 +823,7 @@ func (a *App) RecordOutreachResult(itemID, status, platformReceipt, actor string
 	if err != nil {
 		return err
 	}
-	if current != "needs_manual" && current != "uncertain" && current != "partial" {
+	if current != "needs_manual" && current != "uncertain" && current != "partial" && current != "sending" && current != "failed" {
 		return fmt.Errorf("当前状态不可登记发送结果")
 	}
 	var item OutreachItem
@@ -790,7 +843,7 @@ func (a *App) RecordOutreachResult(itemID, status, platformReceipt, actor string
 	item.Status = status
 	item.Result = fmt.Sprintf("%s 登记平台回执：%s", strings.TrimSpace(actor), strings.TrimSpace(platformReceipt))
 	encoded, _ := json.Marshal(item)
-	result, err := tx.Exec(`UPDATE outreach_items SET status=?,result_json=?,updated_at=? WHERE id=? AND status IN ('needs_manual','uncertain')`,
+	result, err := tx.Exec(`UPDATE outreach_items SET status=?,result_json=?,updated_at=? WHERE id=? AND status IN ('needs_manual','uncertain','partial','sending','failed')`,
 		status, string(encoded), time.Now().UTC().Format(time.RFC3339Nano), itemID)
 	if err != nil {
 		return err

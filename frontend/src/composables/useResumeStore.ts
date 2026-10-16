@@ -31,6 +31,7 @@ export interface FileInfo {
 // 简历类型定义
 export interface Resume {
   id: string
+  projectId?: string
   fileName: string
   filePath: string
   fileType: string
@@ -92,6 +93,8 @@ export interface Resume {
     bonusChecks?: Array<{ rule_id?: string; criterion: string; status: 'met' | 'violated' | 'unknown'; suggested_status?: string; evidence: string; reviewed_at?: string }>
     confirmedBonusCount?: number
     coreCriterionChecks?: Array<{ criterion: string; level: number; evidence?: string; assessment?: string }>
+    competencyStatus?: string
+    competencyMessage?: string
     experienceCompetencies?: Array<{ criterion: string; level: number; evidence?: string; assessment?: string }>
     interviewSuggestions: string[]
     interviewQA?: Array<{ category: string; question: string; reference_answer: string }>
@@ -265,6 +268,8 @@ export const useResumeStore = defineStore('resume', () => {
               confirmedBonusCount: a.confirmed_bonus_count || 0,
               coreCriterionChecks: a.core_criterion_checks || [],
               experienceCompetencies: a.experience_competencies || [],
+          competencyStatus: a.competency_status || "",
+          competencyMessage: a.competency_message || "",
               interviewSuggestions: a.interview_suggestions || [],
               interviewQA: a.interview_qa || [],
               consistency_check: a.consistency_check || undefined,
@@ -743,6 +748,8 @@ export const useResumeStore = defineStore('resume', () => {
           confirmedBonusCount: a.confirmed_bonus_count || 0,
           coreCriterionChecks: a.core_criterion_checks || [],
           experienceCompetencies: a.experience_competencies || [],
+          competencyStatus: a.competency_status || "",
+          competencyMessage: a.competency_message || "",
           interviewSuggestions: a.interview_suggestions || [],
           interviewQA: a.interview_qa || [],
           consistency_check: a.consistency_check || undefined,
@@ -780,7 +787,10 @@ export const useResumeStore = defineStore('resume', () => {
       batchProgress.value = { current: 0, total: 0, currentResumeId: null }
     })
 
-    eventCleanupFns = [unsub1, unsub2, unsub3, unsub4, unsub5, unsub6, unsub7].filter(fn => typeof fn === 'function')
+    const unsubContact = WailsRuntime.EventsOn('resume:contact_updated', (data: any) => {
+      if (data.projectId && resumes.value.some(resume => resume.projectId === data.projectId)) void loadProjectResumes(data.projectId)
+    })
+    eventCleanupFns = [unsubContact, unsub1, unsub2, unsub3, unsub4, unsub5, unsub6, unsub7].filter(fn => typeof fn === 'function')
     console.log('✅ Wails 事件监听已初始化')
   }
 
