@@ -272,7 +272,9 @@
                       <span>主页直达</span>
                     </button>
                     <!-- 51job 快捷打招呼/索要简历 -->
-                    <template v-if="is51JobCandidate">
+                    <button v-if="resumeStore.selectedResume.snapshot_copy_ids?.length" class="hero-act-btn secondary" @click="showSnapshotHistory">快照历史（{{ resumeStore.selectedResume.snapshot_copy_ids.length + 1 }}）</button>
+                    <template v-if="is51JobSource">
+                      <button v-if="!is51JobCandidate" class="hero-act-btn secondary" :disabled="contactBusy" @click="ensure51JobCandidateDetail">关联候选人网页</button>
                       <button
                         class="hero-act-btn platform"
                         :disabled="contactBusy || jobPickerVisible || !!resumeStore.selectedResume.contact_status"
@@ -296,8 +298,8 @@
                       </button>
                     </template>
                   </div>
-                  <div v-if="is51JobCandidate" class="hero-contact-tip">
-                    {{ contactStatusText }}
+                  <div v-if="is51JobSource" class="hero-contact-tip">
+                    {{ is51JobCandidate ? contactStatusText : '旧快照缺少可核验的详情链接。请关联此人的 51job 网页后打招呼；完成后可索要完整简历。' }}
                   </div>
                 </div>
               </div>
@@ -517,27 +519,38 @@
                         <el-icon><Histogram /></el-icon>
                         <span>核心能力维度全景雷达 ({{ resumeStore.selectedResume.analysis.abilityScore ?? resumeStore.selectedResume.score }} 分)</span>
                       </div>
-                      <span class="header-tip">点击雷达图顶点或下方条目可高亮对应简历证据</span>
+                      <el-button size="small" type="primary" plain :loading="competencyBusy" @click="supplementCompetencies">按经历补全雷达</el-button>
+                    </div>
+
+                    <div class="competency-mode-bar">
+                      <el-radio-group v-model="radarMode" size="small">
+                        <el-radio-button label="job">岗位评分卡</el-radio-button>
+                        <el-radio-button label="experience" :disabled="!resumeStore.selectedResume.analysis.experienceCompetencies?.length">履历能力补充</el-radio-button>
+                      </el-radio-group>
+                      <span class="header-tip">{{ radarMode === 'experience' ? '根据实际经历提炼，逐项展示依据；补充维度不计入岗位能力分。' : '对照岗位要求，未取得原文依据的项目保留为未体现。' }}</span>
                     </div>
 
                     <div class="competency-split-layout">
                       <!-- 左侧：原生 SVG 蜘蛛网雷达图 -->
                       <div class="radar-visual-col">
                         <SvgRadarChart
+                          v-if="radarMode === 'job' || activeRadarChecks.length >= 3"
                           :indicators="radarIndicators"
                           :candidate-values="radarCandidateValues"
+                          :show-benchmark="radarMode === 'job'"
                           :selected-index="selectedRadarIndex"
                           @select="handleSelectRadarIndex"
                         />
+                        <p v-else class="score-explanation">目前仅有 {{ activeRadarChecks.length }} 项可引用的履历能力，详见右侧；材料不足时不补画无依据的维度。</p>
                       </div>
 
                       <!-- 右侧：逐项评分卡与原文线索 -->
                       <div class="score-breakdown-box">
-                        <p v-if="resumeStore.selectedResume.analysis.scoreBasis === 'provisional'" class="score-explanation warning">
+                        <p v-if="radarMode === 'job' && resumeStore.selectedResume.analysis.scoreBasis === 'provisional'" class="score-explanation warning">
                           ⚠️ 暂估分：AI 未提供足够可定位的逐项原文，系统改用技能与经验匹配估计；请 HR 核对后再推进。
                         </p>
                         <div
-                          v-for="(item, cIdx) in resumeStore.selectedResume.analysis.coreCriterionChecks || []"
+                          v-for="(item, cIdx) in activeRadarChecks"
                           :key="item.criterion"
                           class="criterion-item-row clickable"
                           :class="{ highlighted: selectedRadarIndex === cIdx }"
@@ -546,14 +559,15 @@
                           <div class="criterion-name-col">
                             <span class="criterion-name">{{ item.criterion }}</span>
                             <span class="criterion-level-badge" :class="'level-' + item.level">
-                              {{ item.level }}/4 · {{ item.level === 0 && resumeStore.selectedResume.analysis.scoreBasis === 'provisional' ? '未取得可核对原文' : ['未体现', '了解', '参与', '独立完成', '主导并可复盘'][item.level] || '待核实' }}
+                              {{ item.level }}/4 · {{ ['未体现', '相关经历线索', '参与', '独立完成', '主导并可复盘'][item.level] || '待核实' }}
                             </span>
                           </div>
                           <div v-if="item.evidence" class="criterion-evidence-col">
                             {{ item.evidence }}
                           </div>
+                          <p v-if="item.assessment" class="criterion-assessment">{{ item.assessment }}</p>
                         </div>
-                        <p v-if="!resumeStore.selectedResume.analysis.coreCriterionChecks?.length" class="score-explanation empty">
+                        <p v-if="!activeRadarChecks.length" class="score-explanation empty">
                           暂无逐项评分卡；当前显示核心匹配估计，建议重新分析以取得可核对的逐项依据。
                         </p>
                       </div>
@@ -869,6 +883,15 @@
     />
     <AIInterviewDialog v-model="showInterviewDialog" :resume-id="resumeStore.selectedResume?.id || ''" />
     <TopTenOutreachDialog v-model="showOutreach" :project-id="projectId" />
+    <el-dialog v-model="snapshotHistoryOpen" title="相同简历快照 · 历史评测" width="min(760px,94vw)">
+      <p>相同文本曾被分别采集和评测，模型输出或当时岗位配置可能不同。列表已折叠相同快照；原文件、历史分数及沟通记录保留。</p>
+      <el-table :data="snapshotHistory" max-height="420">
+        <el-table-column label="档案" min-width="160"><template #default="scope">{{ scope.row.fileName }}<el-tag v-if="scope.row.current" size="small">当前展示</el-tag></template></el-table-column>
+        <el-table-column prop="score" label="保存时得分" width="105" />
+        <el-table-column prop="status" label="原状态" width="100" />
+        <el-table-column prop="analyzedAt" label="评测时间" min-width="170" />
+      </el-table>
+    </el-dialog>
 
     <el-dialog v-model="jobPickerVisible" title="选择 51job 沟通职位" width="640px" destroy-on-close>
       <p class="job-picker-hint">招聘项目岗位：{{ projectStore.currentProject?.job_config?.title || '未设置' }}。请从当前 51job 企业账号返回的职位中选择；点数会在下一步单独确认。</p>
@@ -978,6 +1001,13 @@ const projectStore = useProjectStore()
 const projectId = computed(() => (route.params.id as string) || projectStore.currentProjectId || '')
 const projectName = computed(() => projectStore.currentProject?.name || '')
 const showOutreach = ref(false)
+const competencyBusy = ref(false)
+const snapshotHistoryOpen = ref(false)
+const snapshotHistory = ref<any[]>([])
+const radarMode = ref<'job' | 'experience'>('job')
+const activeRadarChecks = computed(() => radarMode.value === 'experience'
+  ? resumeStore.selectedResume?.analysis?.experienceCompetencies || []
+  : resumeStore.selectedResume?.analysis?.coreCriterionChecks || [])
 const rightTab = ref<'detail' | 'ranking' | 'content'>('detail')
 const detailSubTab = ref<'summary' | 'competency' | 'water' | 'interview'>('summary')
 
@@ -988,7 +1018,7 @@ function handleSelectRadarIndex(idx: number) {
 }
 
 const radarIndicators = computed(() => {
-  const coreChecks = resumeStore.selectedResume?.analysis?.coreCriterionChecks
+  const coreChecks = activeRadarChecks.value
   if (coreChecks && coreChecks.length >= 3) {
     return coreChecks.map(c => ({ name: c.criterion, max: 4 }))
   }
@@ -1001,7 +1031,7 @@ const radarIndicators = computed(() => {
 })
 
 const radarCandidateValues = computed(() => {
-  const coreChecks = resumeStore.selectedResume?.analysis?.coreCriterionChecks
+  const coreChecks = activeRadarChecks.value
   if (coreChecks && coreChecks.length >= 3) {
     return coreChecks.map(c => c.level ?? 2)
   }
@@ -1137,6 +1167,7 @@ const is51JobCandidate = computed(() => {
     return u.protocol === 'https:' && u.hostname === 'ehire.51job.com' && u.pathname === '/Revision/talent/resume/detail' && /^\d+$/.test(u.searchParams.get('resumeId') || '')
   } catch { return false }
 })
+const is51JobSource = computed(() => is51JobCandidate.value || resumeStore.selectedResume?.source_platform === '51job' || /【前程无忧】/.test(resumeStore.selectedResume?.fileName || ''))
 const contactStatusText = computed(() => ({
   greeted: '已打招呼', resume_requested: '已索要简历；页面打开时后台轮询回复', resume_received: '已收到完整简历'
 }[resumeStore.selectedResume?.contact_status || ''] || '尚未联系'))
@@ -1286,8 +1317,9 @@ async function handleOpenCandidateUrl() {
 }
 
 async function handle51JobGreeting() {
+  if (contactBusy.value || jobPickerVisible.value || !await ensure51JobCandidateDetail()) return
   const resume = resumeStore.selectedResume
-  if (!resume || !is51JobCandidate.value || contactBusy.value || jobPickerVisible.value) return
+  if (!resume) return
   jobPickerResumeID.value = resume.id
   jobPickerKeyword.value = ''
   jobPickerJobs.value = []
@@ -1296,6 +1328,50 @@ async function handle51JobGreeting() {
   jobPickerError.value = ''
   jobPickerVisible.value = true
   await load51JobOptions()
+}
+
+async function ensure51JobCandidateDetail(): Promise<boolean> {
+  if (is51JobCandidate.value) return true
+  const resume = resumeStore.selectedResume
+  if (!resume || !is51JobSource.value || contactBusy.value) return false
+  try {
+    const response = await ElMessageBox.prompt('请在 51job 企业工作台找到此人，核对其姓名和经历，再复制包含 resumeId 的新版详情链接。软件会再次核对页面姓名。', '关联候选人网页', { inputPlaceholder: 'https://ehire.51job.com/Revision/talent/resume/detail?resumeId=…', confirmButtonText: '已核对此人，关联链接', cancelButtonText: '取消' })
+    contactBusy.value = true
+    const api: any = await import('../../wailsjs/go/main/App')
+    const result = await runWith51JobBrowser(api, () => api.Bind51JobCandidateDetail(resume.id, response.value.trim()), { isActive: () => resumeStore.selectedResume?.id === resume.id })
+    if (result.status !== 'verified') { ElMessage.warning(result.message || '关联未完成'); return false }
+    await resumeStore.loadProjectResumes(projectId.value)
+    ElMessage.success('候选人网页已关联，可继续打招呼')
+    return resumeStore.selectedResume?.id === resume.id && is51JobCandidate.value
+  } catch (err: any) {
+    if (err !== 'cancel' && err !== 'close') ElMessage.error(err?.message || String(err))
+    return false
+  } finally { contactBusy.value = false }
+}
+
+async function supplementCompetencies() {
+  const resume = resumeStore.selectedResume
+  if (!resume || competencyBusy.value) return
+  competencyBusy.value = true
+  try {
+    const api: any = await import('../../wailsjs/go/main/App')
+    await api.SupplementResumeCompetencies(resume.id)
+    await resumeStore.loadProjectResumes(projectId.value)
+    if (resumeStore.selectedResume?.analysis?.experienceCompetencies?.length) radarMode.value = 'experience'
+    selectedRadarIndex.value = null
+    ElMessage.success('能力维度已按简历经历更新，请结合原文核实')
+  } catch (err: any) { ElMessage.error(err?.message || String(err)) }
+  finally { competencyBusy.value = false }
+}
+
+async function showSnapshotHistory() {
+  const id = resumeStore.selectedResume?.id
+  if (!id) return
+  try {
+    const api: any = await import('../../wailsjs/go/main/App')
+    snapshotHistory.value = await api.GetResumeSnapshotHistory(id)
+    snapshotHistoryOpen.value = true
+  } catch (err: any) { ElMessage.error(err?.message || String(err)) }
 }
 
 async function load51JobOptions() {
@@ -1369,6 +1445,7 @@ async function confirm51JobSelectedJob() {
 }
 
 async function handle51JobContact() {
+  if (contactBusy.value || !await ensure51JobCandidateDetail()) return
   const resume = resumeStore.selectedResume
   if (!resume || !is51JobCandidate.value || contactBusy.value) return
   const preset = '您好，方便发一份最新的完整简历（PDF 或 Word）吗？收到后我们会结合岗位要求进一步评估。'
@@ -1746,6 +1823,8 @@ watch(rightTab, (tab) => {
 
 // 选中简历变化时，如果在内容 Tab 则刷新
 watch(() => resumeStore.selectedId, () => {
+  radarMode.value = 'job'
+  selectedRadarIndex.value = null
   if (rightTab.value === 'content') { loadParsedContent() }
 })
 
@@ -1855,6 +1934,9 @@ onUnmounted(() => {
 </script>
 
 <style scoped lang="scss">
+.competency-mode-bar { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; margin: 12px 0; }
+.competency-mode-bar .header-tip { color: var(--wb-muted); font-size: 12px; line-height: 1.6; }
+.criterion-assessment { width: 100%; margin: 6px 0 0; color: var(--wb-muted); font-size: 12px; line-height: 1.6; }
 @import '../styles/macos-theme.scss';
 
 .job-picker-hint { margin: 0 0 12px; color: #475569; line-height: 1.6; }
@@ -2904,8 +2986,9 @@ onUnmounted(() => {
 
         .criterion-item-row {
           display: flex;
-          align-items: baseline;
-          gap: 12px;
+          flex-direction: column;
+          align-items: stretch;
+          gap: 6px;
           padding: 8px 12px;
           border-radius: 6px;
           background: $bg-secondary;
@@ -2930,8 +3013,9 @@ onUnmounted(() => {
           .criterion-name-col {
             display: flex;
             align-items: center;
+            flex-wrap: wrap;
             gap: 8px;
-            min-width: 220px;
+            min-width: 0;
             font-size: 13px;
             font-weight: 600;
             color: $text-primary;

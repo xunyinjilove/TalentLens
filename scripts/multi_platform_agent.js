@@ -6,6 +6,7 @@ const fs = require('fs');
 const http = require('http');
 const os = require('os');
 const path = require('path');
+const crypto = require('crypto');
 const { spawn } = require('child_process');
 const puppeteer = require('puppeteer-core');
 const agentStartedAt = Date.now();
@@ -249,6 +250,7 @@ async function closeUnusedStartPages(browser, selectedPage) {
 
 // 跨批次与全局排重缓存
 const seenCandidateKeys = new Set();
+const seenSnapshotHashes = new Set();
 let safetyStopped = false;
 const projectExcludedNames = new Set();
 const projectExcludedUrls = new Set();
@@ -257,6 +259,9 @@ if (options.excludeFile && fs.existsSync(options.excludeFile)) {
   try {
     const raw = fs.readFileSync(options.excludeFile, 'utf8');
     const parsed = JSON.parse(raw);
+    for (const hash of parsed.snapshotHashes || []) {
+      if (/^[a-f0-9]{64}$/.test(hash)) seenSnapshotHashes.add(hash);
+    }
     if (Array.isArray(parsed.names)) {
       parsed.names.forEach(n => {
         const c = (n || '').trim();
@@ -326,6 +331,22 @@ function selectFreshCandidates(candidates, limit, excludedUrls = new Set(), seen
     if (selected.length >= limit) break;
   }
   return selected;
+}
+
+function snapshotFingerprint(content) {
+  let text = String(content || '').replace(/\r\n/g, '\n').trim();
+  if (/^【[^\n]*真实推荐牛人档案】/.test(text)) {
+    text = text.split('\n').filter(line => !/^(检索岗位|分流同义词|目标城市|在线直达网址|平台活跃标记)：/.test(line)).join('\n');
+  }
+  return crypto.createHash('sha256').update(text).digest('hex');
+}
+
+function claimResumeSnapshot(content, stableCandidateID, seen = seenSnapshotHashes) {
+  if (stableCandidateID) return true; // Verified IDs have their own dedup rule.
+  const hash = snapshotFingerprint(content);
+  if (seen.has(hash)) return false;
+  seen.add(hash);
+  return true;
 }
 
 // 模拟真人分段随机打字（汲取 GoodHR 拟人输入设计）
@@ -985,6 +1006,7 @@ async function enrichCandidatesWithFullDetail(page, browser, candidates, platfor
       if (platformKey === '51job' && (!fullDetailText || fullDetailText.length < 200)) {
         const captured = await capture51jobDetailUrl(page, cand);
         if (captured.url) {
+          cand.url = captured.url;
           let detailPage = null;
           let detailFocusSession = null;
           try {
@@ -1117,10 +1139,6 @@ async function enrichCandidatesWithFullDetail(page, browser, candidates, platfor
     // 执行文本深度净化（剔除水印网格、举报、免责声明等噪音）
     if (fullDetailText) {
       fullDetailText = cleanCandidateResumeText(fullDetailText);
-      const idMatch = fullDetailText.match(/人才ID[：:\s]*(\d+)/i) || fullDetailText.match(/ID[：:\s]*(\d{6,})/i);
-      if (idMatch && (!cand.url || cand.url.includes('/talent/search'))) {
-        cand.url = `https://ehire.51job.com/Candidate/ResumeView.aspx?hidUserID=${idMatch[1]}`;
-      }
     }
 
     // 若成功提取到全量详情正文，则融合并升级候选人信息
@@ -1886,6 +1904,10 @@ ${item.skills && item.skills.length > 0 ? item.skills.map(s => '• ' + s).join(
 ${cleanedRawText}
 `;
 
+        // Identical anonymous documents are repeated captures, not new quota.
+        // This does not infer identity from a name or similar work history.
+        if (!claimResumeSnapshot(formattedContent, platformCandidateId)) continue;
+
         const fileName = `【${cfg.name}】${item.name}_${currentKeyword}.txt`;
         // Masked names can repeat; keep the display name while giving each
         // captured resume its own file so later scans cannot overwrite it.
@@ -2279,3 +2301,4 @@ if (require.main === module) {
 }
 
 module.exports = { allocateQuota, planChannelQuota, smoothScroll, keepPageActiveInBackground, setBrowserWindowState, preserveBrowserWindow, connectToExistingBrowser, launchPlatformBrowser, openDedicatedSearchPage, createBackgroundPage, capture51jobDetailUrl, extract51JobResumeId, isBrowserStartPage, browserLaunchArgs, closeUnusedStartPages, isPlatformPageUrl, ensurePlatformPage, submit51jobSearch, detectCaptcha, extractCandidatesAcrossFrames, selectFreshCandidates, advanceSearchResults, searchRetryDelay, waitForSearchRetry, main };
+module.exports.claimResumeSnapshot = claimResumeSnapshot;

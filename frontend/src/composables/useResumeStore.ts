@@ -37,6 +37,8 @@ export interface Resume {
   fileSize: number
   content?: string
   url?: string   // 在线候选人主页 URL（矩阵寻才抓取时填充）
+  source_platform?: string
+  snapshot_copy_ids?: string[]
   email?: string // 候选人邮箱
   source_keyword?: string // 矩阵寻才分流词
   activity_label?: string // 平台原始活跃标签；缺失表示未披露
@@ -89,7 +91,8 @@ export interface Resume {
     bonusMatches?: string[]
     bonusChecks?: Array<{ rule_id?: string; criterion: string; status: 'met' | 'violated' | 'unknown'; suggested_status?: string; evidence: string; reviewed_at?: string }>
     confirmedBonusCount?: number
-    coreCriterionChecks?: Array<{ criterion: string; level: number; evidence?: string }>
+    coreCriterionChecks?: Array<{ criterion: string; level: number; evidence?: string; assessment?: string }>
+    experienceCompetencies?: Array<{ criterion: string; level: number; evidence?: string; assessment?: string }>
     interviewSuggestions: string[]
     interviewQA?: Array<{ category: string; question: string; reference_answer: string }>
     consistency_check?: {
@@ -187,6 +190,8 @@ export const useResumeStore = defineStore('resume', () => {
           fileSize: r.file_size,
           content: r.content,
           url: r.url || '',       // 在线候选人主页 URL
+          source_platform: r.source_platform || '',
+          snapshot_copy_ids: r.snapshot_copy_ids || [],
           email: r.email || '',   // 候选人邮箱
           source_keyword: r.source_keyword || '',
           activity_label: r.activity_label || '',
@@ -259,6 +264,7 @@ export const useResumeStore = defineStore('resume', () => {
               bonusChecks: a.bonus_checks || [],
               confirmedBonusCount: a.confirmed_bonus_count || 0,
               coreCriterionChecks: a.core_criterion_checks || [],
+              experienceCompetencies: a.experience_competencies || [],
               interviewSuggestions: a.interview_suggestions || [],
               interviewQA: a.interview_qa || [],
               consistency_check: a.consistency_check || undefined,
@@ -647,6 +653,8 @@ export const useResumeStore = defineStore('resume', () => {
       fileSize: data.file_size,
       content: data.content,
       url: data.url || '',       // 在线候选人主页 URL（矩阵寻才填充）
+      source_platform: data.source_platform || '',
+      snapshot_copy_ids: data.snapshot_copy_ids || [],
       email: data.email || '',   // 候选人邮箱
       status: (data.status as Resume['status']) || 'pending',
       score: data.score,
@@ -734,6 +742,7 @@ export const useResumeStore = defineStore('resume', () => {
           bonusChecks: a.bonus_checks || [],
           confirmedBonusCount: a.confirmed_bonus_count || 0,
           coreCriterionChecks: a.core_criterion_checks || [],
+          experienceCompetencies: a.experience_competencies || [],
           interviewSuggestions: a.interview_suggestions || [],
           interviewQA: a.interview_qa || [],
           consistency_check: a.consistency_check || undefined,

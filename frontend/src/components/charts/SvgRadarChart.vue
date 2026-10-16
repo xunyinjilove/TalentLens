@@ -29,7 +29,7 @@
       </g>
 
       <!-- 3. 岗位期望基准层 (Benchmark Layer, 虚线浅色) -->
-      <g v-if="benchmarkPoints" class="radar-benchmark-layer">
+      <g v-if="showBenchmark && benchmarkPoints" class="radar-benchmark-layer">
         <polygon
           :points="benchmarkPoints"
           fill="rgba(148, 163, 184, 0.12)"
@@ -89,7 +89,7 @@
             dominant-baseline="middle"
             class="radar-score-text"
           >
-            {{ candidateScores[lIdx] }}/4
+            {{ candidateScores[lIdx] }}/{{ indicators[lIdx]?.max || 4 }}
           </text>
         </g>
       </g>
@@ -101,7 +101,7 @@
         <span class="legend-line candidate-line"></span>
         <span>候选人实际</span>
       </div>
-      <div class="legend-item benchmark">
+      <div v-if="showBenchmark" class="legend-item benchmark">
         <span class="legend-line benchmark-line"></span>
         <span>岗位期望 (3级)</span>
       </div>
@@ -124,10 +124,12 @@ const props = withDefaults(
     benchmarkValues?: number[]
     selectedIndex?: number | null
     size?: number
+    showBenchmark?: boolean
   }>(),
   {
     selectedIndex: null,
-    size: 260
+    size: 260,
+    showBenchmark: true
   }
 )
 
