@@ -183,7 +183,7 @@
             </div>
           </div>
           <div class="repo-banner-actions">
-            <el-button size="small" @click="router.push('/jobs')">职位设置</el-button>
+            <el-button size="small" @click="router.push({ path: '/jobs', query: { edit: selectedProject.id } })">职位设置</el-button>
             <el-button size="small" type="primary" plain @click="router.push('/project/' + selectedProject.id)">
               项目完整评测
             </el-button>
@@ -240,6 +240,12 @@
             <span class="count-summary">
               共 <strong>{{ filtered.length }}</strong> 位候选人
             </span>
+
+            <el-select v-model="sortOrder" aria-label="按得分排序候选人" class="candidate-sort-select" size="small">
+              <el-option label="能力分：高到低" value="score_desc" />
+              <el-option label="能力分：低到高" value="score_asc" />
+              <el-option label="入库时间：最新" value="newest" />
+            </el-select>
 
             <el-button size="small" @click="manageMode = !manageMode; selectedCandidateIds = []">
               {{ manageMode ? '退出管理' : '管理简历' }}
@@ -822,6 +828,7 @@ const statusFilter = ref('')
 const sourceFilter = ref('')
 const stageFilter = ref('')
 const viewMode = ref<'grid' | 'table'>('grid')
+const sortOrder = ref<'score_desc' | 'score_asc' | 'newest'>('score_desc')
 const manageMode = ref(false)
 const selectedCandidateIds = ref<string[]>([])
 
@@ -934,7 +941,15 @@ const filtered = computed(() => recruitment.candidates.filter(item =>
   (!sourceFilter.value || item.source === sourceFilter.value) &&
   (!stageFilter.value || item.stage === stageFilter.value) &&
   (!keyword.value || `${item.name} ${item.projectName} ${item.jobTitle}`.toLowerCase().includes(keyword.value.toLowerCase()))
-))
+).sort((a, b) => {
+  const recent = (b.createdAt || '').localeCompare(a.createdAt || '')
+  if (sortOrder.value === 'newest') return recent || a.projectCandidateId.localeCompare(b.projectCandidateId)
+  if (a.analysisStatus !== b.analysisStatus) return a.analysisStatus === 'done' ? -1 : b.analysisStatus === 'done' ? 1 : 0
+  const score = sortOrder.value === 'score_desc'
+    ? b.abilityScore - a.abilityScore
+    : a.abilityScore - b.abilityScore
+  return score || b.confirmedBonus - a.confirmedBonus || recent || a.projectCandidateId.localeCompare(b.projectCandidateId)
+}))
 
 watch(() => route.query.project, value => {
   selectedProjectId.value = String(value || '')
@@ -1577,8 +1592,13 @@ onMounted(() => {
 .toolbar-right-controls {
   display: flex;
   align-items: center;
-  gap: 16px;
+  flex-wrap: wrap;
+  gap: 10px;
   margin-left: auto;
+}
+
+.candidate-sort-select {
+  width: 152px;
 }
 
 .count-summary {

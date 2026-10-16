@@ -72,19 +72,21 @@
           :class="{ active: selectedIndex === lIdx }"
           @click="handleSelect(lIdx)"
         >
+          <title>{{ lbl.fullName }}：{{ candidateScores[lIdx] }}/4</title>
           <text
             :x="lbl.x"
-            :y="lbl.y"
+            :y="lbl.labelY"
             :text-anchor="lbl.anchor"
-            :dominant-baseline="lbl.baseline"
+            dominant-baseline="middle"
             class="radar-label-text"
           >
             {{ lbl.name }}
           </text>
           <text
             :x="lbl.x"
-            :y="lbl.y + 13"
+            :y="lbl.scoreY"
             :text-anchor="lbl.anchor"
+            dominant-baseline="middle"
             class="radar-score-text"
           >
             {{ candidateScores[lIdx] }}/4
@@ -134,7 +136,7 @@ const emit = defineEmits<{
 }>()
 
 const center = computed(() => props.size / 2)
-const maxRadius = computed(() => props.size / 2 - 46)
+const maxRadius = computed(() => props.size / 2 - 56)
 const count = computed(() => Math.max(3, props.indicators.length))
 
 // 计算多边形各顶点的极坐标转换
@@ -213,18 +215,13 @@ const labelPositions = computed(() => {
     if (cosVal > 0.3) anchor = 'start'
     else if (cosVal < -0.3) anchor = 'end'
 
-    let baseline = 'middle'
-    const sinVal = Math.sin(angle)
-    if (sinVal < -0.7) baseline = 'auto'
-    else if (sinVal > 0.7) baseline = 'hanging'
-
     return {
       name: ind.name.length > 7 ? ind.name.slice(0, 6) + '..' : ind.name,
       fullName: ind.name,
       x,
-      y,
+      labelY: y,
+      scoreY: y + 19,
       anchor,
-      baseline
     }
   })
 })
