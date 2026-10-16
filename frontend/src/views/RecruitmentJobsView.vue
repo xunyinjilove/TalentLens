@@ -329,14 +329,29 @@
           </el-form-item>
         </div>
 
-        <el-form-item label="岗位职责与要求 (AI 画像核心参考)">
+        <el-form-item>
+          <template #label>
+            <span>岗位职责与要求 (AI 画像核心参考)</span>
+            <el-button class="ai-description-action" type="primary" link :loading="aiDraftGenerating" @click="generateJobDescription">
+              AI 一键帮写
+            </el-button>
+          </template>
           <el-input
             v-model="jobForm.job_description"
             type="textarea"
-            :rows="3"
+            :rows="5"
             placeholder="填写职位描述、工作职责以及基本技能要求…"
           />
+          <div class="description-help">AI 草稿只供参考；核对后点击“保存职位”才会更新岗位配置。</div>
         </el-form-item>
+
+        <div v-if="aiDraft" class="ai-description-preview">
+          <div class="ai-preview-heading">
+            <strong>AI 起草预览</strong>
+            <el-button type="primary" size="small" @click="applyJobDescriptionDraft">应用到编辑框</el-button>
+          </div>
+          <pre>{{ aiDraft }}</pre>
+        </div>
 
         <el-form-item label="必备关键技能 / 评分项 (回车分隔)">
           <el-input
@@ -401,7 +416,7 @@
 
 <script setup lang="ts">
 import { computed, nextTick, onMounted, reactive, ref } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import {
   Search,
   Moon,
@@ -430,12 +445,15 @@ interface JobStats {
 }
 
 const router = useRouter()
+const route = useRoute()
 const projectStore = useProjectStore()
 const recruitmentStore = useRecruitmentStore()
 
 // 状态
 const loading = ref(false)
 const saving = ref(false)
+const aiDraftGenerating = ref(false)
+const aiDraft = ref('')
 const keyword = ref('')
 const globalSearch = ref('')
 const selectedDepartment = ref('')
@@ -580,6 +598,7 @@ function goToTalentPool(projectId: string) {
 
 // 模态弹窗控制
 function openCreateModal() {
+  aiDraft.value = ''
   isEditing.value = false
   currentEditProjectId.value = null
   jobForm.title = ''
@@ -600,6 +619,7 @@ function openCreateModal() {
 }
 
 function openEditModal(project: Project) {
+  aiDraft.value = ''
   isEditing.value = true
   currentEditProjectId.value = project.id
   jobForm.title = project.job_config?.title || project.name
@@ -617,6 +637,38 @@ function openEditModal(project: Project) {
   redLinesInput.value = (project.job_config?.red_lines || []).join(', ')
   bonusPointsInput.value = (project.job_config?.bonus_points || []).join(', ')
   editModalVisible.value = true
+}
+
+async function generateJobDescription() {
+  if (!jobForm.title.trim()) {
+    ElMessage.warning('请先填写职位名称')
+    return
+  }
+  aiDraftGenerating.value = true
+  aiDraft.value = ''
+  try {
+    const api: any = await import('../../wailsjs/go/main/App')
+    aiDraft.value = await api.GenerateJobDescriptionDraft({
+      title: jobForm.title.trim(),
+      department: jobForm.department.trim(),
+      city: jobForm.city,
+      experienceYears: jobForm.experience_years,
+      educationLevel: jobForm.education_level,
+      skills: splitTags(skillsInput.value),
+      currentText: jobForm.job_description.trim()
+    })
+  } catch (err: any) {
+    ElMessage.error(err?.message || String(err))
+  } finally {
+    aiDraftGenerating.value = false
+  }
+}
+
+function applyJobDescriptionDraft() {
+  if (!aiDraft.value) return
+  jobForm.job_description = aiDraft.value
+  aiDraft.value = ''
+  ElMessage.success('草稿已填入编辑框，请核对后保存职位')
 }
 
 async function saveJob() {
@@ -781,8 +833,13 @@ function toggleTheme() {
   ElMessage.info('已适配系统界面明亮视觉')
 }
 
-onMounted(() => {
-  void load()
+onMounted(async () => {
+  await load()
+  const editId = String(route.query.edit || '')
+  if (!editId) return
+  const project = projectStore.projects.find(item => item.id === editId)
+  if (project) openEditModal(project)
+  else ElMessage.warning('目标职位不存在或已删除')
 })
 </script>
 
@@ -1215,6 +1272,42 @@ onMounted(() => {
 /* 表单与弹窗排版 */
 .job-dialog-form {
   padding-top: 8px;
+}
+
+.ai-description-action {
+  margin-left: 12px;
+}
+
+.description-help {
+  margin-top: 5px;
+  font-size: 12px;
+  color: var(--wb-muted);
+}
+
+.ai-description-preview {
+  margin: -2px 0 18px;
+  padding: 14px;
+  border: 1px solid var(--wb-border);
+  border-radius: 10px;
+  background: var(--wb-surface-soft);
+}
+
+.ai-preview-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  color: var(--wb-text);
+}
+
+.ai-description-preview pre {
+  margin: 10px 0 0;
+  color: var(--wb-text);
+  font: inherit;
+  font-size: 13px;
+  line-height: 1.7;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 
 .form-row {
