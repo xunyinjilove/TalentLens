@@ -16,6 +16,7 @@
         <div class="card-heading">
           <span class="file-name" :title="resume.fileName">{{ resume.fileName }}</span>
           <span class="file-meta">{{ sourceText }} · {{ fileTypeText }} · {{ statusText }}</span>
+          <span v-if="resume.snapshot_copy_ids?.length" class="file-meta" title="原始文件与历史评测保留；同文副本不重复参与排名。平台 ID 冲突的记录不会自动折叠。">已折叠 {{ resume.snapshot_copy_ids.length }} 份相同快照</span>
         </div>
       </div>
 

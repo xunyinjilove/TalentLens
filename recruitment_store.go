@@ -248,6 +248,13 @@ func resumeSourceIdentity(resume *Resume) (string, string) {
 func (a *App) isKnownProjectSource(projectID string, resume *Resume) (bool, error) {
 	platform, id := resumeSourceIdentity(resume)
 	if platform == "legacy" {
+		if resumeSnapshotFingerprint(resume) != "" {
+			for _, existing := range a.GetProjectResumes(projectID) {
+				if resumeSnapshotDocumentKey(existing) == resumeSnapshotDocumentKey(resume) {
+					return true, nil
+				}
+			}
+		}
 		return false, nil
 	}
 	db, err := a.getRecruitmentDB()

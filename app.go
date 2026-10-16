@@ -36,7 +36,7 @@ import (
 )
 
 // 版本信息
-const AppVersion = "1.8.17"
+const AppVersion = "1.8.18"
 const analysisFormatRetryVersion = "model-json-repair-v1"
 const GitHubRepo = "xunyinjilove/TalentLens"
 
@@ -130,6 +130,7 @@ type Resume struct {
 	URL                       string          `json:"url,omitempty"`
 	SourcePlatform            string          `json:"source_platform,omitempty"`
 	PlatformCandidateID       string          `json:"platform_candidate_id,omitempty"`
+	SnapshotCopyIDs           []string        `json:"snapshot_copy_ids,omitempty"`
 	Email                     string          `json:"email,omitempty"`
 	Status                    string          `json:"status"`
 	Score                     int             `json:"score"`
@@ -198,18 +199,19 @@ type AnalysisResult struct {
 	WaterCheck *WaterCheckResult `json:"water_check,omitempty"`
 
 	// 岗位画像核验：一票否决红线与优先加分项
-	RedLineViolations   []string             `json:"red_line_violations,omitempty"` // 仅 HR 核实不满足的红线；与能力分分开
-	RedLineChecks       []RedLineCheck       `json:"red_line_checks,omitempty"`
-	RedLineStatus       string               `json:"red_line_status,omitempty"` // passed | failed | pending | not_configured
-	CoreMatch           float64              `json:"core_match,omitempty"`
-	BonusMatch          float64              `json:"bonus_match,omitempty"`
-	AbilityScore        int                  `json:"ability_score,omitempty"` // 核心能力原始分，不受红线状态影响
-	ScoreBasis          string               `json:"score_basis,omitempty"`   // rubric | provisional | legacy；证据不足时明确标记暂估
-	BonusScore          int                  `json:"bonus_score,omitempty"`   // 旧字段，现固定为 0；确认项只用于同档排序
-	BonusMatches        []string             `json:"bonus_matches,omitempty"` // 命中的核心加分项列表
-	BonusChecks         []BonusCheck         `json:"bonus_checks,omitempty"`
-	ConfirmedBonusCount int                  `json:"confirmed_bonus_count,omitempty"`
-	CoreCriterionChecks []CoreCriterionCheck `json:"core_criterion_checks,omitempty"`
+	RedLineViolations      []string             `json:"red_line_violations,omitempty"` // 仅 HR 核实不满足的红线；与能力分分开
+	RedLineChecks          []RedLineCheck       `json:"red_line_checks,omitempty"`
+	RedLineStatus          string               `json:"red_line_status,omitempty"` // passed | failed | pending | not_configured
+	CoreMatch              float64              `json:"core_match,omitempty"`
+	BonusMatch             float64              `json:"bonus_match,omitempty"`
+	AbilityScore           int                  `json:"ability_score,omitempty"` // 核心能力原始分，不受红线状态影响
+	ScoreBasis             string               `json:"score_basis,omitempty"`   // rubric | provisional | legacy；证据不足时明确标记暂估
+	BonusScore             int                  `json:"bonus_score,omitempty"`   // 旧字段，现固定为 0；确认项只用于同档排序
+	BonusMatches           []string             `json:"bonus_matches,omitempty"` // 命中的核心加分项列表
+	BonusChecks            []BonusCheck         `json:"bonus_checks,omitempty"`
+	ConfirmedBonusCount    int                  `json:"confirmed_bonus_count,omitempty"`
+	CoreCriterionChecks    []CoreCriterionCheck `json:"core_criterion_checks,omitempty"`
+	ExperienceCompetencies []CoreCriterionCheck `json:"experience_competencies,omitempty"`
 
 	// 面试建议
 	InterviewSuggestions []string `json:"interview_suggestions"`
@@ -248,9 +250,10 @@ type BonusCheck struct {
 }
 
 type CoreCriterionCheck struct {
-	Criterion string `json:"criterion"`
-	Level     int    `json:"level"` // 0 未体现，1 了解，2 参与，3 独立完成，4 主导并可复盘
-	Evidence  string `json:"evidence,omitempty"`
+	Criterion  string `json:"criterion"`
+	Level      int    `json:"level"` // 0 未体现，1 了解，2 参与，3 独立完成，4 主导并可复盘
+	Evidence   string `json:"evidence,omitempty"`
+	Assessment string `json:"assessment,omitempty"`
 }
 
 // InterviewQuestion 结构化面试问题及基于简历的参考回答
@@ -1232,7 +1235,7 @@ func (a *App) GetProjectResumes(projectID string) []*Resume {
 			resumes = append(resumes, &r)
 		}
 	}
-	return resumes
+	return foldIdenticalResumeSnapshots(resumes)
 }
 
 // prepareResumeDecision 在读取旧数据时将“AI 已满足/不满足”还原为待核验，
@@ -2295,7 +2298,15 @@ func (a *App) startQuotaMatrixSearch(projectID string, keyword string, city stri
 	// 同名或相似履历不构成可信身份。只用独立主页链接跨批次排重。
 	_ = excludedNames
 	_ = excludedCards
-	excludeData := map[string]interface{}{"urls": excludedUrls}
+	var snapshotHashes []string
+	for _, resume := range existingResumes {
+		if !resume.HasAttachment {
+			if hash := resumeSnapshotFingerprint(resume); hash != "" {
+				snapshotHashes = append(snapshotHashes, hash)
+			}
+		}
+	}
+	excludeData := map[string]interface{}{"urls": excludedUrls, "snapshotHashes": snapshotHashes}
 	if b, err := json.Marshal(excludeData); err == nil {
 		_ = os.WriteFile(excludeFilePath, b, 0644)
 	}
@@ -3068,6 +3079,7 @@ func (a *App) buildAnalysisPrompt(resume *Resume, jobCfg *JobConfig) string {
 			"- 50-69: 学历勉强满足，专业有一定偏差\n"+
 			"- 0-49: 学历不满足要求\n\n"+
 			"**核心能力 (core_match)** 为直接相关项目和核心业务能力的 0-100 分。逐项返回 core_criterion_checks，criterion 必须与评分卡逐字一致，level 为 0-4。最终能力分由系统按各项等级等权计算；加分项经 HR 核实后只用于同档排序，不抬高能力分。\n\n"+
+			"同时从真实工作、项目和学习经历提炼 3–6 个 experience_competencies 补充能力（材料不足则少填或留空，不凑数）。两类能力的 evidence 必须是原文中的连续引用；assessment 写出判断与待核实项。仅职位名称最多给1级，不能推断未披露工具的熟练度。履历补充维度不计入岗位能力分。\n\n"+
 			"### 推荐等级\n"+
 			"模型只提供参考建议；岗位红线必须由 HR 核实后才可判定通过或不满足。\n\n"+
 			"### 输出要求\n\n"+
@@ -3097,6 +3109,7 @@ func (a *App) buildAnalysisPrompt(resume *Resume, jobCfg *JobConfig) string {
 			"  \"red_line_violations\": [],\n"+
 			"  \"red_line_checks\": [{\"criterion\": \"逐字复制岗位红线\", \"status\": \"met/violated/unknown\", \"evidence\": \"简历中的原文短句；无证据时留空\"}],\n"+
 			"  \"core_criterion_checks\": [{\"criterion\": \"逐字复制评分卡能力\", \"level\": 3, \"evidence\": \"简历原文；无证据时留空并给 0 分\"}],\n"+
+			"  \"experience_competencies\": [{\"criterion\": \"从真实经历提炼的能力\", \"level\": 1, \"evidence\": \"逐字引用连续原文\", \"assessment\": \"经历依据与待核实之处\"}],\n"+
 			"  \"bonus_checks\": [{\"criterion\": \"逐字复制优先加分项\", \"status\": \"met/violated/unknown\", \"evidence\": \"简历原文短句；无证据时留空\"}],\n"+
 			"  \"bonus_matches\": [\n"+
 			"    \"符合的优先加分项及具体成果依据（例如：具备日活千万高并发经验，主导过大型系统重构；若未匹配则必须返回空数组 []）\"\n"+
@@ -3516,14 +3529,15 @@ func (a *App) applyJobDecision(result *AnalysisResult, job *JobConfig, resume *R
 	}
 	// 评分卡只接受简历材料中能逐字定位的依据；没有证据的高等级回落为“未体现”。
 	if resume != nil {
-		for i := range result.CoreCriterionChecks {
-			check := &result.CoreCriterionChecks[i]
-			evidence := strings.Trim(check.Evidence, " \t\r\n\"“”")
-			if check.Level > 0 && (evidence == "" ||
-				(!strings.Contains(resume.Content, evidence) && !strings.Contains(resume.AttachmentContent, evidence))) {
-				check.Level, check.Evidence = 0, ""
+		validateCompetencyEvidence(result.CoreCriterionChecks, resume)
+		validateCompetencyEvidence(result.ExperienceCompetencies, resume)
+		extra := make([]CoreCriterionCheck, 0, 6)
+		for _, check := range result.ExperienceCompetencies {
+			if check.Level > 0 && check.Evidence != "" && strings.TrimSpace(check.Criterion) != "" && len(extra) < 6 {
+				extra = append(extra, check)
 			}
 		}
+		result.ExperienceCompetencies = extra
 	}
 	scoreCandidate(result, criteria)
 	proposedBonus := result.BonusChecks
