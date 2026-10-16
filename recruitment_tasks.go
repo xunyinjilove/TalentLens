@@ -42,6 +42,35 @@ type SourcingTask struct {
 
 var sourcingAnalysisSlots = make(chan struct{}, 3)
 
+type ActiveSourcingSearch struct {
+	Busy     bool          `json:"busy"`
+	Starting bool          `json:"starting"`
+	Task     *SourcingTask `json:"task,omitempty"`
+}
+
+// Report the live process owner, not just a historical SQLite status. Merely
+// reopening a dialog must never start, stop or replace a running search.
+func (a *App) GetActiveSourcingSearch() (ActiveSourcingSearch, error) {
+	a.bossMutex.Lock()
+	state := ActiveSourcingSearch{Starting: a.searchStarting, Busy: a.searchStarting || (a.bossCmd != nil && a.bossCmd.Process != nil)}
+	taskID := a.activeSearchTaskID
+	a.bossMutex.Unlock()
+	if !state.Busy || taskID == "" {
+		return state, nil
+	}
+	tasks, err := a.ListSourcingTasks("")
+	if err != nil {
+		return state, err
+	}
+	for i := range tasks {
+		if tasks[i].ID == taskID {
+			state.Task = &tasks[i]
+			break
+		}
+	}
+	return state, nil
+}
+
 func (a *App) createSourcingTask(config SourcingTaskConfig) (string, error) {
 	config.AutoAnalyze = false
 	db, err := a.getRecruitmentDB()

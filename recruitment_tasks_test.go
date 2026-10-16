@@ -2,10 +2,46 @@ package main
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"testing"
 	"time"
 )
+
+func TestActiveSearchReportsOnlyTheLiveOwnerAndRestoresItsProgress(t *testing.T) {
+	a := NewApp()
+	a.dataDirOverride = t.TempDir()
+	defer a.closeRecruitmentDB()
+	p := a.CreateProject("Synthetic active search", "", 1, "", "", &JobConfig{})
+	id, err := a.createSourcingTask(SourcingTaskConfig{ProjectID: p.ID, Count: 30})
+	if err != nil {
+		t.Fatal(err)
+	}
+	a.setSourcingTaskStatus(id, "running", "Waiting for new candidates")
+	for i := 0; i < 11; i++ {
+		a.recordSourcingCandidate(id)
+	}
+	state, err := a.GetActiveSourcingSearch()
+	if err != nil || state.Busy || state.Task != nil {
+		t.Fatalf("historical running status is not a live process: %+v %v", state, err)
+	}
+	a.bossCmd = &exec.Cmd{Process: &os.Process{Pid: 42}}
+	a.activeSearchTaskID = id
+	state, err = a.GetActiveSourcingSearch()
+	if err != nil || !state.Busy || state.Task == nil || state.Task.CapturedCount != 11 || state.Task.TargetCount != 30 || state.Task.ProjectID != p.ID {
+		t.Fatalf("lost active task progress: %+v %v", state, err)
+	}
+	if a.activeSearchTaskID != id || a.bossCmd == nil {
+		t.Fatal("reading progress must not replace the owner")
+	}
+	a.bossCmd = nil
+	a.activeSearchTaskID = ""
+	a.searchStarting = true
+	state, err = a.GetActiveSourcingSearch()
+	if err != nil || !state.Busy || !state.Starting || state.Task != nil {
+		t.Fatalf("startup must remain busy before task creation: %+v %v", state, err)
+	}
+}
 
 func TestSourcingTaskIgnoresLegacyAutomaticAnalysisFlag(t *testing.T) {
 	app := NewApp()

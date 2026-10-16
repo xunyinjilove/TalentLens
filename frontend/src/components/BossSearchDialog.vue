@@ -343,7 +343,8 @@
           <el-button
             :type="isContinue ? 'warning' : 'primary'"
             @click="handleStartSearch"
-            :disabled="!form.keyword.trim() || selectedPlatformCodes.length === 0"
+            :loading="checkingActiveSearch"
+            :disabled="checkingActiveSearch || !form.keyword.trim() || selectedPlatformCodes.length === 0"
           >
             <el-icon><component :is="isContinue ? Plus : Search" /></el-icon>
             {{ isContinue ? `立即启动继续寻才 (已选 ${selectedPlatformCodes.length} 个平台 · 自动排重)` : `启动多渠道检索 (已选 ${selectedPlatformCodes.length} 个平台)` }}
@@ -390,6 +391,7 @@
 <script setup lang="ts">
 import { ref, reactive, computed, watch, nextTick, onMounted, onUnmounted } from 'vue'
 import { ElMessage } from 'element-plus'
+import { useRecruitmentStore } from '../composables/useRecruitmentStore'
 import {
   Search,
   User,
@@ -419,6 +421,33 @@ const props = defineProps<{
   eduLevel?: string
   isContinue?: boolean  // true=继续寻才模式，自动跳过已有候选人
 }>()
+
+const recruitmentStore = useRecruitmentStore()
+const checkingActiveSearch = ref(false)
+
+async function showActiveSearch(): Promise<boolean> {
+  if (checkingActiveSearch.value) return true
+  checkingActiveSearch.value = true
+  try {
+    const api: any = await import('../../wailsjs/go/main/App')
+    if (!api.GetActiveSourcingSearch) return false
+    const state = await api.GetActiveSourcingSearch()
+    if (!visible.value) return true
+    if (!state.busy) return false
+    if (state.task) {
+      await recruitmentStore.loadSourcingTasks()
+      visible.value = false
+      recruitmentStore.taskCenterOpen = true
+      ElMessage.info(`“${state.task.projectName}”仍在后台检索，已打开已有任务进度；如需更换任务，可先在进度面板停止。`)
+    } else {
+      ElMessage.info(state.starting ? '后台检索任务正在启动，请稍后查看寻才任务进度' : '后台浏览器任务正在执行，请稍后再试')
+    }
+    return true
+  } catch (err: any) {
+    ElMessage.warning(`暂时无法读取后台任务状态，请稍后重试：${err?.message || String(err)}`)
+    return true
+  } finally { checkingActiveSearch.value = false }
+}
 
 interface SynonymMatrixItem {
   id?: string
@@ -749,6 +778,7 @@ watch(() => props.modelValue, (val) => {
     } else {
       currentStatusText.value = '准备就绪'
     }
+    void showActiveSearch()
   }
 }, { immediate: true })
 
@@ -807,6 +837,7 @@ async function handleTestPlatform(platformCode: string, platformName: string) {
 
 // 启动多平台顺序检索，共享全局目标人数
 async function handleStartSearch() {
+  if (await showActiveSearch()) return
   let WailsApp: any = null
   try { WailsApp = await import('../../wailsjs/go/main/App') } catch {
     ElMessage.warning('当前运行在开发预览模式')
@@ -858,7 +889,10 @@ async function handleStartSearch() {
           props.expYears ?? 0, props.eduLevel || '不限', form.countPerPlatform,
         plats, JSON.stringify(matrixPayload), form.autoAnalyze, form.activeDays, form.channelStrategy
       )
-      if (!started) throw new Error('搜索进程未启动')
+      if (!started) {
+        if (await showActiveSearch()) return
+        throw new Error('搜索进程未启动')
+      }
     } catch (err: any) {
       searching.value = false
       addLog('error', `启动失败: ${err.message || err}`)
@@ -1046,6 +1080,10 @@ onMounted(async () => {
   }
 
   const handleError = (evt: any) => {
+    if (String(evt?.message || '').includes('已有检索任务正在运行')) {
+      if (visible.value) void showActiveSearch()
+      return
+    }
     if (!evt?.platform) searching.value = false
     if (!evt?.platform) stopPending.value = false
     currentStatusText.value = '检索提示'
