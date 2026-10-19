@@ -242,6 +242,8 @@
             </span>
 
             <el-select v-model="sortOrder" aria-label="按得分排序候选人" class="candidate-sort-select" size="small">
+              <el-option label="参考匹配度：高到低" value="match_desc" />
+              <el-option label="参考匹配度：低到高" value="match_asc" />
               <el-option label="能力分：高到低" value="score_desc" />
               <el-option label="能力分：低到高" value="score_asc" />
               <el-option label="入库时间：最新" value="newest" />
@@ -285,25 +287,54 @@
                 :aria-label="`选择 ${item.name}`"
                 @change="toggleCandidateSelection(item.projectCandidateId)"
               />
-              <span class="wb-avatar candidate-sequence" :title="`当前列表第 ${index + 1} 位`">
-                #{{ index + 1 }}
-              </span>
+              <div class="candidate-avatar-col">
+                <span class="wb-avatar candidate-sequence" :title="`当前列表第 ${index + 1} 位 · ${item.name}`">
+                  {{ getCandidateSurname(item) }}
+                </span>
+                <span class="candidate-seq-badge">#{{ index + 1 }}</span>
+              </div>
               <div class="candidate-headline">
-                <div class="wb-candidate-name">{{ item.name }}</div>
-                <div class="wb-candidate-role" :title="`${item.jobTitle || item.projectName} · ${item.projectName}`">
-                  {{ item.jobTitle || item.projectName }} · {{ item.projectName }}
+                <div class="candidate-name-row">
+                  <span class="wb-candidate-name" :title="item.name">{{ item.name }}</span>
+                  <span v-if="isFreshGradCandidate(item)" class="fresh-grad-tag">应届生</span>
                 </div>
+
+                <!-- 有工作经历：岗位与经历各分一行 -->
+                <template v-if="!isFreshGradCandidate(item)">
+                  <div class="candidate-info-row role-row" :title="`岗位：${getCandidateExperience(item).role}`">
+                    <span class="row-label">岗位：</span>
+                    <span class="row-val role-val">{{ getCandidateExperience(item).role }}</span>
+                  </div>
+                  <div class="candidate-info-row exp-row" :title="`经历：${getCandidateExperience(item).company}`">
+                    <span class="row-label">经历：</span>
+                    <span class="row-val company-val">{{ getCandidateExperience(item).company }}</span>
+                  </div>
+                </template>
+
+                <!-- 没有经历（应届生）：专业和学校各分一行，标注应届生 -->
+                <template v-else>
+                  <div class="candidate-info-row major-row" :title="`专业：${getCandidateEducation(item).major}`">
+                    <span class="row-label">专业：</span>
+                    <span class="row-val major-val">{{ getCandidateEducation(item).major }}</span>
+                  </div>
+                  <div class="candidate-info-row school-row" :title="`学校：${getCandidateEducation(item).school}${getCandidateEducation(item).degree ? ' (' + getCandidateEducation(item).degree + ')' : ''}`">
+                    <span class="row-label">学校：</span>
+                    <span class="row-val school-val">{{ getCandidateEducation(item).school }}</span>
+                    <span v-if="getCandidateEducation(item).degree" class="edu-degree-tag">{{ getCandidateEducation(item).degree }}</span>
+                  </div>
+                </template>
+
+                <div class="candidate-target-role">目标：{{ item.jobTitle || item.projectName }}</div>
               </div>
               <div class="candidate-score-wrap">
-                <span
-                  v-if="item.analysisStatus === 'done'"
-                  class="score-badge"
-                  :class="scoreLevelClass(item.abilityScore)"
-                  title="AI 核心能力评分"
-                >
-                  {{ item.abilityScore }} 分
-                </span>
-                <span v-else class="score-badge pending" title="尚未完成 AI 评测">待评</span>
+                <div v-if="item.analysisStatus === 'done' && item.matchScore > 0"
+                  class="candidate-match-ring" :style="{ '--match': `${item.matchScore}%` }"
+                  role="img" :aria-label="`AI 参考匹配度 ${item.matchScore} 分，岗位证据分 ${item.abilityScore} 分`"
+                  :title="`技能、经验、学历的 AI 参考匹配度 ${item.matchScore}；岗位证据分 ${item.abilityScore}`">
+                  <span>{{ item.matchScore }}</span>
+                </div>
+                <div v-else class="candidate-match-pending">待评</div>
+                <small>参考匹配度</small>
               </div>
             </div>
 
@@ -323,34 +354,29 @@
               <span class="wb-pill stage-pill">{{ stageLabels[item.stage] || item.stage }}</span>
             </div>
 
-            <div class="candidate-owner-line">
-              <span>👤 负责人：<strong>{{ item.owner || '未分配' }}</strong></span>
-              <span v-if="item.nextActionAt"> · 下次跟进 {{ formatDate(item.nextActionAt) }}</span>
+            <div class="candidate-skill-list" aria-label="已核对的能力标签">
+              <span v-for="skill in item.skills || []" :key="skill" class="candidate-skill-chip" :title="skill">{{ skill }}</span>
+              <span v-if="!item.skills?.length" class="candidate-skill-empty">技能证据待补充</span>
             </div>
 
             <div class="wb-candidate-foot">
-              <span class="candidate-created-time">入库 {{ formatDate(item.createdAt) }}</span>
+              <span class="candidate-created-time">入库 {{ formatDate(item.createdAt) }}<span v-if="item.analysisStatus === 'done'"> · 岗位证据分 {{ item.abilityScore }}</span></span>
               <div class="candidate-actions">
-                <el-button size="small" @click="selected = item">查看档案</el-button>
-                <el-button size="small" @click="openMoveDialog(item)">调配分库</el-button>
-                <el-button
-                  v-if="item.analysisStatus === 'error'"
-                  size="small"
-                  type="warning"
-                  plain
-                  @click="retryAnalysis(item.resumeId)"
-                >
-                  重试
+                <el-button class="candidate-primary-action" size="small" type="primary" plain @click="openCandidateProfile(item)">查看档案</el-button>
+                <el-button class="candidate-secondary-action" size="small" type="primary" @click="openInterviewInvite(item)">
+                  <el-icon style="margin-right: 3px;"><Calendar /></el-icon>邀约面试
                 </el-button>
-                <el-button
-                  size="small"
-                  type="primary"
-                  plain
-                  @click="router.push('/project/' + item.projectId)"
-                >
-                  评测
-                </el-button>
-                <el-button size="small" type="danger" plain @click="archiveOneCandidate(item)">删除</el-button>
+                <el-dropdown trigger="click" @command="(command: string) => handleCandidateAction(command, item)">
+                  <el-button size="small" class="candidate-more-action" aria-label="更多候选人操作">更多<el-icon><ArrowDown /></el-icon></el-button>
+                  <template #dropdown>
+                    <el-dropdown-menu>
+                      <el-dropdown-item command="evaluate">查看评测</el-dropdown-item>
+                      <el-dropdown-item command="move">调配分库</el-dropdown-item>
+                      <el-dropdown-item v-if="item.analysisStatus === 'error'" command="retry">重新分析</el-dropdown-item>
+                      <el-dropdown-item command="archive" divided>删除岗位简历</el-dropdown-item>
+                    </el-dropdown-menu>
+                  </template>
+                </el-dropdown>
               </div>
             </div>
           </article>
@@ -381,9 +407,25 @@
               </template>
             </el-table-column>
 
-            <el-table-column prop="name" label="姓名" min-width="120">
+            <el-table-column prop="name" label="姓名" min-width="130">
               <template #default="{ row }">
-                <span class="table-candidate-name">{{ row.name }}</span>
+                <div class="table-name-cell">
+                  <span class="table-candidate-name">{{ row.name }}</span>
+                  <span v-if="isFreshGradCandidate(row)" class="fresh-grad-tag table-fresh-tag">应届生</span>
+                </div>
+              </template>
+            </el-table-column>
+
+            <el-table-column label="背景履历" min-width="200">
+              <template #default="{ row }">
+                <div v-if="!isFreshGradCandidate(row)" class="table-exp-box">
+                  <span class="table-role-title">岗位：{{ getCandidateExperience(row).role }}</span>
+                  <span class="table-company-name">经历：{{ getCandidateExperience(row).company }}</span>
+                </div>
+                <div v-else class="table-exp-box">
+                  <span class="table-role-title">专业：{{ getCandidateEducation(row).major }}</span>
+                  <span class="table-company-name">学校：{{ getCandidateEducation(row).school }}</span>
+                </div>
               </template>
             </el-table-column>
 
@@ -443,12 +485,13 @@
               </template>
             </el-table-column>
 
-            <el-table-column label="操作" width="220" fixed="right" align="center">
+            <el-table-column label="操作" width="250" fixed="right" align="center">
               <template #default="{ row }">
                 <div class="table-row-actions" @click.stop>
-                  <el-button link type="primary" size="small" @click="selected = row">档案</el-button>
+                  <el-button link type="primary" size="small" @click="openCandidateProfile(row)">档案</el-button>
+                  <el-button link type="primary" size="small" @click="openInterviewInvite(row)">邀约面试</el-button>
                   <el-button link type="primary" size="small" @click="openMoveDialog(row)">调配</el-button>
-                  <el-button link type="primary" size="small" @click="router.push('/project/' + row.projectId)">评测</el-button>
+                  <el-button link type="primary" size="small" @click="navigateToEvaluation(row)">评测</el-button>
                   <el-button link type="danger" size="small" @click="archiveOneCandidate(row)">删除</el-button>
                   <el-button
                     v-if="row.analysisStatus === 'error'"
@@ -496,174 +539,182 @@
       </main>
     </div>
 
-    <!-- 候选人档案抽屉 (现代流式模块化设计) -->
-    <el-drawer
-      v-model="drawerOpen"
-      title="候选人综合档案"
-      size="540px"
-      class="candidate-profile-drawer"
-    >
-      <template v-if="selected">
-        <!-- 抽屉顶部 Hero 卡片 -->
-        <div class="profile-hero-card">
-          <div class="hero-avatar">
-            {{ selected.name.charAt(0) }}
+    <!-- 统一档案保留来源、简历版本、跨岗位评测与沟通记录。 -->
+    <el-drawer v-model="profileDrawerOpen" title="候选人综合档案" size="min(560px, 95vw)" class="candidate-profile-drawer">
+      <div v-if="selectedCandidate" class="candidate-profile-content">
+        <div class="profile-summary">
+          <div>
+            <h2>{{ profile?.name || selectedCandidate.name }}</h2>
+            <p>{{ selectedCandidate.currentRole || selectedCandidate.jobTitle || selectedCandidate.projectName }}</p>
           </div>
-          <div class="hero-info">
-            <div class="hero-name-row">
-              <h2 class="hero-name">{{ selected.name }}</h2>
-              <span class="hero-source-tag">{{ selected.source }}</span>
-            </div>
-            <p class="hero-job-text">
-              {{ selected.jobTitle || selected.projectName }} · {{ selected.projectName }}
-            </p>
-            <div class="hero-pills-row">
-              <span class="wb-pill stage-pill">{{ stageLabels[selected.stage] || selected.stage }}</span>
-              <span class="wb-pill" :class="redLineClass(selected.redLineStatus)">
-                红线：{{ redLineLabel(selected.redLineStatus) }}
-              </span>
-            </div>
-          </div>
-          <div class="hero-score-box">
-            <div class="hero-score-val" :class="scoreLevelClass(selected.abilityScore)">
-              {{ selected.analysisStatus === 'done' ? selected.abilityScore : '—' }}
-            </div>
-            <div class="hero-score-lbl">综合评分</div>
-          </div>
+          <el-tag v-if="selectedCandidate.analysisStatus === 'done'" type="primary">参考匹配 {{ selectedCandidate.matchScore || '—' }}</el-tag>
         </div>
+        <div class="profile-actions">
+          <el-button v-if="selectedCandidate.profileUrl" @click="openProfile(selectedCandidate.profileUrl)">打开平台主页</el-button>
+          <el-button type="primary" plain @click="navigateToEvaluation(selectedCandidate)">查看评测</el-button>
+        </div>
+        <section class="profile-section">
+          <h3>已核实的联系方式</h3>
+          <p>电话：{{ profile?.verifiedPhone || '未核实' }} · 邮箱：{{ profile?.verifiedEmail || '未核实' }}</p>
+          <div class="profile-verify-row">
+            <el-select v-model="contactKind" aria-label="联系方式类型" style="width: 90px"><el-option label="邮箱" value="email" /><el-option label="电话" value="phone" /></el-select>
+            <el-input v-model="verifiedContact" aria-label="已核实的联系方式" placeholder="仅录入已核实属于本人的号码或邮箱" clearable />
+            <el-button type="primary" :disabled="!verifiedContact.trim()" @click="verifyContact">核实</el-button>
+          </div>
+        </section>
+        <section class="profile-section">
+          <h3>关联岗位与评测</h3>
+          <p v-if="!profile?.projects?.length" class="wb-muted">暂无关联岗位</p>
+          <div v-for="link in profile?.projects || []" :key="link.projectCandidateId" class="profile-list-row">
+            <strong>{{ link.jobTitle || link.projectName }}</strong>
+            <span>{{ stageLabels[link.stage] || link.stage }} · 岗位证据分 {{ link.analysisStatus === 'done' ? link.abilityScore : '待评' }}</span>
+          </div>
+        </section>
+        <section class="profile-section">
+          <h3>来源与简历版本</h3>
+          <p v-if="!profile?.resumes?.length" class="wb-muted">暂无简历版本</p>
+          <div v-for="resume in profile?.resumes || []" :key="resume.id" class="profile-list-row">
+            <strong>{{ resume.fileName }}</strong><span>{{ formatDate(resume.createdAt) }}</span>
+          </div>
+          <div v-for="source in profile?.sources || []" :key="`${source.platform}:${source.platformCandidateId}`" class="profile-list-row">
+            <strong>{{ source.platform }}</strong><span>ID {{ source.platformCandidateId || '未提供' }}</span>
+          </div>
+        </section>
+        <section class="profile-section">
+          <h3>跨岗位沟通与跟进</h3>
+          <p v-if="!profile?.timeline?.length" class="wb-muted">暂无跟进记录</p>
+          <div v-for="event in profile?.timeline || []" :key="event.id" class="profile-list-row">
+            <strong>{{ event.projectName }} · {{ formatDate(event.createdAt) }}</strong><span>{{ event.note || event.type }}</span>
+          </div>
+        </section>
+      </div>
+    </el-drawer>
 
-        <!-- 快速流转与平台主页操作条 -->
-        <div class="profile-quick-actions">
+    <!-- 邀约面试与沟通文案对话框 -->
+    <el-dialog
+      v-model="inviteDialogOpen"
+      title="邀约面试 · 沟通意向与日程安排"
+      width="min(720px, 94vw)"
+      class="interview-invite-dialog"
+      :close-on-click-modal="!savingInterview && !generatingGreeting"
+    >
+      <div v-if="inviteCandidate" class="invite-dialog-body">
+        <!-- 头部候选人概览卡片 -->
+        <div class="invite-candidate-header">
+          <div class="invite-avatar">{{ getCandidateSurname(inviteCandidate) }}</div>
+          <div class="invite-info">
+            <div class="invite-name-row">
+              <span class="invite-name">{{ inviteCandidate.name }}</span>
+              <span class="wb-pill source-pill">{{ inviteCandidate.source }}</span>
+              <span class="wb-pill stage-pill">{{ stageLabels[inviteCandidate.stage] || inviteCandidate.stage }}</span>
+            </div>
+            <div class="invite-sub-text">
+              <span>应聘分库：<strong>{{ inviteCandidate.jobTitle || inviteCandidate.projectName }}</strong></span>
+              <span v-if="inviteCandidate.abilityScore > 0"> · 岗位证据分：<strong>{{ inviteCandidate.abilityScore }}分</strong></span>
+              <span v-if="inviteCandidate.matchScore > 0"> · 参考匹配度：<strong>{{ inviteCandidate.matchScore }}分</strong></span>
+            </div>
+          </div>
           <el-button
-            v-if="selected.profileUrl"
-            @click="openProfile(selected.profileUrl)"
-            title="在浏览器中打开原平台候选人主页"
+            v-if="inviteCandidate.profileUrl"
+            size="small"
+            link
+            type="primary"
+            @click="openProfile(inviteCandidate.profileUrl)"
           >
             打开平台主页
           </el-button>
-          <el-button type="primary" plain @click="openMoveDialog(selected)">
-            调配至其他职位库
-          </el-button>
-          <el-button type="primary" @click="router.push('/project/' + selected!.projectId)">
-            查看完整评测
-          </el-button>
         </div>
 
-        <!-- 档案流式卡片一：基本指标与跟进责任人 -->
-        <div class="profile-section-card">
-          <h3 class="section-card-title">📌 岗位评测与跟进状态</h3>
-          <div class="section-grid">
-            <div class="section-grid-item">
-              <span class="grid-label">当前阶段</span>
-              <span class="grid-value font-semibold">{{ stageLabels[selected.stage] || selected.stage }}</span>
+        <!-- 模块一：✨ 一键打招呼与 AI 深度定制沟通文案 -->
+        <div class="invite-section-box">
+          <div class="invite-section-header">
+            <div class="section-title">
+              <span class="icon">✨</span>
+              <strong>一键打招呼 / 定制沟通意向</strong>
             </div>
-            <div class="section-grid-item">
-              <span class="grid-label">红线核验</span>
-              <span class="grid-value" :class="redLineClass(selected.redLineStatus)">
-                {{ redLineLabel(selected.redLineStatus) }}
-              </span>
+            <div class="section-actions">
+              <el-button
+                size="small"
+                type="primary"
+                plain
+                :loading="generatingGreeting"
+                @click="generateGreeting(inviteCandidate)"
+              >
+                {{ greetingMessage ? '重新生成招呼语' : 'AI 生成招呼语' }}
+              </el-button>
+              <el-button
+                v-if="greetingMessage"
+                size="small"
+                @click="copyGreeting"
+              >
+                复制招呼文案
+              </el-button>
             </div>
-            <div class="section-grid-item">
-              <span class="grid-label">已确认加分项</span>
-              <span class="grid-value">{{ selected.confirmedBonus || 0 }} 项</span>
+          </div>
+          <p class="section-hint">
+            基于候选人真实项目与工作经历，由接入的 AI 模型深度定制契合岗位方向的真诚招呼文案；可直接复制后在平台对话窗口发送。
+          </p>
+          <el-input
+            v-model="greetingMessage"
+            type="textarea"
+            :rows="3"
+            :maxlength="600"
+            show-word-limit
+            placeholder="点击上方按钮生成沟通文案，或在此手动输入..."
+          />
+        </div>
+
+        <!-- 模块二：📅 面试日程预约表单 -->
+        <div class="invite-section-box">
+          <div class="invite-section-header">
+            <div class="section-title">
+              <span class="icon">📅</span>
+              <strong>预约面试日程</strong>
             </div>
-            <div class="section-grid-item">
-              <span class="grid-label">负责顾问</span>
-              <span class="grid-value">{{ selected.owner || '未分配' }}</span>
+          </div>
+          <div class="wb-form-grid" style="margin-top: 10px;">
+            <div>
+              <label>面试开始时间 <span class="required">*</span></label>
+              <input v-model="interviewForm.startsAt" type="datetime-local" class="invite-input" />
             </div>
-            <div class="section-grid-item full-width" v-if="selected.nextActionAt">
-              <span class="grid-label">下次计划跟进</span>
-              <span class="grid-value text-blue">{{ formatDate(selected.nextActionAt) }}</span>
+            <div>
+              <label>预计结束时间 <span class="required">*</span></label>
+              <input v-model="interviewForm.endsAt" type="datetime-local" class="invite-input" />
+            </div>
+            <div>
+              <label>面试形式</label>
+              <select v-model="interviewForm.method" class="invite-select">
+                <option value="视频面试">视频面试 (腾讯会议/飞书)</option>
+                <option value="现场面试">现场面试 (公司职场)</option>
+                <option value="电话面试">电话初试</option>
+              </select>
+            </div>
+            <div>
+              <label>主要面试官</label>
+              <input v-model="interviewForm.interviewer" placeholder="如：技术总监 / HRBP" class="invite-input" />
+            </div>
+            <div class="full">
+              <label>面试地点 / 会议链接</label>
+              <input v-model="interviewForm.location" placeholder="填写会议号/链接或职场具体会议室" class="invite-input" />
+            </div>
+            <div class="full">
+              <label>邀约备注 (考察重点)</label>
+              <textarea v-model="interviewForm.note" rows="2" placeholder="填写本次面试重点核实的专业问题或备忘事项..." class="invite-textarea" />
             </div>
           </div>
         </div>
-
-        <!-- 档案流式卡片二：核实联系方式 -->
-        <div class="profile-section-card">
-          <div class="section-title-with-desc">
-            <h3 class="section-card-title">📞 核实联系方式</h3>
-            <p class="section-desc">仅在 HR 已核实该联系方式属于本人时录入；相同联系方式将自动合并统一档案。</p>
-          </div>
-          <div class="verify-contact-form">
-            <el-select v-model="contactKind" style="width: 100px">
-              <el-option label="邮箱" value="email" />
-              <el-option label="电话" value="phone" />
-            </el-select>
-            <el-input
-              v-model="verifiedContact"
-              placeholder="填写已核实的手机号或邮箱"
-              clearable
-              class="verify-input"
-            />
-            <el-button type="primary" @click="verifyContact" :disabled="!verifiedContact.trim()">
-              核实
-            </el-button>
-          </div>
-        </div>
-
-        <!-- 档案流式卡片三：关联岗位与独立评测 -->
-        <section v-if="profile" class="profile-section-card">
-          <h3 class="section-card-title">💼 关联岗位与独立评测</h3>
-          <div v-if="!profile.projects?.length" class="empty-sub-text">暂无跨岗位评测</div>
-          <div
-            v-for="link in profile.projects"
-            :key="link.projectCandidateId"
-            class="nested-sub-card"
-          >
-            <div class="nested-sub-top">
-              <strong>{{ link.projectName }}</strong>
-              <span class="wb-muted"> · {{ link.jobTitle }}</span>
-            </div>
-            <div class="nested-sub-meta">
-              <span>评分：<strong>{{ link.analysisStatus === 'done' ? link.abilityScore : '待评估' }}</strong></span>
-              <span class="sep">·</span>
-              <span>红线：<strong :class="redLineClass(link.redLineStatus)">{{ redLineLabel(link.redLineStatus) }}</strong></span>
-              <span class="sep">·</span>
-              <span>阶段：{{ stageLabels[link.stage] || link.stage }}</span>
-            </div>
-          </div>
-
-          <h3 class="section-card-title" style="margin-top: 20px;">📄 来源渠道与简历版本</h3>
-          <div class="source-list">
-            <div
-              v-for="source in profile.sources"
-              :key="source.platform + source.platformCandidateId"
-              class="source-row-item"
-            >
-              <span class="source-badge-tag">{{ source.platform === 'legacy' ? '本地档案' : source.platform }}</span>
-              <span class="source-candidate-id">ID: {{ source.platformCandidateId }}</span>
-            </div>
-          </div>
-          <div class="resume-files-list" style="margin-top: 10px;">
-            <div
-              v-for="resume in profile.resumes"
-              :key="resume.id"
-              class="resume-file-item"
-            >
-              <el-icon><Document /></el-icon>
-              <span class="file-name">{{ resume.fileName }}</span>
-              <span class="file-date">{{ formatDate(resume.createdAt) }}</span>
-            </div>
-          </div>
-
-          <h3 class="section-card-title" style="margin-top: 20px;">🕒 跨岗位沟通与跟进时间线</h3>
-          <div v-if="!profile.timeline?.length" class="empty-sub-text">暂无跟进记录</div>
-          <div v-else class="profile-timeline">
-            <div
-              v-for="event in profile.timeline"
-              :key="event.id"
-              class="timeline-item-card"
-            >
-              <div class="timeline-header">
-                <span class="timeline-project">{{ event.projectName }}</span>
-                <span class="timeline-meta">{{ event.actor || 'HR' }} · {{ formatDate(event.createdAt) }}</span>
-              </div>
-              <p class="timeline-body">{{ event.note || event.type }}</p>
-            </div>
-          </div>
-        </section>
+      </div>
+      <template #footer>
+        <el-button @click="inviteDialogOpen = false">取消</el-button>
+        <el-button
+          type="primary"
+          :loading="savingInterview"
+          @click="submitInterviewInvite"
+        >
+          保存面试安排
+        </el-button>
       </template>
-    </el-drawer>
+    </el-dialog>
 
     <!-- 调配至其他职位库弹窗 -->
     <el-dialog
@@ -750,6 +801,10 @@
 
     <!-- 疑似重复抽屉 -->
     <el-drawer v-model="duplicatesOpen" title="疑似重复 · HR 核对" size="500px">
+      <div class="duplicate-drawer-toolbar">
+        <span>仅清理核对提示，候选人档案与简历保留。</span>
+        <el-button size="small" type="danger" plain :disabled="!duplicates.length" @click="clearDuplicateHints">一键清空</el-button>
+      </div>
       <div v-if="!duplicates.length" class="wb-empty">暂无疑似重复档案</div>
       <article
         v-for="pair in duplicates"
@@ -774,13 +829,14 @@
         >
           确认将 B 合并至 A
         </el-button>
+        <el-button style="margin-top: 8px" type="danger" plain @click="dismissDuplicateHint(pair)">删除提示</el-button>
       </article>
     </el-drawer>
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import {
   Refresh,
@@ -799,21 +855,26 @@ import {
   CircleClose,
   Warning,
   Loading,
-  Document
+  Document,
+  Calendar
 } from '@element-plus/icons-vue'
 import { useProjectStore, type Project } from '../composables/useProjectStore'
 import { useRecruitmentStore, stageLabels, type TalentCandidate } from '../composables/useRecruitmentStore'
 import BossSearchDialog from '../components/BossSearchDialog.vue'
 import TopTenOutreachDialog from '../components/TopTenOutreachDialog.vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import { getCandidateSurname } from '../utils/candidate'
 
 interface PendingApplication { id: string; applicationId: string; candidateName: string; platformJobId: string }
 interface DuplicatePair { candidateId: string; otherCandidateId: string; name: string; reason: string }
 interface CandidateProfile {
+  name: string
+  verifiedPhone: string
+  verifiedEmail: string
   projects: TalentCandidate[]
   sources: Array<{ platform: string; platformCandidateId: string }>
   resumes: Array<{ id: string; fileName: string; createdAt: string }>
-  timeline: Array<{ id: string; projectName: string; type: string; note: string; actor: string; createdAt: string }>
+  timeline: Array<{ id: string; projectName: string; type: string; note: string; createdAt: string }>
 }
 
 const route = useRoute()
@@ -828,7 +889,7 @@ const statusFilter = ref('')
 const sourceFilter = ref('')
 const stageFilter = ref('')
 const viewMode = ref<'grid' | 'table'>('grid')
-const sortOrder = ref<'score_desc' | 'score_asc' | 'newest'>('score_desc')
+const sortOrder = ref<'match_desc' | 'match_asc' | 'score_desc' | 'score_asc' | 'newest'>('match_desc')
 const manageMode = ref(false)
 const selectedCandidateIds = ref<string[]>([])
 
@@ -856,7 +917,7 @@ async function archiveCandidates(ids: string[]) {
   try {
     const removed = await recruitment.archiveCandidates(ids)
     selectedCandidateIds.value = selectedCandidateIds.value.filter(id => !ids.includes(id))
-    if (selected.value && ids.includes(selected.value.projectCandidateId)) selected.value = null
+    if (selectedCandidate.value && ids.includes(selectedCandidate.value.projectCandidateId)) profileDrawerOpen.value = false
     ElMessage.success(`已从人才库删除 ${removed} 条岗位简历`)
   } catch (err: any) {
     ElMessage.error(err?.message || String(err))
@@ -869,6 +930,13 @@ function archiveOneCandidate(item: TalentCandidate) {
 
 function archiveSelectedCandidates() {
   void archiveCandidates(selectedCandidateIds.value)
+}
+
+function handleCandidateAction(command: string, item: TalentCandidate) {
+  if (command === 'evaluate') navigateToEvaluation(item)
+  if (command === 'move') openMoveDialog(item)
+  if (command === 'retry') void retryAnalysis(item.resumeId)
+  if (command === 'archive') archiveOneCandidate(item)
 }
 
 const hasActiveFilters = computed(() => {
@@ -899,14 +967,177 @@ function handleLibraryAction(command: string) {
   if (command === 'duplicates') showDuplicates()
 }
 
+// 点击查看评测跳转到对应候选人的简历预览界面
+function navigateToEvaluation(item: TalentCandidate) {
+  router.push({
+    path: '/project/' + item.projectId,
+    query: { resume: item.resumeId || '' }
+  })
+}
+
+const profileDrawerOpen = ref(false)
+const selectedCandidate = ref<TalentCandidate | null>(null)
+const profile = ref<CandidateProfile | null>(null)
 const contactKind = ref('email')
 const verifiedContact = ref('')
-const selected = ref<TalentCandidate | null>(null)
-const profile = ref<CandidateProfile | null>(null)
-const drawerOpen = computed({
-  get: () => !!selected.value,
-  set: value => { if (!value) selected.value = null }
+
+async function openCandidateProfile(candidate: TalentCandidate) {
+  selectedCandidate.value = candidate
+  profile.value = null
+  profileDrawerOpen.value = true
+  try {
+    const api: any = await import('../../wailsjs/go/main/App')
+    const loaded: CandidateProfile = await api.GetCandidateProfile(candidate.id)
+    if (selectedCandidate.value?.id === candidate.id) profile.value = loaded
+  } catch (err: any) {
+    ElMessage.error(err?.message || String(err))
+  }
+}
+
+async function verifyContact() {
+  if (!selectedCandidate.value || !verifiedContact.value.trim()) return
+  try {
+    const api: any = await import('../../wailsjs/go/main/App')
+    const canonicalId: string = await api.VerifyCandidateContact(selectedCandidate.value.id, contactKind.value, verifiedContact.value.trim(), 'HR')
+    verifiedContact.value = ''
+    selectedCandidate.value = { ...selectedCandidate.value, id: canonicalId }
+    profile.value = await api.GetCandidateProfile(canonicalId)
+    await refresh()
+    ElMessage.success('联系方式已核实')
+  } catch (err: any) {
+    ElMessage.error(err?.message || String(err))
+  }
+}
+
+// 邀约面试与一键打招呼弹窗状态
+const inviteDialogOpen = ref(false)
+const inviteCandidate = ref<TalentCandidate | null>(null)
+const greetingMessage = ref('')
+const generatingGreeting = ref(false)
+const savingInterview = ref(false)
+
+const interviewForm = reactive({
+  startsAt: '',
+  endsAt: '',
+  method: '视频面试',
+  interviewer: '',
+  location: '',
+  note: ''
 })
+
+function formatDateTimeInput(date: Date): string {
+  const offset = date.getTimezoneOffset() * 60000
+  return new Date(date.getTime() - offset).toISOString().slice(0, 16)
+}
+
+async function openInterviewInvite(candidate: TalentCandidate) {
+  inviteCandidate.value = candidate
+  greetingMessage.value = ''
+  generatingGreeting.value = false
+  savingInterview.value = false
+
+  // 默认面试时间：明天上午 10:00 - 11:00
+  const tomorrow = new Date()
+  tomorrow.setDate(tomorrow.getDate() + 1)
+  tomorrow.setHours(10, 0, 0, 0)
+  const tomorrowEnd = new Date(tomorrow)
+  tomorrowEnd.setHours(11, 0, 0, 0)
+
+  Object.assign(interviewForm, {
+    startsAt: formatDateTimeInput(tomorrow),
+    endsAt: formatDateTimeInput(tomorrowEnd),
+    method: '视频面试',
+    interviewer: candidate.owner || 'HRBP',
+    location: '',
+    note: ''
+  })
+
+  inviteDialogOpen.value = true
+
+  // 自动为候选人生成一份 AI 定制打招呼语
+  void generateGreeting(candidate)
+}
+
+async function generateGreeting(candidate: TalentCandidate) {
+  if (generatingGreeting.value) return
+  generatingGreeting.value = true
+  try {
+    const api: any = await import('../../wailsjs/go/main/App')
+    const msg = await api.GenerateCandidateGreetingMessage(candidate.projectId, candidate.resumeId)
+    if (msg) {
+      greetingMessage.value = msg
+    }
+  } catch (err: any) {
+    const surname = getCandidateSurname(candidate)
+    const targetJob = candidate.jobTitle || candidate.projectName || '目标岗位'
+    greetingMessage.value = `您好${surname}，我们正在招聘【${targetJob}】。看到了您提供的经历，想进一步了解您是否愿意交流这个机会，方便聊聊吗？`
+  } finally {
+    generatingGreeting.value = false
+  }
+}
+
+async function copyGreeting() {
+  if (!greetingMessage.value.trim()) return
+  try {
+    await navigator.clipboard.writeText(greetingMessage.value.trim())
+    ElMessage.success('打招呼文案已复制到剪贴板，可直接在平台聊天窗口粘贴发送！')
+  } catch {
+    ElMessage.info('请手动选中文本框复制文案')
+  }
+}
+
+async function submitInterviewInvite() {
+  if (!inviteCandidate.value) return
+  if (!interviewForm.startsAt || !interviewForm.endsAt) {
+    ElMessage.warning('请选择面试开始与结束时间')
+    return
+  }
+  if (new Date(interviewForm.endsAt) <= new Date(interviewForm.startsAt)) {
+    ElMessage.warning('面试结束时间需晚于开始时间')
+    return
+  }
+  savingInterview.value = true
+  let scheduleSaved = false
+  try {
+    const candidate = inviteCandidate.value
+    // 1. 保存面试日程
+    await recruitment.saveInterview({
+      id: '',
+      projectCandidateId: candidate.projectCandidateId,
+      candidateName: candidate.name,
+      projectName: candidate.jobTitle || candidate.projectName,
+      startsAt: new Date(interviewForm.startsAt).toISOString(),
+      endsAt: new Date(interviewForm.endsAt).toISOString(),
+      interviewer: interviewForm.interviewer.trim(),
+      method: interviewForm.method,
+      location: interviewForm.location.trim(),
+      note: interviewForm.note.trim() ? `${interviewForm.note.trim()}\n[招呼文案]: ${greetingMessage.value}` : greetingMessage.value,
+      status: 'scheduled'
+    })
+    scheduleSaved = true
+
+    // 已安排首轮面试，使用招聘流程内有效的阶段值。
+    await recruitment.updateFollowUp(
+      candidate,
+      'first_interview',
+      interviewForm.interviewer.trim() || candidate.owner || 'HR',
+      interviewForm.startsAt,
+      `已保存面试安排：${interviewForm.method}，时间：${interviewForm.startsAt}；请与候选人确认。`
+    )
+
+    ElMessage.success('面试安排已保存，候选人已进入初面阶段；请在平台确认邀约。')
+    inviteDialogOpen.value = false
+    await refresh()
+  } catch (err: any) {
+    ElMessage.error(scheduleSaved ? `面试安排已保存，但阶段更新失败：${err?.message || String(err)}` : err?.message || String(err))
+    if (scheduleSaved) {
+      inviteDialogOpen.value = false
+      await refresh()
+    }
+  } finally {
+    savingInterview.value = false
+  }
+}
 
 // 调配分库逻辑
 const moveDialogOpen = ref(false)
@@ -945,6 +1176,10 @@ const filtered = computed(() => recruitment.candidates.filter(item =>
   const recent = (b.createdAt || '').localeCompare(a.createdAt || '')
   if (sortOrder.value === 'newest') return recent || a.projectCandidateId.localeCompare(b.projectCandidateId)
   if (a.analysisStatus !== b.analysisStatus) return a.analysisStatus === 'done' ? -1 : b.analysisStatus === 'done' ? 1 : 0
+  if (sortOrder.value === 'match_desc' || sortOrder.value === 'match_asc') {
+    const match = sortOrder.value === 'match_desc' ? b.matchScore - a.matchScore : a.matchScore - b.matchScore
+    return match || b.abilityScore - a.abilityScore || recent || a.projectCandidateId.localeCompare(b.projectCandidateId)
+  }
   const score = sortOrder.value === 'score_desc'
     ? b.abilityScore - a.abilityScore
     : a.abilityScore - b.abilityScore
@@ -955,16 +1190,7 @@ watch(() => route.query.project, value => {
   selectedProjectId.value = String(value || '')
 })
 
-watch(selected, async item => {
-  profile.value = null
-  if (!item) return
-  try {
-    const api: any = await import('../../wailsjs/go/main/App')
-    profile.value = await api.GetCandidateProfile(item.id)
-  } catch (err: any) {
-    ElMessage.warning(err?.message || String(err))
-  }
-})
+
 
 function countFor(id: string): number {
   return recruitment.candidates.filter(item => item.projectId === id).length
@@ -1005,7 +1231,7 @@ async function confirmMoveCandidate() {
 }
 
 function handleTableRowClick(row: TalentCandidate) {
-  selected.value = row
+  void openCandidateProfile(row)
 }
 
 function scoreLevelClass(score: number): string {
@@ -1057,6 +1283,158 @@ function redLineClass(status: string) {
 
 function formatDate(value: string) {
   return value ? new Date(value).toLocaleString('zh-CN') : ''
+}
+
+function formatRecentRole(role: string) {
+  return role.replace(/\s*[@＠]\s*/, ' · ')
+}
+
+// 判断候选人是否为应届生或无工作经历（有工作经历优先显示经历）
+function isFreshGradCandidate(item: any): boolean {
+  if (!item) return false
+  const role = (item.currentRole || '').trim()
+  const workYears = (item.workYears || '').trim()
+
+  // 1. 如果有明确的岗位或经历（且不是“无”、“暂无”、“待补充”等占位词），优先视为有工作经历！
+  if (role && !/^(无|暂无|最近经历待补充|无工作经历|待补充|无经历)$/i.test(role)) {
+    if (!/^(应届生?|在校生?|学生|实习生|全日制在读)$/i.test(role)) {
+      return false // 明确有工作岗位/经历，优先显示经历，绝不判断为应届生！
+    }
+  }
+
+  // 2. 如果工作年限明确大于0年（如 1年、3年、10年），绝不能判断为应届生（注意避免 /0年/ 误伤 10年、20年）
+  const yearsMatch = workYears.match(/^(\d+(?:\.\d+)?)\s*年?$/)
+  if (yearsMatch && parseFloat(yearsMatch[1]) > 0) {
+    return false
+  }
+
+  // 3. 只有在没有经历或岗位为空/无经历的情况下，且明确包含“应届/在校/毕业”等关键词，才判定为应届生
+  if (/应届|在校|在读|学生|毕业|fresh/i.test(workYears) || /应届|在校生|在读/i.test(role)) {
+    return true
+  }
+
+  return false
+}
+
+// 提取往期经历：岗位与经历/公司分别提取
+function getCandidateExperience(item: any): { role: string; company: string } {
+  const rawRole = (item?.currentRole || '').trim()
+  if (!rawRole || isFreshGradCandidate(item)) {
+    return { role: '暂无岗位记录', company: '暂无公司经历' }
+  }
+
+  // 1. 如果包含 @ 或 ＠ 分隔符（如 "高级前端工程师 @ 阿里巴巴"）
+  if (/[@＠]/.test(rawRole)) {
+    const parts = rawRole.split(/[@＠]/).map((s: string) => s.trim())
+    return {
+      role: parts[0] || '岗位待核对',
+      company: parts.slice(1).join(' @ ') || '公司待核对'
+    }
+  }
+
+  // 2. 如果包含斜杠 / 或 ／
+  if (/[/／]/.test(rawRole)) {
+    const parts = rawRole.split(/[/／]/).map((s: string) => s.trim())
+    const isCompany = (s: string) => /公司|集团|科技|药业|有限|事务所|研究所|厂|银行|证券|中心|学校|医院/i.test(s)
+    if (parts.length >= 2) {
+      if (isCompany(parts[1]) && !isCompany(parts[0])) {
+        return { role: parts[0], company: parts[1] }
+      }
+      if (isCompany(parts[0]) && !isCompany(parts[1])) {
+        return { role: parts[1], company: parts[0] }
+      }
+      return { role: parts[0], company: parts.slice(1).join(' / ') }
+    }
+  }
+
+  // 3. 如果包含竖线 | 或 ｜
+  if (/[|｜]/.test(rawRole)) {
+    const parts = rawRole.split(/[|｜]/).map((s: string) => s.trim())
+    if (parts.length >= 2) {
+      return { role: parts[0], company: parts.slice(1).join(' | ') }
+    }
+  }
+
+  // 4. 如果包含显式连字符（如 "腾讯科技 - 前端架构师" 或 "前端架构师 - 腾讯科技"）
+  if (/\s+[-–—]\s+/.test(rawRole)) {
+    const parts = rawRole.split(/\s+[-–—]\s+/).map((s: string) => s.trim())
+    const isCompany = (s: string) => /公司|集团|科技|药业|有限|事务所|研究所|厂|银行|证券|中心|学校|医院/i.test(s)
+    if (parts.length >= 2) {
+      if (isCompany(parts[0]) && !isCompany(parts[1])) {
+        return { role: parts[1], company: parts[0] }
+      }
+      return { role: parts[0], company: parts.slice(1).join(' - ') }
+    }
+  }
+
+  // 5. 如果是括号形式（如 "高级前端工程师 (腾讯科技)"）
+  const parenMatch = rawRole.match(/^(.*?)[（(](.*?)[)）]$/)
+  if (parenMatch) {
+    return {
+      role: parenMatch[1].trim() || '岗位待核对',
+      company: parenMatch[2].trim() || '公司待核对'
+    }
+  }
+
+  // 6. 纯岗位文本，公司标注为待标注
+  return {
+    role: rawRole,
+    company: '往期任职公司未标注'
+  }
+}
+
+// 提取应届生/无经历候选人的专业与学校
+function getCandidateEducation(item: any): { major: string; school: string; degree: string } {
+  const rawEdu = (item?.education || '').trim()
+  if (!rawEdu) {
+    return { major: '专业信息待补充', school: '院校信息待补充', degree: '' }
+  }
+
+  // 常见学历关键词
+  const degrees = ['博士后', '博士', '硕士', '研究生', 'MBA', 'EMBA', '本科', '学士', '大专', '专科', '中专', '高中']
+  let detectedDegree = ''
+  for (const deg of degrees) {
+    if (rawEdu.includes(deg)) {
+      detectedDegree = deg
+      break
+    }
+  }
+
+  // 按常见分隔符拆分：-, ·, /, |, 空格, 逗号
+  const parts = rawEdu.split(/[-·／/|｜,，\s]+/).map((s: string) => s.trim()).filter(Boolean)
+
+  let school = ''
+  let major = ''
+
+  for (const part of parts) {
+    // 过滤纯学历关键词
+    if (degrees.includes(part)) {
+      continue
+    }
+    // 识别学校（含大学、学院、学校、分校、研究院、研究所、分院、高职、中专、附中）
+    if (/大学|学院|学校|分校|研究院|研究所|分院|高职|附中/i.test(part) && !school) {
+      school = part
+      continue
+    }
+    // 识别专业
+    if (!major) {
+      major = part
+    }
+  }
+
+  // 如果未能识别出学校或专业，按位置兜底
+  if (!school && parts.length > 0) {
+    school = parts.find((p: string) => !degrees.includes(p)) || '院校待核对'
+  }
+  if (!major && parts.length > 1) {
+    major = parts.filter((p: string) => !degrees.includes(p) && p !== school)[0] || '专业待核对'
+  }
+
+  return {
+    major: major || '专业待补充',
+    school: school || '院校待补充',
+    degree: detectedDegree
+  }
 }
 
 function openProfile(url: string) {
@@ -1133,19 +1511,34 @@ async function merge(pair: DuplicatePair) {
   }
 }
 
-async function verifyContact() {
-  if (!selected.value || !verifiedContact.value.trim()) return
+async function dismissDuplicateHint(pair: DuplicatePair) {
   try {
     const api: any = await import('../../wailsjs/go/main/App')
-    await api.VerifyCandidateContact(selected.value.id, contactKind.value, verifiedContact.value.trim(), 'HR')
-    ElMessage.success('联系方式已核实，统一档案已更新')
-    verifiedContact.value = ''
-    selected.value = null
-    await Promise.all([loadDuplicates(), refresh()])
+    await api.DismissSuspectedDuplicate(pair.candidateId, pair.otherCandidateId)
+    await loadDuplicates()
+    ElMessage.success('已删除这条核对提示，档案和简历仍保留')
   } catch (err: any) {
     ElMessage.error(err?.message || String(err))
   }
 }
+
+async function clearDuplicateHints() {
+  if (!duplicates.value.length) return
+  try {
+    await ElMessageBox.confirm(`清空当前 ${duplicates.value.length} 条疑似重复提示？候选人档案、简历和评测会保留。`,
+      '清空疑似重复提示', { confirmButtonText: '确认清空', cancelButtonText: '取消', type: 'warning' })
+  } catch { return }
+  try {
+    const api: any = await import('../../wailsjs/go/main/App')
+    const removed: number = await api.ClearSuspectedDuplicates()
+    await loadDuplicates()
+    ElMessage.success(`已清理 ${removed} 条核对提示`)
+  } catch (err: any) {
+    ElMessage.error(err?.message || String(err))
+  }
+}
+
+
 
 async function retryAnalysis(resumeId: string) {
   try {
@@ -1647,29 +2040,58 @@ onMounted(() => {
 
 .wb-candidate-top {
   display: flex;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.candidate-avatar-col {
+  display: flex;
+  flex-direction: column;
   align-items: center;
-  gap: 10px;
+  gap: 4px;
+  flex-shrink: 0;
+  width: 44px;
 }
 
 .candidate-sequence {
   font-variant-numeric: tabular-nums;
-  font-size: 13px;
+  font-size: 18px;
   font-weight: 700;
-  width: 32px;
-  height: 32px;
-  border-radius: 8px;
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
   display: flex;
   align-items: center;
   justify-content: center;
-  border: 1px solid #e2e8f0;
-  background: #f8fafc;
-  color: #475569;
+  border: 0;
+  background: linear-gradient(135deg, #8375ff, #4f46e5);
+  color: #fff;
   flex-shrink: 0;
+}
+
+.candidate-seq-badge {
+  font-size: 11px;
+  font-weight: 700;
+  color: #4f46e5;
+  background: #eef2ff;
+  border: 1px solid #e0e7ff;
+  border-radius: 4px;
+  padding: 0 4px;
+  line-height: 1.3;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.2px;
 }
 
 .candidate-headline {
   flex: 1;
   min-width: 0;
+}
+
+.candidate-name-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  line-height: 1.2;
 }
 
 .wb-candidate-name {
@@ -1679,19 +2101,172 @@ onMounted(() => {
   line-height: 1.2;
 }
 
-.wb-candidate-role {
+.fresh-grad-tag {
+  display: inline-flex;
+  align-items: center;
+  font-size: 10px;
+  font-weight: 700;
+  color: #047857;
+  background: #d1fae5;
+  border: 1px solid #6ee7b7;
+  border-radius: 999px;
+  padding: 0 6px;
+  height: 18px;
+  line-height: 18px;
+  letter-spacing: 0.2px;
+  flex-shrink: 0;
+}
+
+.edu-degree-tag {
+  display: inline-flex;
+  align-items: center;
+  font-size: 10px;
+  font-weight: 600;
+  color: #0369a1;
+  background: #e0f2fe;
+  border-radius: 4px;
+  padding: 0 4px;
+  margin-left: 4px;
+  height: 16px;
+  line-height: 16px;
+  flex-shrink: 0;
+}
+
+.candidate-info-row {
+  display: flex;
+  align-items: center;
   font-size: 12px;
-  font-weight: 500;
-  color: #475569;
   margin-top: 3px;
+  line-height: 1.3;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
+.candidate-info-row .row-label {
+  color: #64748b;
+  font-weight: 600;
+  font-size: 11px;
+  flex-shrink: 0;
+  margin-right: 2px;
+}
+
+.candidate-info-row .row-val {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.candidate-info-row .role-val {
+  color: #0f172a;
+  font-weight: 600;
+}
+
+.candidate-info-row .company-val {
+  color: #475569;
+  font-weight: 500;
+}
+
+.candidate-info-row .major-val {
+  color: #0f172a;
+  font-weight: 600;
+}
+
+.candidate-info-row .school-val {
+  color: #475569;
+  font-weight: 500;
+}
+
+.candidate-target-role {
+  margin-top: 3px;
+  font-size: 11px;
+  color: #64748b;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.table-name-cell {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.table-fresh-tag {
+  height: 16px;
+  line-height: 16px;
+  padding: 0 4px;
+  font-size: 9px;
+}
+
+.table-exp-box {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  line-height: 1.25;
+}
+
+.table-role-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: #0f172a;
+}
+
+.table-company-name {
+  font-size: 11px;
+  color: #64748b;
+}
+
 .candidate-score-wrap {
   flex-shrink: 0;
+  width: 76px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
 }
+
+.candidate-score-wrap small { color: #64748b; font-size: 10px; white-space: nowrap; }
+
+.candidate-match-ring,
+.candidate-match-pending {
+  width: 64px;
+  height: 64px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  font-size: 19px;
+  font-weight: 800;
+  color: #4f46e5;
+  font-variant-numeric: tabular-nums;
+}
+
+.candidate-match-ring { background: conic-gradient(#6559ee var(--match), #e8eaf6 0); }
+.candidate-match-ring span {
+  width: 50px;
+  height: 50px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  background: #fff;
+}
+.candidate-match-pending { background: #f1f5f9; color: #94a3b8; font-size: 13px; }
+
+.candidate-skill-list { display: flex; flex-wrap: wrap; gap: 6px; min-height: 24px; }
+.candidate-skill-chip {
+  display: inline-block;
+  max-width: 100%;
+  padding: 3px 9px;
+  border: 1px solid #e2e8f0;
+  border-radius: 99px;
+  background: #f8fafc;
+  color: #475569;
+  font-size: 11px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.candidate-skill-empty { font-size: 11px; color: #94a3b8; }
 
 /* 能力分徽标 */
 .score-badge {
@@ -1778,6 +2353,21 @@ onMounted(() => {
   justify-content: flex-end;
   gap: 6px;
   min-width: 0;
+}
+
+.candidate-actions .candidate-primary-action,
+.candidate-actions .candidate-secondary-action { flex: 1 1 105px; }
+.candidate-actions .candidate-more-action { min-width: 60px; }
+
+.duplicate-drawer-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 14px;
+  color: #64748b;
+  font-size: 12px;
+  line-height: 1.5;
 }
 
 .candidate-actions .el-button + .el-button {
@@ -1908,314 +2498,136 @@ onMounted(() => {
   box-shadow: 0 4px 12px rgba(37, 99, 235, 0.25);
 }
 
-/* 候选人详细档案抽屉 (Modern Modular Design) */
-.candidate-profile-drawer :deep(.el-drawer__body) {
-  padding: 20px 24px;
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-  background-color: #f8fafc;
-}
+.candidate-profile-content { display: flex; flex-direction: column; gap: 16px; }
+.profile-summary { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.profile-summary h2 { margin: 0 0 4px; font-size: 20px; color: #1e293b; }
+.profile-summary p { margin: 0; color: #64748b; line-height: 1.5; }
+.profile-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.profile-section { border: 1px solid #e2e8f0; border-radius: 10px; padding: 14px; }
+.profile-section h3 { margin: 0 0 10px; font-size: 14px; color: #1e293b; }
+.profile-section p { margin: 0 0 8px; color: #64748b; line-height: 1.5; }
+.profile-verify-row { display: flex; gap: 8px; align-items: center; }
+.profile-list-row { display: flex; flex-direction: column; gap: 3px; padding: 8px 0; border-top: 1px solid #f1f5f9; overflow-wrap: anywhere; }
+.profile-list-row strong { font-size: 13px; color: #334155; }
+.profile-list-row span { font-size: 12px; color: #64748b; }
 
-.profile-hero-card {
-  display: flex;
-  align-items: center;
-  gap: 16px;
-  background: #ffffff;
-  border: 1px solid #e2e8f0;
-  border-radius: 12px;
-  padding: 16px;
-}
+/* 邀约面试与沟通文案弹窗 */
+.interview-invite-dialog {
+  .invite-dialog-body {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+  }
 
-.hero-avatar {
-  width: 50px;
-  height: 50px;
-  border-radius: 12px;
-  background: linear-gradient(135deg, #4f46e5 0%, #3b82f6 100%);
-  color: #ffffff;
-  font-size: 20px;
-  font-weight: 800;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  flex-shrink: 0;
-}
+  .invite-candidate-header {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    padding: 14px 18px;
+    background: #f8fafc;
+    border-radius: 10px;
+    border: 1px solid #e2e8f0;
 
-.hero-info {
-  flex: 1;
-  min-width: 0;
-}
+    .invite-avatar {
+      width: 48px;
+      height: 48px;
+      border-radius: 50%;
+      background: linear-gradient(135deg, #6366f1, #4f46e5);
+      color: #fff;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 20px;
+      font-weight: 700;
+      flex-shrink: 0;
+      box-shadow: 0 4px 10px rgba(99, 102, 241, 0.25);
+    }
 
-.hero-name-row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
+    .invite-info {
+      flex: 1;
+      min-width: 0;
 
-.hero-name {
-  margin: 0;
-  font-size: 18px;
-  font-weight: 800;
-  color: #0f172a;
-}
+      .invite-name-row {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin-bottom: 4px;
 
-.hero-source-tag {
-  font-size: 11px;
-  padding: 2px 6px;
-  border-radius: 4px;
-  background-color: #f1f5f9;
-  color: #475569;
-}
+        .invite-name {
+          font-size: 16px;
+          font-weight: 700;
+          color: #1e293b;
+          white-space: nowrap;
+          overflow: hidden;
+          text-overflow: ellipsis;
+        }
+      }
 
-.hero-job-text {
-  margin: 4px 0 8px;
-  font-size: 13px;
-  color: #475569;
-  font-weight: 500;
-}
+      .invite-sub-text {
+        font-size: 12px;
+        color: #64748b;
+      }
+    }
+  }
 
-.hero-pills-row {
-  display: flex;
-  gap: 6px;
-  flex-wrap: wrap;
-}
+  .invite-section-box {
+    padding: 14px 16px;
+    background: #ffffff;
+    border: 1px solid #e2e8f0;
+    border-radius: 10px;
 
-.hero-score-box {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  padding: 8px 12px;
-  background: #f8fafc;
-  border: 1px solid #e2e8f0;
-  border-radius: 10px;
-  flex-shrink: 0;
-}
+    .invite-section-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 6px;
 
-.hero-score-val {
-  font-size: 22px;
-  font-weight: 900;
-  font-variant-numeric: tabular-nums;
-  line-height: 1;
-}
+      .section-title {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        font-size: 14px;
+        color: #1e293b;
 
-.hero-score-val.score-high {
-  color: #15803d;
-}
+        .icon {
+          font-size: 16px;
+        }
+      }
 
-.hero-score-val.score-mid {
-  color: #1d4ed8;
-}
+      .section-actions {
+        display: flex;
+        gap: 8px;
+      }
+    }
 
-.hero-score-val.score-low {
-  color: #475569;
-}
+    .section-hint {
+      font-size: 12px;
+      color: #64748b;
+      margin: 0 0 10px;
+      line-height: 1.5;
+    }
+  }
 
-.hero-score-lbl {
-  font-size: 10px;
-  color: #64748b;
-  margin-top: 4px;
-  font-weight: 600;
-}
+  .invite-input, .invite-select, .invite-textarea {
+    width: 100%;
+    padding: 8px 10px;
+    border: 1px solid #dcdfe6;
+    border-radius: 6px;
+    font-size: 13px;
+    color: #303133;
+    outline: none;
+    box-sizing: border-box;
+    transition: border-color 0.2s;
 
-.profile-quick-actions {
-  display: flex;
-  gap: 10px;
-  flex-wrap: wrap;
-}
+    &:focus {
+      border-color: #409eff;
+    }
+  }
 
-.profile-section-card {
-  background: #ffffff;
-  border: 1px solid #e2e8f0;
-  border-radius: 12px;
-  padding: 16px;
-}
-
-.section-card-title {
-  margin: 0 0 12px;
-  font-size: 14px;
-  font-weight: 800;
-  color: #0f172a;
-}
-
-.section-title-with-desc {
-  margin-bottom: 12px;
-}
-
-.section-title-with-desc .section-card-title {
-  margin-bottom: 4px;
-}
-
-.section-desc {
-  margin: 0;
-  font-size: 12px;
-  color: #64748b;
-  line-height: 1.4;
-}
-
-.section-grid {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 12px;
-}
-
-.section-grid-item {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-
-.section-grid-item.full-width {
-  grid-column: 1 / -1;
-}
-
-.grid-label {
-  font-size: 11px;
-  color: #64748b;
-  font-weight: 500;
-}
-
-.grid-value {
-  font-size: 13px;
-  color: #0f172a;
-}
-
-.grid-value.font-semibold {
-  font-weight: 700;
-}
-
-.grid-value.text-blue {
-  color: #2563eb;
-  font-weight: 600;
-}
-
-.verify-contact-form {
-  display: flex;
-  gap: 8px;
-  align-items: center;
-}
-
-.verify-input {
-  flex: 1;
-}
-
-.nested-sub-card {
-  background: #f8fafc;
-  border: 1px solid #e2e8f0;
-  border-radius: 8px;
-  padding: 10px 12px;
-  margin-bottom: 8px;
-}
-
-.nested-sub-top {
-  font-size: 13px;
-  color: #0f172a;
-}
-
-.nested-sub-meta {
-  font-size: 12px;
-  color: #475569;
-  margin-top: 4px;
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-
-.empty-sub-text {
-  font-size: 12px;
-  color: #94a3b8;
-  padding: 8px 0;
-}
-
-.source-list {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-
-.source-row-item {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 12px;
-}
-
-.source-badge-tag {
-  font-weight: 600;
-  color: #4338ca;
-  background: #ede9fe;
-  padding: 2px 6px;
-  border-radius: 4px;
-}
-
-.source-candidate-id {
-  color: #64748b;
-  font-family: monospace;
-}
-
-.resume-files-list {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-
-.resume-file-item {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 12px;
-  color: #334155;
-  background: #f8fafc;
-  padding: 6px 10px;
-  border-radius: 6px;
-}
-
-.resume-file-item .file-name {
-  flex: 1;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-weight: 500;
-}
-
-.resume-file-item .file-date {
-  color: #94a3b8;
-  font-size: 11px;
-}
-
-.profile-timeline {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.timeline-item-card {
-  background: #f8fafc;
-  border-left: 3px solid #6366f1;
-  padding: 8px 12px;
-  border-radius: 0 8px 8px 0;
-}
-
-.timeline-header {
-  display: flex;
-  justify-content: space-between;
-  font-size: 12px;
-  margin-bottom: 2px;
-}
-
-.timeline-project {
-  font-weight: 700;
-  color: #0f172a;
-}
-
-.timeline-meta {
-  color: #94a3b8;
-  font-size: 11px;
-}
-
-.timeline-body {
-  margin: 0;
-  font-size: 12px;
-  color: #475569;
+  .required {
+    color: #f56c6c;
+    margin-left: 2px;
+  }
 }
 
 @media (max-width: 1180px) {

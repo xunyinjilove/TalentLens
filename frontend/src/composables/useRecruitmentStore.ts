@@ -14,6 +14,11 @@ export interface TalentCandidate {
   profileUrl: string
   analysisStatus: string
   abilityScore: number
+  matchScore: number
+  currentRole: string
+  education?: string
+  workYears?: string
+  skills: string[]
   redLineStatus: string
   confirmedBonus: number
   stage: string

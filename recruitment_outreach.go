@@ -275,6 +275,42 @@ func (a *App) GenerateCandidateAIOutreachMessage(projectID string, itemID string
 	return msg, nil
 }
 
+// GenerateCandidateGreetingMessage 为人才库中指定的候选人生成定制打招呼/邀约文案
+func (a *App) GenerateCandidateGreetingMessage(projectID string, resumeID string) (string, error) {
+	if !interviewIDPattern.MatchString(projectID) || !interviewIDPattern.MatchString(resumeID) {
+		return "", fmt.Errorf("候选人或项目标识无效")
+	}
+	project := a.GetProject(projectID)
+	if project == nil {
+		return "", fmt.Errorf("招聘项目不存在")
+	}
+	jobTitle := ""
+	projectName := ""
+	jobTitle = project.JobConfig.Title
+	projectName = project.Name
+	if jobTitle == "" {
+		jobTitle = "目标岗位"
+	}
+
+	var targetResume *Resume
+	for _, r := range a.GetProjectResumes(projectID) {
+		if r.ID == resumeID {
+			targetResume = r
+			break
+		}
+	}
+	if targetResume == nil {
+		return "", fmt.Errorf("候选人简历记录不存在")
+	}
+
+	msg, _ := a.generateAIOutreachGreeting(targetResume, jobTitle, projectName)
+	if msg == "" {
+		return "", fmt.Errorf("生成打招呼文案失败")
+	}
+
+	return msg, nil
+}
+
 // The preview is a ranking snapshot. No platform message is sent here.
 func (a *App) PreviewTopTenOutreach(projectID string) (OutreachBatch, error) {
 	batch := OutreachBatch{ProjectID: projectID, Status: "draft", Items: make([]OutreachItem, 0)}

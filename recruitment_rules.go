@@ -28,6 +28,50 @@ type JobRuleApproval struct {
 	Approved  bool   `json:"approved"`
 }
 
+type aiJobRuleSuggestion struct {
+	Kind      string `json:"kind"`
+	Criterion string `json:"criterion"`
+	Basis     string `json:"basis"`
+}
+
+// A cited phrase must occur in the supplied job description or skill list.
+// This prevents model output from silently adding unrelated mandatory rules.
+func validatedAIJobRules(items []aiJobRuleSuggestion, job JobConfig, existing []JobRule) []JobRule {
+	context := strings.ToLower(strings.Join([]string{
+		job.JobDescription,
+		strings.Join(job.RequiredSkills, "；"), strings.Join(job.CoreCriteria, "；"),
+	}, "；"))
+	counts := map[string]int{"redline": 0, "bonus": 0, "core": 0}
+	seen := make(map[string]bool)
+	for _, rule := range existing {
+		counts[rule.Kind]++
+		seen[rule.Kind+"\x00"+strings.ToLower(strings.TrimSpace(rule.Criterion))] = true
+	}
+	out := make([]JobRule, 0)
+	for _, item := range items {
+		if item.Kind != "redline" && item.Kind != "core" && item.Kind != "bonus" {
+			continue
+		}
+		criterion, basis := strings.TrimSpace(item.Criterion), strings.TrimSpace(item.Basis)
+		if criterion == "" || len([]rune(criterion)) > 220 || len([]rune(basis)) < 2 ||
+			!strings.Contains(context, strings.ToLower(basis)) || !strings.Contains(strings.ToLower(criterion), strings.ToLower(basis)) {
+			continue
+		}
+		limit := 4
+		if counts[item.Kind] >= limit {
+			continue
+		}
+		key := item.Kind + "\x00" + strings.ToLower(criterion)
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		counts[item.Kind]++
+		out = append(out, JobRule{Kind: item.Kind, Criterion: criterion, Source: "ai", Status: "draft"})
+	}
+	return out
+}
+
 func (a *App) ListJobRules(projectID string) ([]JobRule, error) {
 	db, err := a.getRecruitmentDB()
 	if err != nil {
@@ -99,12 +143,13 @@ func (a *App) SuggestJobRules(projectID string, withAI bool) ([]JobRule, error) 
 		if strings.TrimSpace(a.config.AI.APIKey) == "" {
 			return nil, fmt.Errorf("AI 未配置，请先在设置中填写 API Key")
 		}
-		prompt := fmt.Sprintf(`你是招聘岗位规则起草助手。根据下面的岗位资料，补充最多 2 条直接关联工作职责且可核实的红线建议、最多 4 条核心能力、最多 3 条附加优势。允许没有红线。不要以年龄、性别、学校名气、企业名气或外包身份作为规则。AI 建议只作为 HR 审批草稿，不能直接淘汰候选人。每条要具体可验证，不重复岗位资料中已有条目。只输出 JSON 数组，每项包含 kind（redline/core/bonus）和 criterion（中文）。
+		prompt := fmt.Sprintf(`你是招聘岗位规则起草助手。依据岗位职责和技能，分别建议红线与加分项各 3–4 条、核心能力最多 4 条；已有条目也计入上限。红线必须是直接影响履职、能够核实的必要技能或经验；证据不足时可以少于 3 条或没有，绝不凑数。加分项须与岗位核心技能高度相关且是非必需优势。不要以年龄、性别、学校名气、企业名气或外包身份作为规则。AI 建议仅作为 HR 审批草稿，不能直接淘汰候选人。每项必须附 basis，原样引用下方职责、必需技能或核心能力中的一个具体词组，并在 criterion 中包含该词组；无法引用的建议不要输出。不得重复已有条目。只输出 JSON 数组，每项包含 kind（redline/core/bonus）、criterion（中文）和 basis（原样引用的依据）。
 岗位：%s
 职责：%s
+必需技能：%s
 已有红线：%s
 核心能力：%s
-已有加分：%s`, project.JobConfig.Title, project.JobConfig.JobDescription,
+已有加分：%s`, project.JobConfig.Title, project.JobConfig.JobDescription, strings.Join(project.JobConfig.RequiredSkills, "；"),
 			strings.Join(project.JobConfig.RedLines, "；"), strings.Join(project.JobConfig.CoreCriteria, "；"), strings.Join(project.JobConfig.BonusPoints, "；"))
 		response, err := a.callAI(&a.config.AI, prompt)
 		if err != nil {
@@ -114,20 +159,11 @@ func (a *App) SuggestJobRules(projectID string, withAI bool) ([]JobRule, error) 
 		if start < 0 || end <= start {
 			return nil, fmt.Errorf("AI 未返回有效规则列表")
 		}
-		var aiItems []JobRule
+		var aiItems []aiJobRuleSuggestion
 		if err := json.Unmarshal([]byte(response[start:end+1]), &aiItems); err != nil {
 			return nil, fmt.Errorf("AI 规则格式无效: %w", err)
 		}
-		for _, item := range aiItems {
-			if item.Kind != "redline" && item.Kind != "core" && item.Kind != "bonus" {
-				continue
-			}
-			criterion := strings.TrimSpace(item.Criterion)
-			if criterion == "" || len([]rune(criterion)) > 220 {
-				continue
-			}
-			suggestions = append(suggestions, JobRule{Kind: item.Kind, Criterion: criterion, Source: "ai", Status: "draft"})
-		}
+		suggestions = append(suggestions, validatedAIJobRules(aiItems, project.JobConfig, suggestions)...)
 	}
 	existing, err := a.ListJobRules(projectID)
 	if err != nil {

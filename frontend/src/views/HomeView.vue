@@ -185,7 +185,7 @@
                 <div class="hero-top-row">
                   <div class="hero-left-section">
                     <div class="hero-avatar">
-                      <span>{{ (resumeStore.selectedResume.analysis?.candidateName || resumeStore.selectedResume.fileName || '人').slice(0, 1) }}</span>
+                      <span>{{ getCandidateSurname(resumeStore.selectedResume.analysis?.candidateName || resumeStore.selectedResume.fileName) }}</span>
                     </div>
                     <div class="hero-candidate-info">
                       <div class="hero-title-row">
@@ -227,13 +227,16 @@
                     </div>
                   </div>
 
-                  <!-- 右上角：综合评分与推荐结论 (固定在右上，flex-shrink: 0，永远醒目) -->
+                  <!-- 右上角：证据分与参考匹配分别标示 -->
                   <div v-if="resumeStore.selectedResume.status === 'done' && resumeStore.selectedResume.analysis" class="hero-score-section">
                     <div class="hero-score-box" :class="getScoreClass(resumeStore.selectedResume.score)">
                       <strong class="hero-score-num">{{ animatedDetailScore || resumeStore.selectedResume.score }}</strong>
-                      <span class="hero-score-label">{{ $t('analysis.totalScore') }}</span>
+                      <span class="hero-score-label">岗位证据分</span>
                     </div>
                     <div class="hero-decision-badge-wrap">
+                      <span v-if="holisticRadarScore > 0" class="hero-reference-match" title="技能 40%、经验 40%、学历 20% 的 AI 参考匹配；不替代岗位逐项证据分">
+                        参考匹配 {{ holisticRadarScore }}
+                      </span>
                       <span class="hero-rec-badge" :class="resumeStore.selectedResume.analysis.recommendation">
                         {{ $t(`analysis.recommendations.${resumeStore.selectedResume.analysis.recommendation || 'consider'}`) }}
                       </span>
@@ -556,7 +559,10 @@
                           :selected-index="selectedRadarIndex"
                           @select="handleSelectRadarIndex"
                         />
-                        <p v-else class="score-explanation">目前仅有 {{ activeRadarChecks.length }} 项可引用的履历能力，详见右侧；材料不足时不补画无依据的维度。</p>
+                        <p v-if="radarMode === 'job' && activeRadarChecks.length < 3" class="score-explanation">
+                          综合匹配按技能 40%、经验 40%、学历 20% 展示；岗位证据分仍按逐项可核实材料计算。
+                        </p>
+                        <p v-else-if="radarMode === 'experience' && activeRadarChecks.length < 3" class="score-explanation">目前仅有 {{ activeRadarChecks.length }} 项可引用的履历能力，详见右侧；材料不足时不补画无依据的维度。</p>
                       </div>
 
                       <!-- 右侧：逐项评分卡与原文线索 -->
@@ -1012,6 +1018,7 @@ import InterviewAccordionCard from '../components/InterviewAccordionCard.vue'
 import { useResumeStore } from '../composables/useResumeStore'
 import { useProjectStore } from '../composables/useProjectStore'
 import { runWith51JobBrowser } from '../composables/51jobBrowserRecovery'
+import { getCandidateSurname } from '../utils/candidate'
 
 const { t } = useI18n()
 const router = useRouter()
@@ -1057,8 +1064,14 @@ const radarIndicators = computed(() => {
     { name: '核心技能', max: 100 },
     { name: '业务经验', max: 100 },
     { name: '学历资质', max: 100 },
-    { name: '综合胜任力', max: 100 }
+    { name: '综合匹配', max: 100 }
   ]
+})
+
+const holisticRadarScore = computed(() => {
+  const a = resumeStore.selectedResume?.analysis
+  if (!a || a.skillMatch <= 0 || a.experienceMatch <= 0 || a.educationMatch <= 0) return 0
+  return Math.round(a.skillMatch * 0.4 + a.experienceMatch * 0.4 + a.educationMatch * 0.2)
 })
 
 const radarCandidateValues = computed(() => {
@@ -1071,7 +1084,7 @@ const radarCandidateValues = computed(() => {
     a?.skillMatch ?? 75,
     a?.experienceMatch ?? 70,
     a?.educationMatch ?? 80,
-    resumeStore.selectedResume?.score ?? 75
+    holisticRadarScore.value
   ]
 })
 
@@ -1960,8 +1973,30 @@ onMounted(async () => {
     }
     // 加载项目下的简历
     await resumeStore.loadProjectResumes(projectId.value)
+    selectTargetResumeFromRoute()
   }
   contactPollTimer = window.setInterval(() => { void poll51JobReplies() }, 120000)
+})
+
+function selectTargetResumeFromRoute() {
+  const targetId = String(route.query.resume || '').trim()
+  if (targetId) {
+    const found = resumeStore.resumes.find(r => r.id === targetId || r.fileName.includes(targetId))
+    if (found) {
+      resumeStore.selectResume(found.id)
+      rightTab.value = 'detail'
+      return
+    }
+  }
+  if (!resumeStore.selectedId && resumeStore.resumes.length > 0) {
+    resumeStore.selectResume(resumeStore.resumes[0].id)
+  }
+}
+
+watch(() => route.query.resume, (newResumeId) => {
+  if (newResumeId) {
+    selectTargetResumeFromRoute()
+  }
 })
 
 onUnmounted(() => {
@@ -2736,6 +2771,17 @@ onUnmounted(() => {
           display: flex;
           flex-direction: column;
           gap: 4px;
+
+          .hero-reference-match {
+            padding: 2px 7px;
+            border-radius: 6px;
+            background: #eef2ff;
+            color: #4338ca;
+            font-size: 11px;
+            font-weight: 700;
+            text-align: center;
+            white-space: nowrap;
+          }
 
           .hero-rec-badge {
             display: inline-block;

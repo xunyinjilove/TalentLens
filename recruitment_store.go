@@ -42,6 +42,11 @@ CREATE TABLE IF NOT EXISTS candidate_merge_events (
   duplicate_candidate_id TEXT NOT NULL, actor TEXT NOT NULL,
   reason TEXT NOT NULL, created_at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS dismissed_duplicate_hints (
+  candidate_id TEXT NOT NULL, other_candidate_id TEXT NOT NULL,
+  dismissed_at TEXT NOT NULL,
+  PRIMARY KEY(candidate_id, other_candidate_id)
+);
 CREATE TABLE IF NOT EXISTS candidate_sources (
   id TEXT PRIMARY KEY, candidate_id TEXT NOT NULL REFERENCES candidates(id),
   platform TEXT NOT NULL, platform_account TEXT NOT NULL DEFAULT '',

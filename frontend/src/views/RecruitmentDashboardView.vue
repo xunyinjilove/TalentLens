@@ -32,7 +32,7 @@
           <h2 class="wb-section-title">近期入库</h2>
           <div v-if="recentCandidates.length" class="recent-list">
             <div v-for="item in recentCandidates" :key="item.projectCandidateId" class="recent-item" @click="router.push('/talent?project=' + item.projectId)">
-              <span class="wb-avatar">{{ item.name.slice(0, 1) }}</span>
+              <span class="wb-avatar">{{ getCandidateSurname(item) }}</span>
               <div><strong>{{ item.name }}</strong><div class="wb-muted">{{ item.projectName }} · {{ item.source }}</div></div>
               <span class="wb-muted">{{ formatDate(item.createdAt) }}</span>
             </div>
@@ -59,6 +59,7 @@
 import { computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { useRecruitmentStore, stageLabels } from '../composables/useRecruitmentStore'
+import { getCandidateSurname } from '../utils/candidate'
 
 const router = useRouter()
 const recruitment = useRecruitmentStore()

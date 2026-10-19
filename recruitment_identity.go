@@ -19,7 +19,11 @@ func (a *App) ListSuspectedDuplicates() ([]SuspectedDuplicate, error) {
 	if err != nil {
 		return nil, err
 	}
-	rows, err := db.Query("SELECT a.id,b.id,a.display_name FROM candidates a JOIN candidates b ON a.id<b.id AND lower(trim(a.display_name))=lower(trim(b.display_name)) WHERE trim(a.display_name)<>'' AND a.display_name<>'候选人' ORDER BY a.display_name,a.id,b.id LIMIT 200")
+	rows, err := db.Query(`SELECT a.id,b.id,a.display_name FROM candidates a
+		JOIN candidates b ON a.id<b.id AND lower(trim(a.display_name))=lower(trim(b.display_name))
+		LEFT JOIN dismissed_duplicate_hints d ON d.candidate_id=a.id AND d.other_candidate_id=b.id
+		WHERE trim(a.display_name)<>'' AND a.display_name<>'候选人' AND d.candidate_id IS NULL
+		ORDER BY a.display_name,a.id,b.id LIMIT 200`)
 	if err != nil {
 		return nil, err
 	}
@@ -34,6 +38,53 @@ func (a *App) ListSuspectedDuplicates() ([]SuspectedDuplicate, error) {
 		out = append(out, item)
 	}
 	return out, rows.Err()
+}
+
+// DismissSuspectedDuplicate removes only the review hint. Both profiles remain.
+func (a *App) DismissSuspectedDuplicate(candidateID, otherCandidateID string) error {
+	if candidateID == "" || otherCandidateID == "" || candidateID == otherCandidateID {
+		return fmt.Errorf("请选择有效的疑似重复记录")
+	}
+	if candidateID > otherCandidateID {
+		candidateID, otherCandidateID = otherCandidateID, candidateID
+	}
+	db, err := a.getRecruitmentDB()
+	if err != nil {
+		return err
+	}
+	result, err := db.Exec(`INSERT OR IGNORE INTO dismissed_duplicate_hints(candidate_id,other_candidate_id,dismissed_at)
+		SELECT a.id,b.id,? FROM candidates a JOIN candidates b ON a.id=? AND b.id=?
+		WHERE lower(trim(a.display_name))=lower(trim(b.display_name)) AND trim(a.display_name)<>''`, time.Now().UTC().Format(time.RFC3339Nano), candidateID, otherCandidateID)
+	if err != nil {
+		return err
+	}
+	count, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if count == 0 {
+		var exists int
+		if err := db.QueryRow("SELECT 1 FROM dismissed_duplicate_hints WHERE candidate_id=? AND other_candidate_id=?", candidateID, otherCandidateID).Scan(&exists); err != nil {
+			return fmt.Errorf("疑似重复记录已不存在")
+		}
+	}
+	return nil
+}
+
+// ClearSuspectedDuplicates dismisses all currently detected pairs, not people.
+func (a *App) ClearSuspectedDuplicates() (int64, error) {
+	db, err := a.getRecruitmentDB()
+	if err != nil {
+		return 0, err
+	}
+	result, err := db.Exec(`INSERT OR IGNORE INTO dismissed_duplicate_hints(candidate_id,other_candidate_id,dismissed_at)
+		SELECT a.id,b.id,? FROM candidates a JOIN candidates b
+		ON a.id<b.id AND lower(trim(a.display_name))=lower(trim(b.display_name))
+		WHERE trim(a.display_name)<>'' AND a.display_name<>'候选人'`, time.Now().UTC().Format(time.RFC3339Nano))
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
 }
 
 func (a *App) MergeCandidates(primaryID, duplicateID, actor, reason string) error {

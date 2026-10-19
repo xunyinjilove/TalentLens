@@ -319,15 +319,20 @@ function extract51JobResumeId(candidateUrl) {
   } catch { return ''; }
 }
 
-function selectFreshCandidates(candidates, limit, excludedUrls = new Set(), seenKeys = new Set()) {
+function selectFreshCandidates(candidates, limit, excludedUrls = new Set(), seenKeys = new Set(), deferredKeys = new Set()) {
   const selected = [];
   const batchKeys = new Set();
   for (const candidate of candidates || []) {
     const key = candidateCardKey(candidate);
-    if (!candidate.name || (candidate.url && (seenKeys.has(key) || batchKeys.has(key)))) continue;
+    const resumeId = extract51JobResumeId(candidate.url);
+    const stableKey = resumeId ? `id:51job:${resumeId}` : '';
+    if (!candidate.name || deferredKeys.has(key) ||
+        (candidate.url && (seenKeys.has(key) || batchKeys.has(key))) ||
+        (stableKey && (seenKeys.has(stableKey) || batchKeys.has(stableKey)))) continue;
     if (candidate.url && excludedUrls.has(candidate.url)) continue;
     candidate.cardKey = key;
     if (candidate.url) batchKeys.add(key);
+    if (stableKey) batchKeys.add(stableKey);
     selected.push(candidate);
     if (selected.length >= limit) break;
   }
@@ -536,7 +541,7 @@ async function createBackgroundPage(browser, sourcePage, url) {
 }
 
 // 前程无忧可能先请求详情权限，再异步 window.open；拦截必须覆盖请求完成后的回调。
-async function capture51jobDetailUrl(page, candidate, timeoutMs = 8000) {
+async function capture51jobDetailUrl(page, candidate, timeoutMs = 3500) {
   const result = await page.evaluate(async (name, expectedText, waitMs) => {
     const cards = Array.from(document.querySelectorAll('.talent-search-container .card'));
     const sameName = cards.filter(card => {
@@ -573,6 +578,12 @@ async function capture51jobDetailUrl(page, candidate, timeoutMs = 8000) {
   } catch (error) {
     return { clicked: true, url: '' };
   }
+}
+
+function isComplete51JobDetail(candidate, detailText) {
+  const text = cleanCandidateResumeText(detailText || '');
+  return Boolean(extract51JobResumeId(candidate?.url || '') && text.length >= 220 &&
+    /工作经历|项目经验|教育经历|个人优势|专业技能|技能证书|求职意向/.test(text));
 }
 
 // 全渠道安全验证码深度多模态感知函数（覆盖 BOSS直聘、猎聘网、智联招聘、前程无忧）
@@ -759,6 +770,12 @@ async function extractCandidatesAcrossFrames(page, targetCount, keyword, platfor
       const aTag = el.querySelector('a[href*="resume"], a[href*="Resume"], a[href*="detail"], a[href*="geek"], a[href*="talent"], a');
       if (aTag && aTag.href && !aTag.href.startsWith('javascript:')) {
         candUrl = aTag.href;
+      }
+      if (!candUrl && pName === '前程无忧') {
+        const resumeId = el.getAttribute('data-resumeid') || el.querySelector('[data-resumeid]')?.getAttribute('data-resumeid') || '';
+        if (/^\d+$/.test(resumeId)) {
+          candUrl = `${window.location.origin}/Revision/talent/resume/detail?resumeId=${resumeId}`;
+        }
       }
       if (!candUrl) {
         const seq = el.getAttribute('data-seq') || el.getAttribute('data-resumeid') || el.getAttribute('data-id') || el.getAttribute('data-userid') || el.getAttribute('data-geekid');
@@ -1146,6 +1163,8 @@ async function enrichCandidatesWithFullDetail(page, browser, candidates, platfor
     if (fullDetailText) {
       fullDetailText = cleanCandidateResumeText(fullDetailText);
     }
+
+    if (platformKey === '51job') cand.detailComplete = isComplete51JobDetail(cand, fullDetailText);
 
     // 若成功提取到全量详情正文，则融合并升级候选人信息
     if (fullDetailText && fullDetailText.length > (cand.rawCardText || '').length) {
@@ -1682,6 +1701,8 @@ async function autoNavigateAndSearch(page, platformKey, cfg, searchKeyword) {
   const allPlatformSavedList = [];
   const savedPerKeyword = Array.isArray(keywordPlan) ? keywordPlan.map(() => 0) : [];
   const exhaustedKeywords = new Set();
+  const pending51jobDetails = new Map();
+  const deferred51jobKeys = new Set();
   let activeKeyword = '';
   let batchIdx = 0;
   let emptyBatches = 0;
@@ -1761,7 +1782,8 @@ async function autoNavigateAndSearch(page, platformKey, cfg, searchKeyword) {
       // 2. 动态弹性轮询（最长 35 秒，每 1.5 秒微步滚轮并检测候选人卡片）
       let scraped = [];
       const pollStart = Date.now();
-      const maxPollMs = quotaTasks.length > 1 ? 30000 : 45000;
+      // 51job 已提交查询后若当前页无新卡片，尽快翻页；全量扫完仍会定时补抓。
+      const maxPollMs = platformKey === '51job' ? 12000 : quotaTasks.length > 1 ? 30000 : 45000;
       let pollAttempts = 0;
 
       while (Date.now() - pollStart < maxPollMs && !stopRequested()) {
@@ -1791,7 +1813,8 @@ async function autoNavigateAndSearch(page, platformKey, cfg, searchKeyword) {
             Array.from(projectExcludedUrls),
             { city: options.city, exp: options.exp, edu: options.edu, activeDays: options.activeDays }
           );
-          scraped = selectFreshCandidates(scraped, remainingForTask, projectExcludedUrls, seenCandidateKeys);
+          scraped = selectFreshCandidates(scraped, remainingForTask, projectExcludedUrls, seenCandidateKeys,
+            platformKey === '51job' ? deferred51jobKeys : undefined);
 
           if (scraped && scraped.length > 0) {
             if (scraped.length >= remainingForTask || pollAttempts >= 2) {
@@ -1840,7 +1863,7 @@ async function autoNavigateAndSearch(page, platformKey, cfg, searchKeyword) {
           message: `ℹ️ 【${cfg.name}】当前列表无新候选人，继续向下加载（本轮 ${pageAttempts}/${maxPageAttempts}）。`
         });
         if (pageAttempts >= maxPageAttempts) break;
-        if (!await advanceSearchResults(page)) {
+        if (!await advanceSearchResults(page, platformKey === '51job' ? { waitStepMs: 400, maxChecks: 6 } : {})) {
           exhaustedKeywords.add(currentKeyword);
           sendMsg('status', { platform: platformKey, message: `【${cfg.name}】「${currentKeyword}」列表及滚动位置均未变化，停止重复扫描。` });
           break;
@@ -1854,6 +1877,25 @@ async function autoNavigateAndSearch(page, platformKey, cfg, searchKeyword) {
       scraped = await enrichCandidatesWithFullDetail(page, browser, scraped, platformKey, cfg);
       if (scraped === null) return outcome(allPlatformSavedList, '详情页安全验证未完成');
       if (stopRequested()) return outcome(allPlatformSavedList, 'HR 已停止');
+
+      if (platformKey === '51job') {
+        for (const card of scraped) {
+          const key = card.cardKey || candidateCardKey(card);
+          if (card.detailComplete) {
+            if (pending51jobDetails.delete(key)) {
+              sendMsg('status', { platform: platformKey, detailCompleted: key,
+                message: `【前程无忧】${card.name} 的完整档案已补全，正在保存。` });
+            }
+          } else if (!pending51jobDetails.has(key)) {
+            pending51jobDetails.set(key, card.name);
+            sendMsg('status', { platform: platformKey,
+              pendingDetail: { key, name: card.name },
+              message: `【前程无忧】发现 ${card.name} 的列表卡片，详情地址或履历内容尚未核实；暂不计入目标，后续继续补抓。` });
+          }
+          if (!card.detailComplete) deferred51jobKeys.add(key);
+        }
+        scraped = scraped.filter(card => card.detailComplete);
+      }
 
       // 整理并存储
       const savedBeforePass = allPlatformSavedList.length;
@@ -1922,6 +1964,7 @@ ${cleanedRawText}
 
         const candData = {
           id: candID,
+          detailKey: item.cardKey || '',
           platform: platformKey,
           platformCandidateId,
           platformName: cfg.name,
@@ -1965,7 +2008,7 @@ ${cleanedRawText}
       if (allPlatformSavedList.length === savedBeforePass) {
         sendMsg('status', { platform: platformKey,
           message: `【${cfg.name}】本轮卡片均已收录，继续翻页寻找新候选人（${pageAttempts}/${maxPageAttempts}）。` });
-        if (pageAttempts >= maxPageAttempts || !await advanceSearchResults(page)) {
+        if (pageAttempts >= maxPageAttempts || !await advanceSearchResults(page, platformKey === '51job' ? { waitStepMs: 400, maxChecks: 6 } : {})) {
           exhaustedKeywords.add(currentKeyword);
           break;
         }
@@ -1998,6 +2041,7 @@ ${cleanedRawText}
         message: searchRetryMessage(allPlatformSavedList.length, targetCount, delayMs) });
       if (!await waitForSearchRetry(delayMs, stopRequested)) break;
       exhaustedKeywords.clear();
+      deferred51jobKeys.clear();
       activeKeyword = '';
       batchIdx = 0;
       passStartCount = allPlatformSavedList.length;
@@ -2306,6 +2350,6 @@ if (require.main === module) {
   });
 }
 
-module.exports = { allocateQuota, planChannelQuota, smoothScroll, keepPageActiveInBackground, setBrowserWindowState, preserveBrowserWindow, connectToExistingBrowser, launchPlatformBrowser, openDedicatedSearchPage, createBackgroundPage, capture51jobDetailUrl, extract51JobResumeId, isBrowserStartPage, browserLaunchArgs, closeUnusedStartPages, isPlatformPageUrl, ensurePlatformPage, submit51jobSearch, detectCaptcha, extractCandidatesAcrossFrames, selectFreshCandidates, advanceSearchResults, searchRetryDelay, waitForSearchRetry, main };
+module.exports = { allocateQuota, planChannelQuota, smoothScroll, keepPageActiveInBackground, setBrowserWindowState, preserveBrowserWindow, connectToExistingBrowser, launchPlatformBrowser, openDedicatedSearchPage, createBackgroundPage, capture51jobDetailUrl, extract51JobResumeId, isComplete51JobDetail, isBrowserStartPage, browserLaunchArgs, closeUnusedStartPages, isPlatformPageUrl, ensurePlatformPage, submit51jobSearch, detectCaptcha, extractCandidatesAcrossFrames, selectFreshCandidates, advanceSearchResults, searchRetryDelay, waitForSearchRetry, main };
 module.exports.claimResumeSnapshot = claimResumeSnapshot;
 module.exports.searchRetryMessage = searchRetryMessage;

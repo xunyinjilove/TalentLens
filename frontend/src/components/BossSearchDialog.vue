@@ -290,6 +290,13 @@
           </div>
         </div>
 
+        <details v-if="pending51jobDetails.length" class="pending-detail-list">
+          <summary>前程无忧待补全卡片 {{ pending51jobDetails.length }} 位（不计入 {{ candidateCount }} 份完整档案）</summary>
+          <div class="pending-detail-items">
+            <span v-for="item in pending51jobDetails" :key="item.key" class="pending-detail-item">{{ item.name }} · 待取得可回访详情与履历</span>
+          </div>
+        </details>
+
         <!-- 当前各招聘平台状态实时指示条 -->
         <div class="active-platforms-bar">
           <div
@@ -689,6 +696,7 @@ interface SearchLog {
 }
 
 const searchLogs = ref<SearchLog[]>([])
+const pending51jobDetails = ref<Array<{ key: string; name: string }>>([])
 
 const cityOptions = ['上海', '北京', '深圳', '广州', '杭州', '南京', '武汉', '成都', '苏州', '全国']
 
@@ -878,6 +886,7 @@ async function handleStartSearch() {
   doneTriggered = false
   captchaAlert.active = false
   searchLogs.value = []
+  pending51jobDetails.value = []
   currentStatusText.value = '正在启动矩阵式检索引擎...'
 
   if (WailsApp?.StartSearchWithPolicy) {
@@ -1019,6 +1028,10 @@ onMounted(async () => {
   const handleStatus = (evt: any) => {
     if (evt) {
       if (evt.platform) activePlatformCode.value = evt.platform
+      if (evt.pendingDetail?.key && !pending51jobDetails.value.some(item => item.key === evt.pendingDetail.key)) {
+        pending51jobDetails.value.push({ key: String(evt.pendingDetail.key), name: String(evt.pendingDetail.name || '候选人') })
+      }
+      if (evt.detailCompleted) pending51jobDetails.value = pending51jobDetails.value.filter(item => item.key !== evt.detailCompleted)
       if (evt.message) {
         if (lastStatusMsg === evt.message) return // 防重打印
         lastStatusMsg = evt.message
@@ -1034,6 +1047,7 @@ onMounted(async () => {
       const candKey = c.id || `${c.platform}_${c.name}_${c.fileName}`
       if (seenCandidateIds.has(candKey)) return // 排重，根绝翻倍
       seenCandidateIds.add(candKey)
+      if (c.detailKey) pending51jobDetails.value = pending51jobDetails.value.filter(item => item.key !== c.detailKey)
 
       if (c.platform) {
         platformCounts.value[c.platform] = (platformCounts.value[c.platform] || 0) + 1
@@ -1137,6 +1151,18 @@ onUnmounted(() => {
   flex-direction: column;
   gap: 14px;
 }
+
+.pending-detail-list {
+  border: 1px solid #d7dfeb;
+  border-radius: 8px;
+  padding: 10px 12px;
+  color: #475569;
+  font-size: 12px;
+}
+
+.pending-detail-list summary { cursor: pointer; font-weight: 600; }
+.pending-detail-items { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+.pending-detail-item { padding: 4px 8px; border-radius: 6px; background: #f1f5f9; }
 
 .job-context-card {
   background: #f0f7ff;

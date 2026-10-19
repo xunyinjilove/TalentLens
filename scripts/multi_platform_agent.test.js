@@ -17,6 +17,36 @@ test('51job candidate identity ignores changing link parameters', () => {
   assert.equal(agent.extract51JobResumeId('https://ehire.51job.com/Revision/talent/search?resumeId=123'), '');
 });
 
+test('51job quota accepts a verified detail page, not a list snapshot', () => {
+  const detail = '工作经历\n' + '负责接口测试、自动化回归和测试平台维护。'.repeat(18);
+  const candidate = { url: 'https://ehire.51job.com/Revision/talent/resume/detail?resumeId=123' };
+  assert.equal(agent.isComplete51JobDetail(candidate, detail), true);
+  assert.equal(agent.isComplete51JobDetail(candidate, '列表卡片：3年经验，本科，上海'), false);
+  assert.equal(agent.isComplete51JobDetail({ url: '' }, detail), false);
+  assert.equal(agent.isComplete51JobDetail({ url: 'https://ehire.51job.com/Revision/talent/search?resumeId=123' }, detail), false);
+});
+
+test('51job deferred cards do not hide later candidates on the same page', () => {
+  const cards = [
+    { name: '甲女士', infoText: '上海 本科 3年', workText: '测试工程师' },
+    { name: '乙女士', infoText: '上海 本科 4年', workText: '接口测试工程师' }
+  ];
+  const first = agent.selectFreshCandidates(cards, 1);
+  assert.equal(first[0].name, '甲女士');
+  const deferred = new Set([first[0].cardKey]);
+  const next = agent.selectFreshCandidates(cards, 1, new Set(), new Set(), deferred);
+  assert.equal(next[0].name, '乙女士');
+});
+
+test('51job cards with a known resume ID are skipped before detail loading', () => {
+  const cards = [
+    { name: '甲女士', url: 'https://ehire.51job.com/Revision/talent/resume/detail?resumeId=123&source=new' },
+    { name: '乙女士', url: 'https://ehire.51job.com/Revision/talent/resume/detail?resumeId=456' }
+  ];
+  const selected = agent.selectFreshCandidates(cards, 2, new Set(), new Set(['id:51job:123']));
+  assert.deepEqual(selected.map(card => card.name), ['乙女士']);
+});
+
 test('minimized search scrolls the list without mouse wheel events', async () => {
   const body = {};
   const scroller = { parentElement: body, scrollTop: 0, scrollHeight: 2000, clientHeight: 500 };

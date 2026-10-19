@@ -36,7 +36,7 @@ import (
 )
 
 // 版本信息
-const AppVersion = "1.8.21"
+const AppVersion = "1.8.22"
 const analysisFormatRetryVersion = "model-json-repair-v1"
 const GitHubRepo = "xunyinjilove/TalentLens"
 
@@ -3451,6 +3451,7 @@ func scoreCandidate(result *AnalysisResult, criteria []string) {
 		levels := make(map[string]int, len(result.CoreCriterionChecks))
 		evidencePresent := make(map[string]bool, len(result.CoreCriterionChecks))
 		verifiedCount := 0
+		coveredCount := 0
 		for _, check := range result.CoreCriterionChecks {
 			if check.Level >= 0 && check.Level <= 4 {
 				key := strings.TrimSpace(check.Criterion)
@@ -3461,13 +3462,19 @@ func scoreCandidate(result *AnalysisResult, criteria []string) {
 		total := 0
 		for _, criterion := range criteria {
 			key := strings.TrimSpace(criterion)
-			level := levels[key] // 未返回的评分卡项按 0 处理
+			level, covered := levels[key]
+			if covered {
+				coveredCount++
+			}
 			if level > 0 && evidencePresent[key] {
 				verifiedCount++
 			}
 			total += level * 25
 		}
-		if verifiedCount*2 >= len(criteria) {
+		if coveredCount < len(criteria) && result.SkillMatch > 0 && result.ExperienceMatch > 0 {
+			result.CoreMatch = clampFloat(result.SkillMatch*0.55+result.ExperienceMatch*0.45, 0, 100)
+			result.ScoreBasis = "provisional"
+		} else if verifiedCount*2 >= len(criteria) {
 			result.CoreMatch = math.Round(float64(total) / float64(len(criteria)))
 			result.ScoreBasis = "rubric"
 		} else {
@@ -3480,6 +3487,17 @@ func scoreCandidate(result *AnalysisResult, criteria []string) {
 	result.AbilityScore = int(math.Round(result.CoreMatch))
 	result.BonusScore = 0
 	refreshCandidateRecommendation(result)
+}
+
+// holisticMatchScore is a display-only summary of the model's three match
+// dimensions. The evidence-based ability score remains the hiring score.
+func holisticMatchScore(result *AnalysisResult) int {
+	if result == nil || result.SkillMatch <= 0 || result.ExperienceMatch <= 0 || result.EducationMatch <= 0 {
+		return 0
+	}
+	return int(math.Round(clampFloat(result.SkillMatch, 0, 100)*0.4 +
+		clampFloat(result.ExperienceMatch, 0, 100)*0.4 +
+		clampFloat(result.EducationMatch, 0, 100)*0.2))
 }
 
 func refreshCandidateRecommendation(result *AnalysisResult) {
