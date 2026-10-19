@@ -78,11 +78,23 @@ type JobConfig struct {
 	City                 string   `json:"city,omitempty"`
 	EmploymentType       string   `json:"employment_type,omitempty"`
 	SalaryRange          string   `json:"salary_range,omitempty"`
+	ExperienceText       string   `json:"experience_text,omitempty"`       // 原始自定义经验要求，输入什么就是什么
 	RedLines             []string `json:"red_lines,omitempty"`             // 一票否决红线 (Deal Breakers / 准入底线)
 	BonusPoints          []string `json:"bonus_points,omitempty"`          // 优先加分项 (Bonus Points / 优质优选)
 	EquivalentExperience []string `json:"equivalent_experience,omitempty"` // 旧项目兼容读取；不再参与配置或评估
 	TrainableSkills      []string `json:"trainable_skills,omitempty"`      // 旧项目兼容读取；不再参与配置或评估
 	CoreCriteria         []string `json:"core_criteria,omitempty"`         // 岗位能力评分卡；为空时使用 RequiredSkills
+}
+
+// GetExperienceRequirement 返回精准且原汁原味的经验要求文本
+func (j *JobConfig) GetExperienceRequirement() string {
+	if strings.TrimSpace(j.ExperienceText) != "" {
+		return strings.TrimSpace(j.ExperienceText)
+	}
+	if j.ExperienceYears <= 0 {
+		return "经验不限"
+	}
+	return fmt.Sprintf("%d 年以上", j.ExperienceYears)
 }
 
 // Project 招聘项目
@@ -3091,7 +3103,7 @@ func (a *App) buildAnalysisPrompt(resume *Resume, jobCfg *JobConfig) string {
 	userPrompt := fmt.Sprintf(
 		"## 招聘岗位信息\n"+
 			"- 岗位名称: %s\n"+
-			"- 最低工作年限: %d 年\n"+
+			"- 经验要求: %s\n"+
 			"- 最低学历: %s\n"+
 			"- 核心必备技能: %s\n"+
 			"%s"+
@@ -3232,7 +3244,7 @@ func (a *App) buildAnalysisPrompt(resume *Resume, jobCfg *JobConfig) string {
 			"   - 对每条红线返回一条 red_line_checks：criterion 必须逐字复制，status 仅能是 met/violated/unknown；evidence 必须是简历中可核对的原文短句。简历未写明时填 unknown，不能猜测满足或违反。\n"+
 			"   - 逐项对照「优先加分项」，仅在有具体事实依据时填入 bonus_checks 和 bonus_matches；AI 不确认加分，也不改变能力分。",
 		jobCfg.Title,
-		jobCfg.ExperienceYears,
+		jobCfg.GetExperienceRequirement(),
 		jobCfg.EducationLevel,
 		skills,
 		jobDescBlock,
@@ -4175,6 +4187,76 @@ func (a *App) ActivatePlatformBrowser(platform string) bool {
 		}
 	}
 	return false
+}
+
+// EnsurePlatformBrowser 确保指定平台（51job, boss, zhaopin, liepin）的专用独立浏览器已启动并处于前台
+func (a *App) EnsurePlatformBrowser(platform string) bool {
+	platform = strings.ToLower(strings.TrimSpace(platform))
+	portMap := map[string]int{
+		"boss":    9501,
+		"zhaopin": 9502,
+		"51job":   9503,
+		"liepin":  9504,
+	}
+	urlMap := map[string]string{
+		"boss":    "https://www.zhipin.com/web/geek/job",
+		"zhaopin": "https://rd6.zhaopin.com",
+		"51job":   "https://ehire.51job.com",
+		"liepin":  "https://lpt.liepin.com",
+	}
+	profileMap := map[string]string{
+		"boss":    "boss_isolated_profile",
+		"zhaopin": "zhaopin_isolated_profile",
+		"51job":   "51job_isolated_profile",
+		"liepin":  "liepin_isolated_profile",
+	}
+
+	port, ok := portMap[platform]
+	if !ok {
+		return false
+	}
+	targetURL := urlMap[platform]
+	profileDirName := profileMap[platform]
+
+	// 1. 检查端口是否已经在运行
+	client := &http.Client{Timeout: 1 * time.Second}
+	resp, err := client.Get(fmt.Sprintf("http://127.0.0.1:%d/json/version", port))
+	if err == nil {
+		_ = resp.Body.Close()
+		a.ActivatePlatformBrowser(platform)
+		return true
+	}
+
+	// 2. 未在运行，使用专用 profile 启动独立 Edge/Chrome
+	profileDir := filepath.Join(a.getDataDir(), "candidates_multi", profileDirName)
+	browserPath := a.findBrowserExecutable()
+	if browserPath == "" {
+		return false
+	}
+	_ = os.MkdirAll(profileDir, 0755)
+	cmd := exec.Command(browserPath,
+		fmt.Sprintf("--user-data-dir=%s", profileDir),
+		fmt.Sprintf("--remote-debugging-port=%d", port),
+		"--no-first-run",
+		"--no-default-browser-check",
+		targetURL,
+	)
+	hideConsoleWindow(cmd)
+	if err := cmd.Start(); err != nil {
+		log.Printf("[EnsurePlatformBrowser] 启动 %s 专用浏览器失败: %v", platform, err)
+		return false
+	}
+
+	// 3. 轮询等待端口就绪（最多等待 3 秒）
+	for i := 0; i < 15; i++ {
+		time.Sleep(200 * time.Millisecond)
+		checkResp, checkErr := client.Get(fmt.Sprintf("http://127.0.0.1:%d/json/version", port))
+		if checkErr == nil {
+			_ = checkResp.Body.Close()
+			return true
+		}
+	}
+	return true
 }
 
 // CheckForUpdate 检查 GitHub 是否有新版本

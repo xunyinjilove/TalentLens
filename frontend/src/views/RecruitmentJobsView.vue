@@ -308,19 +308,21 @@
           <el-form-item label="经验要求">
             <el-select
               v-model="jobForm.experience_years"
-              placeholder="选择或输入经验要求"
+              placeholder="输入或选择经验要求（如：3-5年、应届生）"
               allow-create
               filterable
               default-first-option
+              clearable
             >
-              <el-option label="经验不限" :value="0" />
-              <el-option label="应届毕业生" :value="0" />
-              <el-option label="1 年以上" :value="1" />
-              <el-option label="2 年以上" :value="2" />
-              <el-option label="3-5 年" :value="3" />
-              <el-option label="5 年以上" :value="5" />
-              <el-option label="8 年以上" :value="8" />
-              <el-option label="10 年以上" :value="10" />
+              <el-option label="经验不限" value="经验不限" />
+              <el-option label="应届毕业生" value="应届毕业生" />
+              <el-option label="1 年以上" value="1 年以上" />
+              <el-option label="1-3 年" value="1-3 年" />
+              <el-option label="3-5 年" value="3-5 年" />
+              <el-option label="5-8 年" value="5-8 年" />
+              <el-option label="5 年以上" value="5 年以上" />
+              <el-option label="8-10 年" value="8-10 年" />
+              <el-option label="10 年以上" value="10 年以上" />
             </el-select>
           </el-form-item>
           <el-form-item label="最低学历">
@@ -500,10 +502,18 @@ const jobForm = reactive({
   employment_type: '全职',
   salary_range: '25-40K',
   status: 'publishing',
-  experience_years: 3 as number | string,
+  experience_years: '3-5 年',
   education_level: '本科',
   job_description: ''
 })
+
+function formatExpRequirement(jobConfig: any): string {
+  if (jobConfig?.experience_text) return String(jobConfig.experience_text)
+  if (jobConfig?.experience_years !== undefined && jobConfig?.experience_years !== null) {
+    return jobConfig.experience_years === 0 ? '经验不限' : `${jobConfig.experience_years} 年以上`
+  }
+  return '3-5 年'
+}
 
 function parseExperienceYears(val: any): number {
   if (typeof val === 'number') return isNaN(val) ? 0 : Math.max(0, val)
@@ -641,7 +651,7 @@ function openCreateModal() {
   jobForm.employment_type = '全职'
   jobForm.salary_range = '25-40K'
   jobForm.status = 'publishing'
-  jobForm.experience_years = 3
+  jobForm.experience_years = '3-5 年'
   jobForm.education_level = '本科'
   jobForm.job_description = ''
   skillsInput.value = 'Vue3, TypeScript, 性能优化'
@@ -662,7 +672,7 @@ function openEditModal(project: Project) {
   jobForm.employment_type = project.job_config?.employment_type || '全职'
   jobForm.salary_range = project.job_config?.salary_range || '25-40K'
   jobForm.status = project.status || 'publishing'
-  jobForm.experience_years = project.job_config?.experience_years ?? 3
+  jobForm.experience_years = formatExpRequirement(project.job_config)
   jobForm.education_level = project.job_config?.education_level || '本科'
   jobForm.job_description = project.job_config?.job_description || ''
   skillsInput.value = (project.job_config?.core_criteria || project.job_config?.required_skills || []).join(', ')
@@ -713,13 +723,15 @@ async function saveJob() {
     const skills = splitTags(skillsInput.value)
     const redLines = splitTags(redLinesInput.value)
     const bonusPoints = splitTags(bonusPointsInput.value)
-    const expYears = parseExperienceYears(jobForm.experience_years)
+    const expText = String(jobForm.experience_years ?? '').trim()
+    const expYears = parseExperienceYears(expText)
 
     const jobConfig = {
       title: jobForm.title.trim(),
       requirements: [],
       required_skills: skills,
       experience_years: expYears,
+      experience_text: expText,
       education_level: jobForm.education_level,
       job_description: jobForm.job_description.trim(),
       city: jobForm.city,
