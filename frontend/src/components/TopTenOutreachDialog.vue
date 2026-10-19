@@ -12,21 +12,41 @@
       </div>
       <div v-if="batch.authorization" class="budget-summary" role="status" aria-live="polite">
         <strong>{{ batch.authorization.jobTitle }}</strong>
-        <span>单人上限 {{ batch.authorization.perPersonLimit }} 点</span>
-        <span>本批预算占用 {{ batch.authorization.reservedPoints }} / {{ batch.authorization.totalLimit }} 点</span>
+        <span>默认消耗 Hi 点发起沟通</span>
+        <span>已发送/处理 {{ batch.authorization.reservedPoints }} 人</span>
         <p v-if="batch.authorization.message">{{ batch.authorization.message }}</p>
       </div>
       <div v-if="batch.status === 'draft'" class="outreach-toolbar">
-        <el-button
-          size="small"
-          type="primary"
-          plain
-          :loading="regeneratingAll"
-          @click="regenerateAll"
-        >
-          ✨ 全员 AI 深度定制招呼语
-        </el-button>
-        <span class="wb-muted" style="font-size:12px;margin-left:8px">自动结合已接入大模型分析每位候选人的真实代表性项目与工作经历</span>
+        <div class="toolbar-left">
+          <el-checkbox
+            :model-value="allSelected"
+            :indeterminate="isIndeterminate"
+            @change="handleSelectAll"
+          >
+            一键全选 / 纳入本批
+          </el-checkbox>
+          <span class="selected-badge">已选 {{ selectedCount }} / {{ batch.items.length }} 人</span>
+        </div>
+        <div class="toolbar-right">
+          <el-button
+            size="small"
+            type="primary"
+            plain
+            :loading="regeneratingAll"
+            @click="regenerateAll"
+          >
+            ✨ 全员 AI 定制招呼语
+          </el-button>
+          <el-button
+            size="small"
+            type="primary"
+            :disabled="selectedCount === 0"
+            :loading="confirming || sendingBatch"
+            @click="openBudget"
+          >
+            🚀 开始打招呼
+          </el-button>
+        </div>
       </div>
 
       <article v-for="item in batch.items" :key="item.id" class="outreach-row">
@@ -72,30 +92,39 @@
           </div>
         </template>
       </article>
-      <div v-if="batch.status === 'draft'" class="wb-actions" style="justify-content:flex-end;margin-top:18px">
-        <el-button type="primary" :loading="confirming" @click="openBudget">确认名单，设置职位与预算</el-button>
+      <div v-if="batch.status === 'draft'" class="wb-actions" style="justify-content:space-between;align-items:center;margin-top:18px">
+        <el-checkbox
+          :model-value="allSelected"
+          :indeterminate="isIndeterminate"
+          @change="handleSelectAll"
+        >
+          全选本批候选人
+        </el-checkbox>
+        <el-button type="primary" :disabled="selectedCount === 0" :loading="confirming" @click="openBudget">
+          确认名单并开始打招呼 (已选 {{ selectedCount }} 人)
+        </el-button>
       </div>
     </div>
-    <el-dialog v-model="budgetOpen" title="确认本批职位与点数预算" width="min(640px, 92vw)" append-to-body :close-on-click-modal="false" :close-on-press-escape="!confirming" :show-close="!confirming">
-      <p class="budget-hint">招聘岗位：{{ batch?.projectTitle }}。本批共用一个沟通职位；预选结果仍需你确认。</p>
+    <el-dialog v-model="budgetOpen" title="确认沟通职位并开始打招呼" width="min(560px, 92vw)" append-to-body :close-on-click-modal="false" :close-on-press-escape="!confirming" :show-close="!confirming">
+      <p class="budget-hint">招聘岗位：{{ batch?.projectTitle }}。请确认本批沟通职位，系统将默认消耗 51job 平台 Hi 点数发起沟通（不设点数上限）。</p>
       <el-form label-position="top" @submit.prevent>
-        <el-form-item label="搜索 51job 沟通职位">
-          <div class="budget-search"><el-input v-model="jobKeyword" placeholder="职位名称" @keyup.enter="loadJobs" /><el-button :loading="jobsLoading" @click="loadJobs">搜索</el-button></div>
-        </el-form-item>
         <el-alert v-if="jobsError" :title="jobsError" type="warning" :closable="false" style="margin-bottom:12px" />
-        <el-form-item label="本批沟通职位（来自当前企业账号）">
-          <el-select v-model="selectedJobID" placeholder="请选择真实平台职位" style="width:100%" :loading="jobsLoading">
+        <el-form-item label="沟通职位（来自当前企业账号）">
+          <el-select v-model="selectedJobID" placeholder="请选择沟通职位" style="width:100%" :loading="jobsLoading">
             <el-option v-for="job in jobOptions" :key="job.id" :value="job.id" :label="`${job.title} · ${job.workArea || job.company || ''} · ID ${job.id}`" />
           </el-select>
-          <span v-if="jobsHasMore" class="budget-hint">平台还有更多职位，请输入具体名称搜索。</span>
         </el-form-item>
-        <div class="budget-fields">
-          <el-form-item label="每人点数上限" for="outreach-person-budget"><input id="outreach-person-budget" v-model.number="perPersonLimit" class="budget-number" type="number" min="1" max="1000000" step="1" placeholder="填写上限" required /></el-form-item>
-          <el-form-item label="本批总点数上限" for="outreach-total-budget"><input id="outreach-total-budget" v-model.number="totalLimit" class="budget-number" type="number" :min="Math.max(1,batch?.authorization?.reservedPoints || 0)" max="10000000" step="1" placeholder="填写总额" required /></el-form-item>
+        <div class="hi-budget-tip">
+          <el-icon><InfoFilled /></el-icon>
+          <span>已取消点数上限限制，将默认消耗平台 Hi 点数逐人发送已定制的招呼文案。</span>
         </div>
       </el-form>
-      <el-alert title="确认后将自动逐人发起平台默认 Hi聊，再发送已预览的定制文案。回执不明时停止并保留预算占用；占用不代表实际扣费。" type="warning" :closable="false" />
-      <template #footer><el-button :disabled="confirming" @click="budgetOpen=false">暂不发送</el-button><el-button type="primary" :loading="confirming" :disabled="!selectedJobID || !perPersonLimit || !totalLimit || jobsLoading" @click="confirm">确认职位与预算，开始发送</el-button></template>
+      <template #footer>
+        <el-button :disabled="confirming" @click="budgetOpen=false">取消</el-button>
+        <el-button type="primary" :loading="confirming" :disabled="!selectedJobID || jobsLoading" @click="confirm">
+          立即开始打招呼
+        </el-button>
+      </template>
     </el-dialog>
     <el-dialog v-model="receiptOpen" title="登记平台发送结果" width="460px" append-to-body>
       <el-select v-model="receiptStatus" style="width:100%;margin-bottom:12px">
@@ -115,6 +144,7 @@
 
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
+import { InfoFilled } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 
 interface Item { id:string; rank:number; candidateName:string; platform:string; platformCandidateId:string; profileUrl:string; redLineStatus:string; abilityScore:number; evidence:string; message:string; status:string; result:string }
@@ -133,10 +163,7 @@ const jobsLoading=ref(false)
 const jobsError=ref('')
 const jobOptions=ref<JobOption[]>([])
 const jobsHasMore=ref(false)
-const jobKeyword=ref('')
 const selectedJobID=ref('')
-const perPersonLimit=ref<number>()
-const totalLimit=ref<number>()
 const regenerating=ref<Record<string, boolean>>({})
 const regeneratingAll=ref(false)
 const error=ref('')
@@ -148,6 +175,32 @@ const receiptItem=ref<Item|null>(null)
 const receiptStatus=ref('sent')
 const receiptText=ref('')
 const receiptActor=ref('HR')
+
+const selectedCount = computed(() => {
+  if (!batch.value) return 0
+  return batch.value.items.filter(item => selected.value[item.id]).length
+})
+const allSelected = computed(() => {
+  if (!batch.value || !batch.value.items.length) return false
+  return batch.value.items.every(item => selected.value[item.id])
+})
+const isIndeterminate = computed(() => {
+  if (!batch.value || !batch.value.items.length) return false
+  const count = selectedCount.value
+  return count > 0 && count < batch.value.items.length
+})
+
+function handleSelectAll(val: any) {
+  if (!batch.value) return
+  const isChecked = Boolean(val)
+  for (const item of batch.value.items) {
+    selected.value[item.id] = isChecked
+    if (item.redLineStatus === 'pending') {
+      pendingConfirmed.value[item.id] = isChecked
+    }
+  }
+}
+
 function statusLabel(status:string){return ({queued:'待发送',awaiting_confirmation:'已核点／待发送',sending:'发送中或中断待核查',partial:'部分完成／待核查',needs_manual:'需人工处理',excluded:'未纳入',sent:'已核实发送',failed:'失败',uncertain:'待核查'} as Record<string,string>)[status]||status}
 async function preview(forceNew=false){
   if(!props.projectId)return
@@ -220,9 +273,6 @@ async function openBudget(){
   budgetOpen.value=true
   const auth=batch.value.authorization
   selectedJobID.value=auth?.jobId||''
-  perPersonLimit.value=auth?.perPersonLimit
-  totalLimit.value=auth?.totalLimit
-  jobKeyword.value=''
   await loadJobs()
 }
 async function loadJobs(){
@@ -230,16 +280,16 @@ async function loadJobs(){
   jobsLoading.value=true; jobsError.value=''
   try{
     const api:any=await import('../../wailsjs/go/main/App')
-    const result=await api.ListOutreachCommunicationJobs(batch.value.id,jobKeyword.value.trim())
+    const result=await api.ListOutreachCommunicationJobs(batch.value.id,'')
     if(result.status!=='jobs')throw new Error(result.message||'无法读取平台职位')
     jobOptions.value=result.jobs||[]; jobsHasMore.value=!!result.hasMore
     if(!jobOptions.value.some(job=>job.id===selectedJobID.value))selectedJobID.value=result.suggestedJobId||''
-    if(!jobOptions.value.length)jobsError.value='未找到职位，请调整搜索词。'
+    if(!jobOptions.value.length)jobsError.value='当前账号未找到在招职位'
   }catch(err:any){jobsError.value=err?.message||String(err);jobOptions.value=[];selectedJobID.value=''}
   finally{jobsLoading.value=false}
 }
 async function confirm(){
-  if(!batch.value || !perPersonLimit.value || !totalLimit.value)return
+  if(!batch.value || !selectedJobID.value)return
   const job=jobOptions.value.find(job=>job.id===selectedJobID.value)
   if(!job)return
   confirming.value=true
@@ -248,9 +298,12 @@ async function confirm(){
     if(batch.value.status==='draft'){
       batch.value=await api.ConfirmOutreachBatch(batch.value.id,batch.value.items.map(item=>({itemId:item.id,message:messages.value[item.id],include:!!selected.value[item.id],confirmPending:!!pendingConfirmed.value[item.id]})))
     }
-    batch.value=await api.AuthorizeOutreachBudget(batch.value!.id,job.id,job.title,perPersonLimit.value,totalLimit.value)
+    // 默认消耗 Hi 点数，不设上限限制
+    const pLimit = 100
+    const tLimit = 100000
+    batch.value=await api.AuthorizeOutreachBudget(batch.value!.id,job.id,job.title,pLimit,tLimit)
     budgetOpen.value=false
-    ElMessage.info('本批职位与预算已确认，开始逐人实时核点发送')
+    ElMessage.info('沟通职位已确认，开始默认消耗 Hi 点数逐人发送打招呼')
     await runQueuedOutreach()
   }catch(err:any){ElMessage.error(err?.message||String(err))}finally{confirming.value=false}
 }
@@ -329,7 +382,10 @@ watch(()=>props.modelValue,value=>{if(value)void preview()})
 .outreach-head strong{margin-right:4px}
 .outreach-row p{font-size:12px;margin:9px 0}
 .outreach-message{padding:10px;border-radius:8px;background:var(--wb-surface-soft);color:var(--wb-text);font-size:13px!important}
-.outreach-toolbar{display:flex;align-items:center;margin-bottom:14px;padding:8px 12px;background:var(--wb-surface-soft);border-radius:8px}
+.outreach-toolbar{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:14px;padding:10px 14px;background:var(--wb-surface-soft);border-radius:8px;flex-wrap:wrap}
+.toolbar-left{display:flex;align-items:center;gap:10px}
+.toolbar-right{display:flex;align-items:center;gap:10px;margin-left:auto}
+.selected-badge{font-size:12px;color:var(--wb-text-secondary);background:rgba(0,0,0,0.05);padding:2px 8px;border-radius:12px}
 .outreach-run-state{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:12px;padding:10px 12px;border-radius:8px;background:var(--wb-brand-soft);color:var(--wb-text);font-size:13px;font-weight:600}
 .head-actions{margin-left:auto}
 .evidence-line{display:flex;align-items:center;gap:6px;margin:6px 0!important}
@@ -337,9 +393,5 @@ watch(()=>props.modelValue,value=>{if(value)void preview()})
 .budget-summary{display:flex;flex-wrap:wrap;gap:8px 20px;padding:16px;margin-bottom:16px;border:1px solid var(--wb-border);border-radius:12px;background:var(--wb-surface-soft);font-size:13px;color:var(--wb-text)}
 .budget-summary p{flex-basis:100%;margin:0}
 .budget-hint{font-size:13px;line-height:1.6;color:var(--wb-text);margin:0 0 16px}
-.budget-search{display:flex;gap:8px;width:100%}
-.budget-fields{display:flex;gap:24px;flex-wrap:wrap}
-.budget-fields .el-form-item{flex:1;min-width:180px}
-.budget-number{box-sizing:border-box;width:100%;height:40px;border:1px solid var(--el-border-color);border-radius:6px;padding:8px 12px;color:var(--el-text-color-primary);background:var(--el-fill-color-blank);font:inherit}
-.budget-number:focus{outline:2px solid var(--el-color-primary);outline-offset:2px}
+.hi-budget-tip{display:flex;align-items:center;gap:8px;margin-top:14px;padding:10px 14px;background:rgba(37, 99, 235, 0.08);border:1px solid rgba(37, 99, 235, 0.15);border-radius:8px;font-size:13px;color:#1d4ed8}
 </style>

@@ -285,7 +285,7 @@
           </el-form-item>
         </div>
 
-        <div class="form-row three-cols">
+        <div class="form-row two-cols">
           <el-form-item label="薪资范围">
             <el-select v-model="jobForm.salary_range" placeholder="薪资" allow-create filterable>
               <el-option label="10-18K" value="10-18K" />
@@ -294,9 +294,6 @@
               <el-option label="40-60K" value="40-60K" />
               <el-option label="面议" value="面议" />
             </el-select>
-          </el-form-item>
-          <el-form-item label="招聘负责人">
-            <el-input v-model="jobForm.recruiter" placeholder="HR 姓名" />
           </el-form-item>
           <el-form-item label="当前状态">
             <el-select v-model="jobForm.status">
@@ -309,13 +306,21 @@
 
         <div class="form-row two-cols">
           <el-form-item label="经验要求">
-            <el-select v-model="jobForm.experience_years">
+            <el-select
+              v-model="jobForm.experience_years"
+              placeholder="选择或输入经验要求"
+              allow-create
+              filterable
+              default-first-option
+            >
               <el-option label="经验不限" :value="0" />
+              <el-option label="应届毕业生" :value="0" />
               <el-option label="1 年以上" :value="1" />
               <el-option label="2 年以上" :value="2" />
               <el-option label="3-5 年" :value="3" />
               <el-option label="5 年以上" :value="5" />
               <el-option label="8 年以上" :value="8" />
+              <el-option label="10 年以上" :value="10" />
             </el-select>
           </el-form-item>
           <el-form-item label="最低学历">
@@ -490,15 +495,22 @@ const jobForm = reactive({
   title: '',
   department: '研发中心',
   headcount: 1,
-  recruiter: '林',
+  recruiter: '',
   city: '上海',
   employment_type: '全职',
   salary_range: '25-40K',
   status: 'publishing',
-  experience_years: 3,
+  experience_years: 3 as number | string,
   education_level: '本科',
   job_description: ''
 })
+
+function parseExperienceYears(val: any): number {
+  if (typeof val === 'number') return isNaN(val) ? 0 : Math.max(0, val)
+  if (!val) return 0
+  const match = String(val).match(/\d+/)
+  return match ? parseInt(match[0], 10) : 0
+}
 
 const skillsInput = ref('')
 const redLinesInput = ref('')
@@ -624,7 +636,7 @@ function openCreateModal() {
   jobForm.title = ''
   jobForm.department = '研发中心'
   jobForm.headcount = 1
-  jobForm.recruiter = '林'
+  jobForm.recruiter = ''
   jobForm.city = '上海'
   jobForm.employment_type = '全职'
   jobForm.salary_range = '25-40K'
@@ -645,7 +657,7 @@ function openEditModal(project: Project) {
   jobForm.title = project.job_config?.title || project.name
   jobForm.department = project.department || ''
   jobForm.headcount = project.headcount || 1
-  jobForm.recruiter = project.recruiter || '林'
+  jobForm.recruiter = project.recruiter || ''
   jobForm.city = project.job_config?.city || '上海'
   jobForm.employment_type = project.job_config?.employment_type || '全职'
   jobForm.salary_range = project.job_config?.salary_range || '25-40K'
@@ -672,7 +684,7 @@ async function generateJobDescription() {
       title: jobForm.title.trim(),
       department: jobForm.department.trim(),
       city: jobForm.city,
-      experienceYears: jobForm.experience_years,
+      experienceYears: parseExperienceYears(jobForm.experience_years),
       educationLevel: jobForm.education_level,
       skills: splitTags(skillsInput.value),
       currentText: jobForm.job_description.trim()
@@ -701,12 +713,13 @@ async function saveJob() {
     const skills = splitTags(skillsInput.value)
     const redLines = splitTags(redLinesInput.value)
     const bonusPoints = splitTags(bonusPointsInput.value)
+    const expYears = parseExperienceYears(jobForm.experience_years)
 
     const jobConfig = {
       title: jobForm.title.trim(),
       requirements: [],
       required_skills: skills,
-      experience_years: jobForm.experience_years,
+      experience_years: expYears,
       education_level: jobForm.education_level,
       job_description: jobForm.job_description.trim(),
       city: jobForm.city,
@@ -725,7 +738,7 @@ async function saveJob() {
           name: jobForm.title.trim(),
           department: jobForm.department.trim(),
           headcount: jobForm.headcount,
-          recruiter: jobForm.recruiter.trim(),
+          recruiter: jobForm.recruiter?.trim() || '',
           status: jobForm.status,
           job_config: jobConfig,
           updated_at: new Date().toISOString()
@@ -738,7 +751,7 @@ async function saveJob() {
         jobForm.title.trim(),
         jobForm.department.trim(),
         jobForm.headcount,
-        jobForm.recruiter.trim(),
+        jobForm.recruiter?.trim() || '',
         '',
         jobConfig
       )

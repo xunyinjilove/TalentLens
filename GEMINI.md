@@ -23,3 +23,13 @@
 2. **为什么这样做（解决什么痛点）**：不这么写/不用这个技术会发生什么问题？选它的核心原因；
 3. **底层工作机制与源码逻辑**：从操作系统/内存/事件流/网络协议等最底层角度说明它的运转过程；
 4. **举一反三与避坑指南**：类比同类场景，说明工业级生产环境下的核心坑点与最佳实践。
+
+---
+
+### 3. 自动构建与发布交付规范 (Auto Packaging, Commits & Release)
+用户明确要求：**每次代码改好后，必须自动执行打包，并将修改上传到 Commits 与 GitHub Releases**。
+流程规范：
+1. **版本自增与配置同步**：检查并递增小版本号（如 v1.8.x），同步 `wails.json`、打包脚本 `scripts/package-amd64.ps1` 及 `.github/release-notes/` 对应版本的发行说明。
+2. **打包与校验**：执行前端构建 `npm run build`，执行 `wails build` 生成可执行文件并打包绿色 zip。
+3. **提交与推送发布**：执行 `git add`、`git commit` 规范提交修改，创建对应版本的 Git Tag（如 `v1.8.x`），推送到远程仓库（`git push origin main` 与 `git push origin <tag>`）自动触发 GitHub Actions 发行正式 Release。
+
