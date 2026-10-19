@@ -18,9 +18,12 @@ func TestChatWithAIAssistantPaymentRequiredDoesNotRetryOrInventAnswer(t *testing
 	}))
 	defer server.Close()
 
-	app := &App{config: Config{AI: AIConfig{
-		APIKey: "test-key", BaseURL: server.URL, Model: "test-model", MaxRetries: 3,
-	}}}
+	app := &App{
+		dataDirOverride: t.TempDir(),
+		config: Config{AI: AIConfig{
+			APIKey: "test-key", BaseURL: server.URL, Model: "test-model", MaxRetries: 3,
+		}},
+	}
 	reply, err := app.ChatWithAIAssistant([]ChatMessage{{Role: "user", Content: "你好"}}, "", nil)
 	if err == nil || !strings.Contains(err.Error(), "余额不足") {
 		t.Fatalf("期望清晰的余额不足错误，实际回答=%q 错误=%v", reply, err)
@@ -136,6 +139,7 @@ func TestGLMFlashRetriesThinkingOnlyAnswerWithLargerBudget(t *testing.T) {
 
 func TestChatWithAIAssistantOfflineKnowledge(t *testing.T) {
 	app := &App{
+		dataDirOverride: t.TempDir(),
 		config: Config{
 			AI: AIConfig{
 				APIKey: "", // 未配置 Key
@@ -223,6 +227,7 @@ func TestChatWithAIAssistantOnlineMock(t *testing.T) {
 	defer server.Close()
 
 	app := &App{
+		dataDirOverride: t.TempDir(),
 		config: Config{
 			AI: AIConfig{
 				APIKey:     "test-key",
@@ -271,6 +276,7 @@ func TestChatWithAIAssistantWithCustomConfigOverridesEmptyBackend(t *testing.T) 
 
 	// 后端初始无 Key
 	app := &App{
+		dataDirOverride: t.TempDir(),
 		config: Config{
 			AI: AIConfig{
 				APIKey: "",

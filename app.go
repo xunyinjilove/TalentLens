@@ -36,7 +36,7 @@ import (
 )
 
 // 版本信息
-const AppVersion = "1.8.23"
+const AppVersion = "1.8.26"
 const analysisFormatRetryVersion = "model-json-repair-v1"
 const GitHubRepo = "xunyinjilove/TalentLens"
 
@@ -655,6 +655,29 @@ func (a *App) loadConfig() {
 		return
 	}
 	json.Unmarshal(data, &a.config)
+
+	// 自动防护与纠正：清理测试临时端口污染或残留的虚拟 Key
+	baseURL := strings.TrimSpace(a.config.AI.BaseURL)
+	needSave := false
+	if strings.Contains(baseURL, "127.0.0.1:") || strings.Contains(baseURL, "localhost:") {
+		provider := strings.ToLower(strings.TrimSpace(a.config.AI.Provider))
+		if provider == "deepseek" || provider == "" {
+			log.Printf("[loadConfig] 自动纠正被污染的本地 BaseURL (%s) 为 DeepSeek 官方服务地址", baseURL)
+			a.config.AI.BaseURL = "https://api.deepseek.com"
+			needSave = true
+		} else if provider == "openai" {
+			a.config.AI.BaseURL = "https://api.openai.com/v1"
+			needSave = true
+		}
+	}
+	if a.config.AI.APIKey == "custom-client-key-123" {
+		log.Printf("[loadConfig] 清理测试残留的虚拟 Key")
+		a.config.AI.APIKey = ""
+		needSave = true
+	}
+	if needSave {
+		_ = a.SaveConfig(&a.config)
+	}
 }
 
 func (a *App) processFile(filePath string) {
@@ -4189,7 +4212,7 @@ func (a *App) ActivatePlatformBrowser(platform string) bool {
 	return false
 }
 
-// EnsurePlatformBrowser 确保指定平台（51job, boss, zhaopin, liepin）的专用独立浏览器已启动并处于前台
+// EnsurePlatformBrowser 确保指定平台（51job, boss, zhaopin, liepin）的专用独立浏览器已启动；若新启动则自动最小化
 func (a *App) EnsurePlatformBrowser(platform string) bool {
 	platform = strings.ToLower(strings.TrimSpace(platform))
 	portMap := map[string]int{
@@ -4223,11 +4246,11 @@ func (a *App) EnsurePlatformBrowser(platform string) bool {
 	resp, err := client.Get(fmt.Sprintf("http://127.0.0.1:%d/json/version", port))
 	if err == nil {
 		_ = resp.Body.Close()
-		a.ActivatePlatformBrowser(platform)
+		// 已经在运行中，直接复用，不重新激活或弹窗打扰用户
 		return true
 	}
 
-	// 2. 未在运行，使用专用 profile 启动独立 Edge/Chrome
+	// 2. 未在运行，使用专用 profile 启动独立 Edge/Chrome，加入 --start-minimized
 	profileDir := filepath.Join(a.getDataDir(), "candidates_multi", profileDirName)
 	browserPath := a.findBrowserExecutable()
 	if browserPath == "" {
@@ -4239,6 +4262,7 @@ func (a *App) EnsurePlatformBrowser(platform string) bool {
 		fmt.Sprintf("--remote-debugging-port=%d", port),
 		"--no-first-run",
 		"--no-default-browser-check",
+		"--start-minimized",
 		targetURL,
 	)
 	hideConsoleWindow(cmd)
@@ -4247,16 +4271,52 @@ func (a *App) EnsurePlatformBrowser(platform string) bool {
 		return false
 	}
 
-	// 3. 轮询等待端口就绪（最多等待 3 秒）
+	// 3. 轮询等待端口就绪（最多等待 3 秒），就绪后立刻自动执行窗口最小化
 	for i := 0; i < 15; i++ {
 		time.Sleep(200 * time.Millisecond)
 		checkResp, checkErr := client.Get(fmt.Sprintf("http://127.0.0.1:%d/json/version", port))
 		if checkErr == nil {
 			_ = checkResp.Body.Close()
+			// 打开后自动再最小化
+			a.MinimizePlatformBrowser(platform)
 			return true
 		}
 	}
 	return true
+}
+
+// MinimizePlatformBrowser 将指定平台（51job, boss, zhaopin, liepin）的专用独立浏览器窗口最小化
+func (a *App) MinimizePlatformBrowser(platform string) bool {
+	platform = strings.ToLower(strings.TrimSpace(platform))
+	portMap := map[string]int{
+		"boss":    9501,
+		"zhaopin": 9502,
+		"51job":   9503,
+		"liepin":  9504,
+	}
+	port, ok := portMap[platform]
+	if !ok {
+		return false
+	}
+
+	scriptCandidates := []string{
+		filepath.Join("scripts", "show_candidate_window.js"),
+		filepath.Join(filepath.Dir(os.Args[0]), "scripts", "show_candidate_window.js"),
+		filepath.Join(filepath.Dir(os.Args[0]), "..", "..", "scripts", "show_candidate_window.js"),
+	}
+	for _, scriptPath := range scriptCandidates {
+		if _, statErr := os.Stat(scriptPath); statErr != nil {
+			continue
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		cmd := exec.CommandContext(ctx, "node", scriptPath, "--port", fmt.Sprintf("%d", port), "--state", "minimized")
+		hideConsoleWindow(cmd)
+		_ = cmd.Run()
+		cancel()
+		log.Printf("[MinimizePlatformBrowser] 已请求最小化 %s 专用浏览器 (端口 %d)", platform, port)
+		return true
+	}
+	return false
 }
 
 // CheckForUpdate 检查 GitHub 是否有新版本
