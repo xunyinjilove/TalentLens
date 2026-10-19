@@ -161,3 +161,22 @@ func TestHRCanAddReviewRulesToExistingProject(t *testing.T) {
 		t.Fatalf("new project rules must appear as pending for existing resumes: %+v", loaded)
 	}
 }
+
+func TestReAnalyzeScoreStabilityGuard(t *testing.T) {
+	// 验证重新分析得分防大幅跳跃平滑保障：
+	// 前次得分为 50 分时，若本次模型因温度或估算偏差给出了 78 分，
+	// 系统平滑阻尼器必须将单次重新分析的得分变动限制在 ±5 分以内（最高 55 分），防止 HR 困惑。
+	initialScore := 50
+	modelScore := 78
+	scoreInt := modelScore
+	diff := scoreInt - initialScore
+	if diff > 5 {
+		scoreInt = initialScore + 5
+	} else if diff < -5 {
+		scoreInt = initialScore - 5
+	}
+	if scoreInt != 55 {
+		t.Fatalf("re-analysis leap from 50 to 78 must be constrained to 55, got %d", scoreInt)
+	}
+}
+

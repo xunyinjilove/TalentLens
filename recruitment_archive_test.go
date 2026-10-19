@@ -61,6 +61,10 @@ func TestArchiveTalentCandidatesKeepsProfileAndTimeline(t *testing.T) {
 	if err != nil || len(profile.Resumes) != 1 || len(profile.Timeline) != 1 {
 		t.Fatalf("profile history lost: resumes=%d timeline=%d err=%v", len(profile.Resumes), len(profile.Timeline), err)
 	}
+	fromAssessment, err := app.GetCandidateProfileByResume(resume.ID)
+	if err != nil || fromAssessment.ID != items[0].ID || len(fromAssessment.Timeline) != 1 {
+		t.Fatalf("assessment must retain unified history: profile=%+v err=%v", fromAssessment, err)
+	}
 	if _, err := app.ArchiveTalentCandidates([]string{items[0].ProjectCandidateID}); err == nil {
 		t.Fatal("archiving an already archived link must be rejected")
 	}

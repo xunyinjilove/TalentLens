@@ -362,7 +362,7 @@
             <div class="wb-candidate-foot">
               <span class="candidate-created-time">入库 {{ formatDate(item.createdAt) }}<span v-if="item.analysisStatus === 'done'"> · 岗位证据分 {{ item.abilityScore }}</span></span>
               <div class="candidate-actions">
-                <el-button class="candidate-primary-action" size="small" type="primary" plain @click="openCandidateProfile(item)">查看档案</el-button>
+                <el-button class="candidate-primary-action" size="small" type="primary" plain @click="navigateToEvaluation(item)">查看测评</el-button>
                 <el-button class="candidate-secondary-action" size="small" type="primary" @click="openInterviewInvite(item)">
                   <el-icon style="margin-right: 3px;"><Calendar /></el-icon>邀约面试
                 </el-button>
@@ -370,7 +370,6 @@
                   <el-button size="small" class="candidate-more-action" aria-label="更多候选人操作">更多<el-icon><ArrowDown /></el-icon></el-button>
                   <template #dropdown>
                     <el-dropdown-menu>
-                      <el-dropdown-item command="evaluate">查看评测</el-dropdown-item>
                       <el-dropdown-item command="move">调配分库</el-dropdown-item>
                       <el-dropdown-item v-if="item.analysisStatus === 'error'" command="retry">重新分析</el-dropdown-item>
                       <el-dropdown-item command="archive" divided>删除岗位简历</el-dropdown-item>
@@ -488,10 +487,9 @@
             <el-table-column label="操作" width="250" fixed="right" align="center">
               <template #default="{ row }">
                 <div class="table-row-actions" @click.stop>
-                  <el-button link type="primary" size="small" @click="openCandidateProfile(row)">档案</el-button>
+                  <el-button link type="primary" size="small" @click="navigateToEvaluation(row)">查看测评</el-button>
                   <el-button link type="primary" size="small" @click="openInterviewInvite(row)">邀约面试</el-button>
                   <el-button link type="primary" size="small" @click="openMoveDialog(row)">调配</el-button>
-                  <el-button link type="primary" size="small" @click="navigateToEvaluation(row)">评测</el-button>
                   <el-button link type="danger" size="small" @click="archiveOneCandidate(row)">删除</el-button>
                   <el-button
                     v-if="row.analysisStatus === 'error'"
@@ -538,57 +536,6 @@
         </div>
       </main>
     </div>
-
-    <!-- 统一档案保留来源、简历版本、跨岗位评测与沟通记录。 -->
-    <el-drawer v-model="profileDrawerOpen" title="候选人综合档案" size="min(560px, 95vw)" class="candidate-profile-drawer">
-      <div v-if="selectedCandidate" class="candidate-profile-content">
-        <div class="profile-summary">
-          <div>
-            <h2>{{ profile?.name || selectedCandidate.name }}</h2>
-            <p>{{ selectedCandidate.currentRole || selectedCandidate.jobTitle || selectedCandidate.projectName }}</p>
-          </div>
-          <el-tag v-if="selectedCandidate.analysisStatus === 'done'" type="primary">参考匹配 {{ selectedCandidate.matchScore || '—' }}</el-tag>
-        </div>
-        <div class="profile-actions">
-          <el-button v-if="selectedCandidate.profileUrl" @click="openProfile(selectedCandidate.profileUrl)">打开平台主页</el-button>
-          <el-button type="primary" plain @click="navigateToEvaluation(selectedCandidate)">查看评测</el-button>
-        </div>
-        <section class="profile-section">
-          <h3>已核实的联系方式</h3>
-          <p>电话：{{ profile?.verifiedPhone || '未核实' }} · 邮箱：{{ profile?.verifiedEmail || '未核实' }}</p>
-          <div class="profile-verify-row">
-            <el-select v-model="contactKind" aria-label="联系方式类型" style="width: 90px"><el-option label="邮箱" value="email" /><el-option label="电话" value="phone" /></el-select>
-            <el-input v-model="verifiedContact" aria-label="已核实的联系方式" placeholder="仅录入已核实属于本人的号码或邮箱" clearable />
-            <el-button type="primary" :disabled="!verifiedContact.trim()" @click="verifyContact">核实</el-button>
-          </div>
-        </section>
-        <section class="profile-section">
-          <h3>关联岗位与评测</h3>
-          <p v-if="!profile?.projects?.length" class="wb-muted">暂无关联岗位</p>
-          <div v-for="link in profile?.projects || []" :key="link.projectCandidateId" class="profile-list-row">
-            <strong>{{ link.jobTitle || link.projectName }}</strong>
-            <span>{{ stageLabels[link.stage] || link.stage }} · 岗位证据分 {{ link.analysisStatus === 'done' ? link.abilityScore : '待评' }}</span>
-          </div>
-        </section>
-        <section class="profile-section">
-          <h3>来源与简历版本</h3>
-          <p v-if="!profile?.resumes?.length" class="wb-muted">暂无简历版本</p>
-          <div v-for="resume in profile?.resumes || []" :key="resume.id" class="profile-list-row">
-            <strong>{{ resume.fileName }}</strong><span>{{ formatDate(resume.createdAt) }}</span>
-          </div>
-          <div v-for="source in profile?.sources || []" :key="`${source.platform}:${source.platformCandidateId}`" class="profile-list-row">
-            <strong>{{ source.platform }}</strong><span>ID {{ source.platformCandidateId || '未提供' }}</span>
-          </div>
-        </section>
-        <section class="profile-section">
-          <h3>跨岗位沟通与跟进</h3>
-          <p v-if="!profile?.timeline?.length" class="wb-muted">暂无跟进记录</p>
-          <div v-for="event in profile?.timeline || []" :key="event.id" class="profile-list-row">
-            <strong>{{ event.projectName }} · {{ formatDate(event.createdAt) }}</strong><span>{{ event.note || event.type }}</span>
-          </div>
-        </section>
-      </div>
-    </el-drawer>
 
     <!-- 邀约面试与沟通文案对话框 -->
     <el-dialog
@@ -867,16 +814,6 @@ import { getCandidateSurname } from '../utils/candidate'
 
 interface PendingApplication { id: string; applicationId: string; candidateName: string; platformJobId: string }
 interface DuplicatePair { candidateId: string; otherCandidateId: string; name: string; reason: string }
-interface CandidateProfile {
-  name: string
-  verifiedPhone: string
-  verifiedEmail: string
-  projects: TalentCandidate[]
-  sources: Array<{ platform: string; platformCandidateId: string }>
-  resumes: Array<{ id: string; fileName: string; createdAt: string }>
-  timeline: Array<{ id: string; projectName: string; type: string; note: string; createdAt: string }>
-}
-
 const route = useRoute()
 const router = useRouter()
 const projects = useProjectStore()
@@ -917,7 +854,6 @@ async function archiveCandidates(ids: string[]) {
   try {
     const removed = await recruitment.archiveCandidates(ids)
     selectedCandidateIds.value = selectedCandidateIds.value.filter(id => !ids.includes(id))
-    if (selectedCandidate.value && ids.includes(selectedCandidate.value.projectCandidateId)) profileDrawerOpen.value = false
     ElMessage.success(`已从人才库删除 ${removed} 条岗位简历`)
   } catch (err: any) {
     ElMessage.error(err?.message || String(err))
@@ -933,7 +869,6 @@ function archiveSelectedCandidates() {
 }
 
 function handleCandidateAction(command: string, item: TalentCandidate) {
-  if (command === 'evaluate') navigateToEvaluation(item)
   if (command === 'move') openMoveDialog(item)
   if (command === 'retry') void retryAnalysis(item.resumeId)
   if (command === 'archive') archiveOneCandidate(item)
@@ -973,40 +908,6 @@ function navigateToEvaluation(item: TalentCandidate) {
     path: '/project/' + item.projectId,
     query: { resume: item.resumeId || '' }
   })
-}
-
-const profileDrawerOpen = ref(false)
-const selectedCandidate = ref<TalentCandidate | null>(null)
-const profile = ref<CandidateProfile | null>(null)
-const contactKind = ref('email')
-const verifiedContact = ref('')
-
-async function openCandidateProfile(candidate: TalentCandidate) {
-  selectedCandidate.value = candidate
-  profile.value = null
-  profileDrawerOpen.value = true
-  try {
-    const api: any = await import('../../wailsjs/go/main/App')
-    const loaded: CandidateProfile = await api.GetCandidateProfile(candidate.id)
-    if (selectedCandidate.value?.id === candidate.id) profile.value = loaded
-  } catch (err: any) {
-    ElMessage.error(err?.message || String(err))
-  }
-}
-
-async function verifyContact() {
-  if (!selectedCandidate.value || !verifiedContact.value.trim()) return
-  try {
-    const api: any = await import('../../wailsjs/go/main/App')
-    const canonicalId: string = await api.VerifyCandidateContact(selectedCandidate.value.id, contactKind.value, verifiedContact.value.trim(), 'HR')
-    verifiedContact.value = ''
-    selectedCandidate.value = { ...selectedCandidate.value, id: canonicalId }
-    profile.value = await api.GetCandidateProfile(canonicalId)
-    await refresh()
-    ElMessage.success('联系方式已核实')
-  } catch (err: any) {
-    ElMessage.error(err?.message || String(err))
-  }
 }
 
 // 邀约面试与一键打招呼弹窗状态
@@ -1231,7 +1132,7 @@ async function confirmMoveCandidate() {
 }
 
 function handleTableRowClick(row: TalentCandidate) {
-  void openCandidateProfile(row)
+  void navigateToEvaluation(row)
 }
 
 function scoreLevelClass(score: number): string {
@@ -2015,7 +1916,7 @@ onMounted(() => {
 /* 网格卡片看板视图 (Grid View) */
 .wb-candidate-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 16px;
   box-sizing: border-box;
 }
@@ -2498,18 +2399,6 @@ onMounted(() => {
   box-shadow: 0 4px 12px rgba(37, 99, 235, 0.25);
 }
 
-.candidate-profile-content { display: flex; flex-direction: column; gap: 16px; }
-.profile-summary { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
-.profile-summary h2 { margin: 0 0 4px; font-size: 20px; color: #1e293b; }
-.profile-summary p { margin: 0; color: #64748b; line-height: 1.5; }
-.profile-actions { display: flex; flex-wrap: wrap; gap: 8px; }
-.profile-section { border: 1px solid #e2e8f0; border-radius: 10px; padding: 14px; }
-.profile-section h3 { margin: 0 0 10px; font-size: 14px; color: #1e293b; }
-.profile-section p { margin: 0 0 8px; color: #64748b; line-height: 1.5; }
-.profile-verify-row { display: flex; gap: 8px; align-items: center; }
-.profile-list-row { display: flex; flex-direction: column; gap: 3px; padding: 8px 0; border-top: 1px solid #f1f5f9; overflow-wrap: anywhere; }
-.profile-list-row strong { font-size: 13px; color: #334155; }
-.profile-list-row span { font-size: 12px; color: #64748b; }
 
 /* 邀约面试与沟通文案弹窗 */
 .interview-invite-dialog {
@@ -2633,6 +2522,10 @@ onMounted(() => {
 @media (max-width: 1180px) {
   .talent-page-header { align-items: flex-start; }
   .header-actions-bar { justify-content: flex-start; margin-left: 0; }
+}
+
+@media (max-width: 900px) {
+  .wb-candidate-grid { grid-template-columns: minmax(0, 1fr); }
 }
 
 @media (max-width: 760px) {
