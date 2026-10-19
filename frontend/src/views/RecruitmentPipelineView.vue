@@ -16,7 +16,7 @@
         <section v-for="stage in stages" :key="stage" class="wb-kanban-col">
           <div class="wb-kanban-head"><span>{{ stageLabels[stage] }}</span><span class="wb-pill">{{ inStage(stage).length }}</span></div>
           <div v-for="item in inStage(stage)" :key="item.projectCandidateId" class="wb-kanban-card" role="button" tabindex="0" @click="edit(item)" @keydown.enter="edit(item)">
-            <div style="display:flex;gap:9px;align-items:center"><span class="wb-avatar" style="width:31px;height:31px">{{ item.name.slice(0, 1) }}</span><strong>{{ item.name }}</strong></div>
+            <div style="display:flex;gap:9px;align-items:center"><span class="wb-avatar" style="width:31px;height:31px">{{ getCandidateSurname(item) }}</span><strong>{{ item.name }}</strong></div>
             <div class="wb-muted" style="font-size:12px;margin:8px 0">{{ item.jobTitle || item.projectName }}</div>
             <div style="display:flex;justify-content:space-between;align-items:center"><span class="wb-pill">{{ item.analysisStatus === 'done' ? `能力 ${item.abilityScore}` : '待评估' }}</span><span class="wb-muted" style="font-size:11px">{{ item.owner || '未分配' }}</span></div>
             <div v-if="item.nextActionAt" class="wb-muted" style="font-size:11px;margin-top:8px">下次：{{ formatDate(item.nextActionAt) }}</div>
@@ -56,6 +56,7 @@ import { ElMessage } from 'element-plus'
 import { useRoute, useRouter } from 'vue-router'
 import { useProjectStore } from '../composables/useProjectStore'
 import { useRecruitmentStore, stageLabels, type TalentCandidate } from '../composables/useRecruitmentStore'
+import { getCandidateSurname } from '../utils/candidate'
 
 const stages = ['new', 'pending_analysis', 'pending_contact', 'communicating', 'first_interview', 'second_interview', 'offer', 'hired', 'on_hold', 'rejected']
 const route = useRoute()

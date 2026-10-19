@@ -56,9 +56,13 @@ async function suggest(withAI: boolean) {
   if (!props.project) return
   busy.value = true; error.value = ''
   try {
+    const previous = new Set(rules.value.map(rule => rule.id))
     const api: any = await import('../../wailsjs/go/main/App')
     await api.SuggestJobRules(props.project.id, withAI)
     await load()
+    if (withAI && !rules.value.some(rule => rule.source === 'ai' && !previous.has(rule.id))) {
+      ElMessage.info('没有生成新的有岗位依据的规则，请补充职位职责或必需技能后重试')
+    }
   } catch (err: any) { error.value = err?.message || String(err) }
   finally { busy.value = false }
 }

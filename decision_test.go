@@ -45,6 +45,29 @@ func TestScorecardUsesAnchoredLevels(t *testing.T) {
 	}
 }
 
+func TestHolisticMatchKeepsDimensionsSeparateFromEvidenceScore(t *testing.T) {
+	analysis := &AnalysisResult{SkillMatch: 82, ExperienceMatch: 88, EducationMatch: 78, AbilityScore: 25}
+	if got := holisticMatchScore(analysis); got != 84 {
+		t.Fatalf("holistic match = %d, want 84; evidence score is a separate measure", got)
+	}
+	if analysis.AbilityScore != 25 {
+		t.Fatal("display match must not rewrite the evidence score")
+	}
+	if got := holisticMatchScore(&AnalysisResult{SkillMatch: 82, ExperienceMatch: 88}); got != 0 {
+		t.Fatalf("missing education dimension must not show a fabricated complete match: %d", got)
+	}
+}
+
+func TestMissingRubricRowsUseDisclosedProvisionalEstimate(t *testing.T) {
+	result := &AnalysisResult{SkillMatch: 82, ExperienceMatch: 88, CoreCriterionChecks: []CoreCriterionCheck{
+		{Criterion: "测试设计", Level: 1, Evidence: "测试设计经历"},
+	}}
+	scoreCandidate(result, []string{"测试设计", "自动化", "性能测试", "质量管理"})
+	if result.AbilityScore != 85 || result.ScoreBasis != "provisional" {
+		t.Fatalf("missing rubric rows must not become evidence-backed zeroes: %+v", result)
+	}
+}
+
 func TestLegacyAIVerdictsBecomePendingUntilHRReviews(t *testing.T) {
 	a := NewApp()
 	a.dataDirOverride = t.TempDir()

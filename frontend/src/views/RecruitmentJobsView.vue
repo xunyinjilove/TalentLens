@@ -361,21 +361,25 @@
           />
         </el-form-item>
 
-        <el-form-item label="一票否决红线 (Deal Breakers，如：统招本科、无竞业协议)">
+        <el-form-item label="岗位必需红线（仅填写可核实的必要技能，AI 建议需由 HR 审批）">
           <el-input
             v-model="redLinesInput"
-            placeholder="以逗号或分号分隔多个准入底线"
+            placeholder="如：能独立完成接口测试用例设计；以逗号或分号分隔"
             @blur="syncRedLines"
           />
         </el-form-item>
 
-        <el-form-item label="优先加分项 (Bonus Points，如：开源项目贡献、大厂背景)">
+        <el-form-item label="技能相关加分项（非必需优势）">
           <el-input
             v-model="bonusPointsInput"
-            placeholder="以逗号或分号分隔优质加分项"
+            placeholder="如：具备自动化测试框架维护经验；以逗号或分号分隔"
             @blur="syncBonusPoints"
           />
         </el-form-item>
+        <div class="rule-suggestion-entry">
+          <el-button type="primary" plain :disabled="!isEditing" @click="openRuleSuggestionsFromEditor">AI 建议红线与加分项</el-button>
+          <span>{{ isEditing ? '基于已保存的岗位职责与技能起草，每条由 HR 审批。修改职位后请先保存。' : '请先保存新职位，再生成 AI 建议。' }}</span>
+        </div>
       </el-form>
 
       <template #footer>
@@ -513,6 +517,22 @@ function syncSkills() {
 function syncRedLines() {}
 function syncBonusPoints() {}
 
+function openRuleSuggestionsFromEditor() {
+  const project = projectStore.projects.find(item => item.id === currentEditProjectId.value)
+  if (!project) return
+  const config = project.job_config
+  if (jobForm.title.trim() !== (config.title || project.name) ||
+      jobForm.job_description.trim() !== (config.job_description || '') ||
+      splitTags(skillsInput.value).join('\x00') !== (config.required_skills || []).join('\x00') ||
+      splitTags(redLinesInput.value).join('\x00') !== (config.red_lines || []).join('\x00') ||
+      splitTags(bonusPointsInput.value).join('\x00') !== (config.bonus_points || []).join('\x00')) {
+    ElMessage.warning('请先保存本次职位配置，AI 才能依据最新的岗位职责与技能生成建议')
+    return
+  }
+  editModalVisible.value = false
+  ruleProject.value = project
+}
+
 // 部门选项
 const departmentOptions = computed(() => {
   const depts = new Set<string>()
@@ -613,8 +633,8 @@ function openCreateModal() {
   jobForm.education_level = '本科'
   jobForm.job_description = ''
   skillsInput.value = 'Vue3, TypeScript, 性能优化'
-  redLinesInput.value = '统招本科及以上'
-  bonusPointsInput.value = '有大型 SaaS 项目经验, 深入掌握架构设计'
+  redLinesInput.value = ''
+  bonusPointsInput.value = ''
   editModalVisible.value = true
 }
 
@@ -844,6 +864,8 @@ onMounted(async () => {
 </script>
 
 <style scoped>
+.rule-suggestion-entry { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin: 2px 0 16px; }
+.rule-suggestion-entry span { color: #64748b; font-size: 12px; line-height: 1.5; }
 .job-management-view {
   display: flex;
   flex-direction: column;

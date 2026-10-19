@@ -13,23 +13,28 @@ import (
 )
 
 type TalentCandidate struct {
-	ID                 string `json:"id"`
-	ProjectCandidateID string `json:"projectCandidateId"`
-	ProjectID          string `json:"projectId"`
-	ProjectName        string `json:"projectName"`
-	JobTitle           string `json:"jobTitle"`
-	Name               string `json:"name"`
-	Source             string `json:"source"`
-	ResumeID           string `json:"resumeId"`
-	ProfileURL         string `json:"profileUrl"`
-	AnalysisStatus     string `json:"analysisStatus"`
-	AbilityScore       int    `json:"abilityScore"`
-	RedLineStatus      string `json:"redLineStatus"`
-	ConfirmedBonus     int    `json:"confirmedBonus"`
-	Stage              string `json:"stage"`
-	Owner              string `json:"owner"`
-	NextActionAt       string `json:"nextActionAt"`
-	CreatedAt          string `json:"createdAt"`
+	ID                 string   `json:"id"`
+	ProjectCandidateID string   `json:"projectCandidateId"`
+	ProjectID          string   `json:"projectId"`
+	ProjectName        string   `json:"projectName"`
+	JobTitle           string   `json:"jobTitle"`
+	Name               string   `json:"name"`
+	Source             string   `json:"source"`
+	ResumeID           string   `json:"resumeId"`
+	ProfileURL         string   `json:"profileUrl"`
+	AnalysisStatus     string   `json:"analysisStatus"`
+	AbilityScore       int      `json:"abilityScore"`
+	MatchScore         int      `json:"matchScore"`
+	CurrentRole        string   `json:"currentRole"`
+	Education          string   `json:"education"`
+	WorkYears          string   `json:"workYears"`
+	Skills             []string `json:"skills"`
+	RedLineStatus      string   `json:"redLineStatus"`
+	ConfirmedBonus     int      `json:"confirmedBonus"`
+	Stage              string   `json:"stage"`
+	Owner              string   `json:"owner"`
+	NextActionAt       string   `json:"nextActionAt"`
+	CreatedAt          string   `json:"createdAt"`
 }
 
 type FollowUpRecord struct {
@@ -88,7 +93,7 @@ func (a *App) ListTalentCandidates(projectID string) ([]TalentCandidate, error) 
 	}
 	rows, err := db.Query(`SELECT c.id,pc.id,p.id,p.name,p.job_title,c.display_name,
 		COALESCE(rv.legacy_resume_id,''),COALESCE(rv.raw_json,''),
-		COALESCE(ev.status,''),COALESCE(ev.ability_score,0),
+		COALESCE(ev.status,''),COALESCE(ev.ability_score,0),COALESCE(ev.analysis_json,''),
 		COALESCE(ev.redline_status,''),COALESCE(ev.confirmed_bonus_count,0),
 		pc.stage,pc.owner,pc.next_action_at,pc.created_at
 		FROM project_candidates pc JOIN candidates c ON c.id=pc.candidate_id
@@ -106,10 +111,10 @@ func (a *App) ListTalentCandidates(projectID string) ([]TalentCandidate, error) 
 	result := make([]TalentCandidate, 0)
 	for rows.Next() {
 		var item TalentCandidate
-		var raw string
+		var raw, analysisJSON string
 		if err := rows.Scan(&item.ID, &item.ProjectCandidateID, &item.ProjectID,
 			&item.ProjectName, &item.JobTitle, &item.Name, &item.ResumeID, &raw,
-			&item.AnalysisStatus, &item.AbilityScore, &item.RedLineStatus,
+			&item.AnalysisStatus, &item.AbilityScore, &analysisJSON, &item.RedLineStatus,
 			&item.ConfirmedBonus, &item.Stage, &item.Owner, &item.NextActionAt,
 			&item.CreatedAt); err != nil {
 			return nil, err
@@ -121,6 +126,49 @@ func (a *App) ListTalentCandidates(projectID string) ([]TalentCandidate, error) 
 				item.Source = recruitmentSourceFromURL(resume.URL)
 				if item.AnalysisStatus == "" {
 					item.AnalysisStatus = resume.Status
+				}
+				if resume.Analysis != nil {
+					if item.CurrentRole == "" {
+						item.CurrentRole = strings.TrimSpace(resume.Analysis.CurrentRole)
+					}
+					if item.Education == "" {
+						item.Education = strings.TrimSpace(resume.Analysis.Education)
+						if item.Education == "" {
+							item.Education = strings.TrimSpace(resume.Analysis.EducationDetail)
+						}
+					}
+					if item.WorkYears == "" {
+						item.WorkYears = strings.TrimSpace(resume.Analysis.WorkYears)
+					}
+				}
+			}
+		}
+		if analysisJSON != "" && item.AnalysisStatus == "done" {
+			var analysis AnalysisResult
+			if json.Unmarshal([]byte(analysisJSON), &analysis) == nil {
+				item.MatchScore = holisticMatchScore(&analysis)
+				if role := strings.TrimSpace(analysis.CurrentRole); role != "" {
+					item.CurrentRole = role
+				}
+				if education := strings.TrimSpace(analysis.Education); education != "" {
+					item.Education = education
+				} else if detail := strings.TrimSpace(analysis.EducationDetail); detail != "" {
+					item.Education = detail
+				}
+				if workYears := strings.TrimSpace(analysis.WorkYears); workYears != "" {
+					item.WorkYears = workYears
+				}
+				seen := make(map[string]bool)
+				for _, check := range append(analysis.CoreCriterionChecks, analysis.ExperienceCompetencies...) {
+					label := strings.TrimSpace(check.Criterion)
+					if check.Level <= 0 || strings.TrimSpace(check.Evidence) == "" || label == "" || seen[label] {
+						continue
+					}
+					item.Skills = append(item.Skills, label)
+					seen[label] = true
+					if len(item.Skills) == 4 {
+						break
+					}
 				}
 			}
 		}

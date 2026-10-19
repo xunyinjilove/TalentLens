@@ -57,3 +57,37 @@ func TestSameNameStaysSeparateUntilVerifiedContact(t *testing.T) {
 		t.Fatalf("project links lost: %d", links)
 	}
 }
+
+func TestDismissAndClearDuplicateHintsPreserveCandidates(t *testing.T) {
+	a := NewApp()
+	a.dataDirOverride = t.TempDir()
+	defer a.closeRecruitmentDB()
+	db, err := a.getRecruitmentDB()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, item := range []struct{ id, name string }{{"a", "同名甲"}, {"b", "同名甲"}, {"c", "同名乙"}, {"d", "同名乙"}} {
+		if _, err := db.Exec("INSERT INTO candidates(id,display_name,created_at,updated_at) VALUES(?,?,?,?)", item.id, item.name, "now", "now"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := a.DismissSuspectedDuplicate("a", "b"); err != nil {
+		t.Fatal(err)
+	}
+	hints, err := a.ListSuspectedDuplicates()
+	if err != nil || len(hints) != 1 {
+		t.Fatalf("one hint should remain: %+v %v", hints, err)
+	}
+	removed, err := a.ClearSuspectedDuplicates()
+	if err != nil || removed != 1 {
+		t.Fatalf("clear current hints: %d %v", removed, err)
+	}
+	hints, err = a.ListSuspectedDuplicates()
+	if err != nil || len(hints) != 0 {
+		t.Fatalf("hints should be empty: %+v %v", hints, err)
+	}
+	var count int
+	if err := db.QueryRow("SELECT COUNT(*) FROM candidates").Scan(&count); err != nil || count != 4 {
+		t.Fatalf("candidate records changed: %d %v", count, err)
+	}
+}
