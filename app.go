@@ -36,7 +36,7 @@ import (
 )
 
 // 版本信息
-const AppVersion = "1.8.26"
+const AppVersion = "1.8.27"
 const analysisFormatRetryVersion = "model-json-repair-v1"
 const GitHubRepo = "xunyinjilove/TalentLens"
 
@@ -3077,11 +3077,35 @@ func (a *App) buildAnalysisPrompt(resume *Resume, jobCfg *JobConfig) string {
 	if len(jobCfg.BonusPoints) > 0 {
 		bonusBlock = fmt.Sprintf("- ⭐ 优先加分项（仅提供证据线索，HR 确认后只用于同档排序）:\n  * %s\n", strings.Join(jobCfg.BonusPoints, "\n  * "))
 	}
-	criteria := jobCfg.CoreCriteria
-	if len(criteria) == 0 {
-		criteria = jobCfg.RequiredSkills
+	var unifiedMetrics []string
+	seenMetrics := make(map[string]bool)
+	for _, s := range jobCfg.RequiredSkills {
+		s = strings.TrimSpace(s)
+		if s != "" && !seenMetrics[s] {
+			seenMetrics[s] = true
+			unifiedMetrics = append(unifiedMetrics, s)
+		}
 	}
-	tierBlock := fmt.Sprintf("- 核心能力评分卡（每项按 0 未体现、1 了解、2 参与、3 独立完成、4 主导并可复盘评分）：%s\n", strings.Join(criteria, "、"))
+	for _, c := range jobCfg.CoreCriteria {
+		c = strings.TrimSpace(c)
+		if c != "" && !seenMetrics[c] {
+			seenMetrics[c] = true
+			unifiedMetrics = append(unifiedMetrics, c)
+		}
+	}
+	if len(unifiedMetrics) < 3 {
+		fallbacks := []string{"专业技能基础", "核心业务实操", "综合解决问题能力"}
+		for _, fb := range fallbacks {
+			if len(unifiedMetrics) >= 3 {
+				break
+			}
+			if !seenMetrics[fb] {
+				seenMetrics[fb] = true
+				unifiedMetrics = append(unifiedMetrics, fb)
+			}
+		}
+	}
+	tierBlock := fmt.Sprintf("- 岗位统一能力评分卡与雷达指标（每项按 0 未体现、1 了解/线索、2 熟练参与、3 精通独立、4 专家主导评分）：%s\n", strings.Join(unifiedMetrics, "、"))
 
 	systemPrompt := "你是一位拥有15年经验的资深人力资源专家和猎头顾问。你的专长是精准评估候选人与岗位的匹配度。\n" +
 		"你必须基于简历中的客观事实进行分析，不得凭空臆造简历中没有的信息。\n" +
@@ -3161,8 +3185,9 @@ func (a *App) buildAnalysisPrompt(resume *Resume, jobCfg *JobConfig) string {
 			"- 0-59: 未达到岗位最低学历门槛要求\n\n"+
 			"**综合评分逻辑 (overall_score)**：\n"+
 			"overall_score 必须在逻辑上严密契合各分项得分，基准公式为：skill_match * 0.55 + experience_match * 0.35 + education_match * 0.10（四舍五入取整）。不得脱离单项评分凭主观臆断给出突变分数。\n\n"+
-			"**核心能力 (core_match)** 为直接相关项目和核心业务能力的 0-100 分。逐项返回 core_criterion_checks，criterion 必须与评分卡逐字一致，level 为 0-4。最终能力分由系统按各项等级等权计算；加分项经 HR 核实后只用于同档排序，不抬高能力分。\n\n"+
-			"同时从真实工作、项目和学习经历提炼 3–6 个 experience_competencies 补充能力（材料不足则少填或留空，不凑数）。两类能力的 evidence 必须是原文中的连续引用；assessment 写出判断与待核实项。仅职位名称最多给1级，不能推断未披露工具的熟练度。履历补充维度不计入岗位能力分。\n\n"+
+			"**核心能力与岗位统一技能雷达指标 (experience_competencies 与 core_criterion_checks)**：\n"+
+			"必须严格围绕上述【岗位统一能力评分卡与雷达指标】逐项评估！每一项的 criterion 必须与指标名称完全一致（逐字对应，不得自创其他名称）；\n"+
+			"level 为 0-4 分整数（0 未体现、1 了解/线索、2 熟练参与、3 精通独立完成、4 专家主导复盘）；evidence 必须是简历中连续且真实的原文引用（无证据时填空字符串且 level 必须为 0）；assessment 给出专业评估与核实要点。最终岗位能力分由系统按各项等级等权计算；加分项经 HR 核实后只用于同档排序。\n\n"+
 			"### 推荐等级\n"+
 			"模型只提供参考建议；岗位红线必须由 HR 核实后才可判定通过或不满足。\n\n"+
 			"### 输出要求\n\n"+
@@ -3191,8 +3216,8 @@ func (a *App) buildAnalysisPrompt(resume *Resume, jobCfg *JobConfig) string {
 			"  \"recommendation\": \"recommend\",\n"+
 			"  \"red_line_violations\": [],\n"+
 			"  \"red_line_checks\": [{\"criterion\": \"逐字复制岗位红线\", \"status\": \"met/violated/unknown\", \"evidence\": \"简历中的原文短句；无证据时留空\"}],\n"+
-			"  \"core_criterion_checks\": [{\"criterion\": \"逐字复制评分卡能力\", \"level\": 3, \"evidence\": \"简历原文；无证据时留空并给 0 分\"}],\n"+
-			"  \"experience_competencies\": [{\"criterion\": \"从真实经历提炼的能力\", \"level\": 1, \"evidence\": \"逐字引用连续原文\", \"assessment\": \"经历依据与待核实之处\"}],\n"+
+			"  \"core_criterion_checks\": [{\"criterion\": \"逐字复制上述岗位统一指标\", \"level\": 3, \"evidence\": \"简历原文；无证据时留空并给 0 分\"}],\n"+
+			"  \"experience_competencies\": [{\"criterion\": \"逐字复制上述岗位统一指标\", \"level\": 3, \"evidence\": \"逐字引用连续原文；无证据留空\", \"assessment\": \"对该项技能的掌握判断依据与待核实项\"}],\n"+
 			"  \"bonus_checks\": [{\"criterion\": \"逐字复制优先加分项\", \"status\": \"met/violated/unknown\", \"evidence\": \"简历原文短句；无证据时留空\"}],\n"+
 			"  \"bonus_matches\": [\n"+
 			"    \"符合的优先加分项及具体成果依据（例如：具备日活千万高并发经验，主导过大型系统重构；若未匹配则必须返回空数组 []）\"\n"+
