@@ -23,11 +23,6 @@
         <span class="nav-label">招聘概览</span>
       </router-link>
 
-      <button type="button" class="nav-item sidebar-action" aria-label="发布岗位到 51job" @click="openProjectPicker">
-        <el-icon class="nav-icon"><Promotion /></el-icon>
-        <span class="nav-label">发布岗位</span>
-      </button>
-
       <router-link to="/jobs" class="nav-item" :class="{ active: isProjectsActive }">
         <el-icon class="nav-icon"><Briefcase /></el-icon>
         <span class="nav-label">职位管理</span>
@@ -37,16 +32,6 @@
       <router-link to="/talent" class="nav-item" :class="{ active: route.path === '/talent' }">
         <el-icon class="nav-icon"><Document /></el-icon>
         <span class="nav-label">简历人才库</span>
-      </router-link>
-
-      <router-link to="/interviews" class="nav-item" :class="{ active: route.path === '/interviews' }">
-        <el-icon class="nav-icon"><Calendar /></el-icon>
-        <span class="nav-label">面试安排</span>
-      </router-link>
-
-      <router-link to="/pipeline" class="nav-item" :class="{ active: route.path === '/pipeline' }">
-        <el-icon class="nav-icon"><Connection /></el-icon>
-        <span class="nav-label">候选人跟进</span>
       </router-link>
 
       <div class="nav-group-title">智能助手</div>
@@ -93,30 +78,15 @@
         <span class="status-text">本地 AI 引擎就绪</span>
       </div>
     </div>
-    <el-dialog v-model="projectPickerOpen" title="选择要发布的招聘项目" width="min(480px, 94vw)" append-to-body>
-      <p class="posting-picker-hint">选择项目后预览职位信息，再保存草稿或发布到前程无忧 51job。</p>
-      <el-select v-model="postingProjectId" filterable placeholder="选择招聘项目" style="width: 100%" aria-label="招聘项目">
-        <el-option v-for="project in projectStore.projects" :key="project.id"
-          :label="`${project.job_config?.title || project.name} · ${project.name}`" :value="project.id" />
-      </el-select>
-      <p v-if="!projectStore.projects.length" class="posting-picker-hint">暂无招聘项目，请先在职位管理中创建。</p>
-      <template #footer>
-        <el-button @click="projectPickerOpen = false">取消</el-button>
-        <el-button type="primary" :disabled="!postingProjectId" @click="confirmProject">预览并发布到 51job</el-button>
-      </template>
-    </el-dialog>
-    <JobPostingDialog v-model="postingOpen" :project="postingProject" />
   </aside>
 </template>
 
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed } from 'vue'
 import { useRoute } from 'vue-router'
 import { useTheme } from '../composables/useTheme'
 import { useProjectStore } from '../composables/useProjectStore'
 import { useAIAssistantStore } from '../composables/useAIAssistantStore'
-import { Promotion } from '@element-plus/icons-vue'
-import JobPostingDialog from './JobPostingDialog.vue'
 
 const route = useRoute()
 const { isDark, toggleTheme } = useTheme()
@@ -124,22 +94,6 @@ const projectStore = useProjectStore()
 const assistantStore = useAIAssistantStore()
 
 const projectCount = computed(() => projectStore.projects.length)
-const projectPickerOpen = ref(false)
-const postingOpen = ref(false)
-const postingProjectId = ref('')
-const postingProject = computed(() => projectStore.projects.find(project => project.id === postingProjectId.value) || null)
-
-async function openProjectPicker() {
-  await projectStore.loadProjects()
-  postingProjectId.value = ''
-  projectPickerOpen.value = true
-}
-
-function confirmProject() {
-  if (!postingProject.value) return
-  projectPickerOpen.value = false
-  postingOpen.value = true
-}
 
 // 判断项目列表是否处于激活态（包含详情页）
 const isProjectsActive = computed(() => {

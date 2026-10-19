@@ -1,6 +1,9 @@
 package main
 
-import "fmt"
+import (
+	"database/sql"
+	"fmt"
+)
 
 type CandidateSourceView struct {
 	Platform            string `json:"platform"`
@@ -33,6 +36,28 @@ type CandidateProfile struct {
 	Sources       []CandidateSourceView    `json:"sources"`
 	Resumes       []CandidateResumeView    `json:"resumes"`
 	Timeline      []CandidateTimelineEvent `json:"timeline"`
+}
+
+// GetCandidateProfileByResume resolves the unified candidate record from the
+// resume shown in the assessment page. Legacy resumes without an imported
+// candidate record return an empty profile so their assessment stays usable.
+func (a *App) GetCandidateProfileByResume(resumeID string) (CandidateProfile, error) {
+	if !interviewIDPattern.MatchString(resumeID) {
+		return CandidateProfile{}, fmt.Errorf("简历 ID 无效")
+	}
+	db, err := a.getRecruitmentDB()
+	if err != nil {
+		return CandidateProfile{}, err
+	}
+	var candidateID string
+	err = db.QueryRow(`SELECT candidate_id FROM resume_versions WHERE legacy_resume_id=? ORDER BY created_at DESC LIMIT 1`, resumeID).Scan(&candidateID)
+	if err == sql.ErrNoRows {
+		return CandidateProfile{}, nil
+	}
+	if err != nil {
+		return CandidateProfile{}, err
+	}
+	return a.GetCandidateProfile(candidateID)
 }
 
 func (a *App) GetCandidateProfile(candidateID string) (CandidateProfile, error) {

@@ -517,59 +517,35 @@
                     </div>
                   </div>
 
-                  <!-- 评分面板与逐项评分卡 -->
+                  <!-- 履历能力维度全景雷达 -->
                   <div class="score-section-card modern-competency-card">
                     <div class="section-card-header">
                       <div class="header-title">
                         <el-icon><Histogram /></el-icon>
-                        <span>核心能力维度全景雷达 ({{ resumeStore.selectedResume.analysis.abilityScore ?? resumeStore.selectedResume.score }} 分)</span>
+                        <span>履历能力维度全景雷达</span>
                       </div>
-                      <el-button size="small" type="primary" plain :loading="competencyBusy" @click="supplementCompetencies">
-                        <el-icon style="margin-right: 4px"><RefreshRight /></el-icon>
-                        {{ competencyButtonText }}
-                      </el-button>
                     </div>
 
                     <el-alert v-if="resumeStore.selectedResume.analysis.competencyMessage" :title="resumeStore.selectedResume.analysis.competencyMessage" :type="resumeStore.selectedResume.analysis.competencyStatus === 'error' ? 'warning' : 'info'" :closable="false" show-icon style="margin:0 0 16px" />
 
-                    <div class="competency-mode-bar">
-                      <el-radio-group v-model="radarMode" size="small">
-                        <el-radio-button label="job">岗位评分卡</el-radio-button>
-                        <el-radio-button label="experience" :disabled="!resumeStore.selectedResume.analysis.experienceCompetencies?.length">
-                          履历能力补充
-                          <span
-                            v-if="resumeStore.selectedResume.analysis.experienceCompetencies?.length"
-                            class="competency-count-badge"
-                          >
-                            ({{ resumeStore.selectedResume.analysis.experienceCompetencies.length }})
-                          </span>
-                        </el-radio-button>
-                      </el-radio-group>
-                      <span class="header-tip">{{ radarMode === 'experience' ? '根据实际经历提炼，逐项展示依据；补充维度不计入岗位能力分。' : '对照岗位要求，未取得原文依据的项目保留为未体现。' }}</span>
-                    </div>
+                    <p class="score-explanation">根据实际经历提炼，逐项展示原文依据；这些补充维度不计入岗位证据分。</p>
 
                     <div class="competency-split-layout">
                       <!-- 左侧：原生 SVG 蜘蛛网雷达图 -->
                       <div class="radar-visual-col">
                         <SvgRadarChart
-                          v-if="radarMode === 'job' || activeRadarChecks.length >= 3"
+                          v-if="activeRadarChecks.length >= 3"
                           :indicators="radarIndicators"
                           :candidate-values="radarCandidateValues"
-                          :show-benchmark="radarMode === 'job'"
+                          :show-benchmark="false"
                           :selected-index="selectedRadarIndex"
                           @select="handleSelectRadarIndex"
                         />
-                        <p v-if="radarMode === 'job' && activeRadarChecks.length < 3" class="score-explanation">
-                          综合匹配按技能 40%、经验 40%、学历 20% 展示；岗位证据分仍按逐项可核实材料计算。
-                        </p>
-                        <p v-else-if="radarMode === 'experience' && activeRadarChecks.length < 3" class="score-explanation">目前仅有 {{ activeRadarChecks.length }} 项可引用的履历能力，详见右侧；材料不足时不补画无依据的维度。</p>
+                        <p v-else class="score-explanation">目前仅有 {{ activeRadarChecks.length }} 项可引用的履历能力，材料不足时不补画无依据的维度。需要更新时可重新分析整份简历。</p>
                       </div>
 
-                      <!-- 右侧：逐项评分卡与原文线索 -->
+                      <!-- 右侧：经历能力与原文线索 -->
                       <div class="score-breakdown-box">
-                        <p v-if="radarMode === 'job' && resumeStore.selectedResume.analysis.scoreBasis === 'provisional'" class="score-explanation warning">
-                          ⚠️ 暂估分：AI 未提供足够可定位的逐项原文，系统改用技能与经验匹配估计；请 HR 核对后再推进。
-                        </p>
                         <div
                           v-for="(item, cIdx) in activeRadarChecks"
                           :key="item.criterion"
@@ -589,7 +565,7 @@
                           <p v-if="item.assessment" class="criterion-assessment">{{ item.assessment }}</p>
                         </div>
                         <p v-if="!activeRadarChecks.length" class="score-explanation empty">
-                          暂无逐项评分卡；当前显示核心匹配估计，建议重新分析以取得可核对的逐项依据。
+                          暂无可引用的经历能力维度。可重新分析整份简历，并结合原文核实。
                         </p>
                       </div>
                     </div>
@@ -825,23 +801,67 @@
               <div class="content-header">
                 <div class="content-heading">
                   <span class="content-filename">{{ resumeStore.selectedResume.fileName }}</span>
-                  <span class="content-stats">{{ $t('home.contentLength', { count: parsedContent.length }) }}</span>
+                  <span class="content-stats">{{ $t('home.contentLength', { count: activeRawContent.length }) }}</span>
+                  <span v-if="isChineseView" class="translation-status-pill">已一键译为中文</span>
                 </div>
-                <el-button size="small" plain @click="showRawContent = !showRawContent">
-                  {{ showRawContent ? '查看分区排版' : '查看完整原文' }}
-                </el-button>
+                <div class="content-actions">
+                  <el-button
+                    v-if="!isChineseView"
+                    size="small"
+                    type="primary"
+                    plain
+                    :loading="translationBusy"
+                    @click="handleTranslateToChinese(false)"
+                  >
+                    <el-icon><RefreshRight /></el-icon>
+                    一键翻译为中文
+                  </el-button>
+                  <template v-else>
+                    <el-button size="small" type="primary" plain @click="isChineseView = false">
+                      查看原文
+                    </el-button>
+                    <el-button size="small" plain :loading="translationBusy" @click="handleTranslateToChinese(true)">
+                      重新翻译
+                    </el-button>
+                  </template>
+                  <el-button v-if="!isChineseView && translatedSections.length" size="small" plain @click="isChineseView = true">
+                    查看中文译文
+                  </el-button>
+                  <el-button size="small" plain @click="showRawContent = !showRawContent">
+                    {{ showRawContent ? '查看分区排版' : '查看完整原文' }}
+                  </el-button>
+                </div>
               </div>
-              <div class="content-hint">以下内容只调整排版，不改写简历原文；原文可随时切换查看。</div>
-              <pre v-if="showRawContent" class="content-text">{{ parsedContent }}</pre>
+              <div class="content-hint">
+                {{ isChineseView ? '当前展示为一键翻译后的中文内容，排版结构保持不变。重要事实请以原文核对。' : '以下内容只调整排版，不改写简历原文。' }}
+              </div>
+              <el-alert v-if="translationError" :title="translationError" type="warning" :closable="true" @close="translationError = ''" />
+
+              <div v-if="showRawContent" class="raw-content-view">
+                <pre class="content-text">{{ activeRawContent }}</pre>
+              </div>
+
               <div v-else class="parsed-sections">
-                <section v-for="(section, index) in parsedSections" :key="index" class="parsed-section">
+                <section v-for="(section, index) in activeSections" :key="index" class="parsed-section">
                   <div class="parsed-section-heading">
                     <span class="parsed-section-number">{{ String(index + 1).padStart(2, '0') }}</span>
                     <h3>{{ section.title }}</h3>
                   </div>
                   <div class="parsed-section-body">
                     <template v-for="(line, lineIndex) in section.lines" :key="lineIndex">
-                      <div v-if="line.kind === 'field'" class="parsed-field">
+                      <div v-if="isLineWorkSnapshot(line)" class="work-snapshot">
+                        <h4>{{ line.label || '任职履历快照' }}</h4>
+                        <div v-if="parseWorkSnapshot(getSnapshotRaw(line)).facts.length" class="snapshot-facts">
+                          <span v-for="(fact, factIndex) in parseWorkSnapshot(getSnapshotRaw(line)).facts" :key="factIndex">{{ fact }}</span>
+                        </div>
+                        <div v-for="(experience, expIndex) in parseWorkSnapshot(getSnapshotRaw(line)).experiences" :key="expIndex" class="snapshot-experience">
+                          <span class="snapshot-period">{{ experience.period }}</span>
+                          <strong v-if="experience.company">{{ experience.company }}</strong>
+                          <span v-if="experience.role" class="snapshot-role">{{ experience.role }}</span>
+                          <p v-if="experience.details.length">{{ experience.details.join(' · ') }}</p>
+                        </div>
+                      </div>
+                      <div v-else-if="line.kind === 'field'" class="parsed-field">
                         <span class="parsed-field-label">{{ line.label }}</span>
                         <span class="parsed-field-value">{{ line.value }}</span>
                       </div>
@@ -1030,22 +1050,9 @@ const projectStore = useProjectStore()
 const projectId = computed(() => (route.params.id as string) || projectStore.currentProjectId || '')
 const projectName = computed(() => projectStore.currentProject?.name || '')
 const showOutreach = ref(false)
-const competencyBusy = ref(false)
 const snapshotHistoryOpen = ref(false)
 const snapshotHistory = ref<any[]>([])
-const radarMode = ref<'job' | 'experience'>('job')
-const competencyButtonText = computed(() => {
-  const analysis = resumeStore.selectedResume?.analysis
-  if (!analysis) return '按经历补全雷达'
-  if (analysis.competencyStatus === 'error') return '重试雷达补全'
-  if (analysis.experienceCompetencies && analysis.experienceCompetencies.length > 0) {
-    return '重新核验经历雷达'
-  }
-  return '补充提炼经历雷达'
-})
-const activeRadarChecks = computed(() => radarMode.value === 'experience'
-  ? resumeStore.selectedResume?.analysis?.experienceCompetencies || []
-  : resumeStore.selectedResume?.analysis?.coreCriterionChecks || [])
+const activeRadarChecks = computed(() => resumeStore.selectedResume?.analysis?.experienceCompetencies || [])
 const rightTab = ref<'detail' | 'ranking' | 'content'>('detail')
 const detailSubTab = ref<'summary' | 'competency' | 'water' | 'interview'>('summary')
 
@@ -1056,16 +1063,7 @@ function handleSelectRadarIndex(idx: number) {
 }
 
 const radarIndicators = computed(() => {
-  const coreChecks = activeRadarChecks.value
-  if (coreChecks && coreChecks.length >= 3) {
-    return coreChecks.map(c => ({ name: c.criterion, max: 4 }))
-  }
-  return [
-    { name: '核心技能', max: 100 },
-    { name: '业务经验', max: 100 },
-    { name: '学历资质', max: 100 },
-    { name: '综合匹配', max: 100 }
-  ]
+  return activeRadarChecks.value.map(c => ({ name: c.criterion, max: 4 }))
 })
 
 const holisticRadarScore = computed(() => {
@@ -1075,17 +1073,7 @@ const holisticRadarScore = computed(() => {
 })
 
 const radarCandidateValues = computed(() => {
-  const coreChecks = activeRadarChecks.value
-  if (coreChecks && coreChecks.length >= 3) {
-    return coreChecks.map(c => c.level ?? 2)
-  }
-  const a = resumeStore.selectedResume?.analysis
-  return [
-    a?.skillMatch ?? 75,
-    a?.experienceMatch ?? 70,
-    a?.educationMatch ?? 80,
-    holisticRadarScore.value
-  ]
+  return activeRadarChecks.value.map(c => c.level ?? 0)
 })
 
 // 左右面板拖拽调整宽度 (Splitter Resizer)
@@ -1166,12 +1154,19 @@ const interviewQACount = computed(() => {
 const parsedContent = ref('')
 const contentLoading = ref(false)
 const showRawContent = ref(false)
+const isChineseView = ref(false)
+const translatedSections = ref<string[]>([])
+const translationBusy = ref(false)
+const translationError = ref('')
+let translationRequest = 0
+
 type ParsedLine = { kind: 'field' | 'bullet' | 'text'; text?: string; label?: string; value?: string }
 type ParsedSection = { title: string; lines: ParsedLine[] }
-const parsedSections = computed<ParsedSection[]>(() => {
+
+function parseContentToSections(content: string): ParsedSection[] {
   const sections: ParsedSection[] = []
   let current: ParsedSection = { title: '基本信息', lines: [] }
-  for (const rawLine of parsedContent.value.replace(/\r\n?/g, '\n').split('\n')) {
+  for (const rawLine of content.replace(/\r\n?/g, '\n').split('\n')) {
     const line = rawLine.trim()
     if (!line) continue
     const heading = line.match(/^[【\[]([^】\]]{2,60})[】\]]$/) || line.match(/^#{1,4}\s+(.+)$/)
@@ -1186,8 +1181,154 @@ const parsedSections = computed<ParsedSection[]>(() => {
     else current.lines.push({ kind: 'text', text: line })
   }
   if (current.lines.length) sections.push(current)
-  return sections.length ? sections : [{ title: '原文内容', lines: [{ kind: 'text', text: parsedContent.value }] }]
+  return sections.length ? sections : [{ title: '原文内容', lines: [{ kind: 'text', text: content }] }]
+}
+
+function isWorkSnapshot(label?: string, value?: string, text?: string): boolean {
+  if (label && (label.includes('任职履历快照') || label.includes('工作经历') || label.includes('履历快照') || label.includes('工作背景') || label.includes('履历') || label.includes('经历') || /work\s*experience/i.test(label) || /experience/i.test(label))) {
+    return true
+  }
+  const candidate = (value || '') + ' ' + (text || '')
+  return candidate.includes('|') && /(?:19|20)\d{2}[./-]\d{1,2}/.test(candidate)
+}
+
+function isLineWorkSnapshot(line: ParsedLine): boolean {
+  if (line.kind === 'field' && isWorkSnapshot(line.label, line.value)) return true
+  const raw = line.value || line.text || ''
+  return raw.includes('|') && /(?:19|20)\d{2}[./-]\d{1,2}/.test(raw)
+}
+
+function getSnapshotRaw(line: ParsedLine): string {
+  return line.value || line.text || ''
+}
+
+function parseSectionText(text: string, defaultTitle: string): ParsedSection {
+  const lines = text.replace(/\r\n?/g, '\n').split('\n')
+  let title = defaultTitle
+  const parsedLines: ParsedLine[] = []
+  let activeSnapshotLine: ParsedLine | null = null
+
+  for (const rawLine of lines) {
+    const line = rawLine.trim()
+    if (!line) continue
+    const heading = line.match(/^[【\[]([^】\]]{2,60})[】\]]$/) || line.match(/^#{1,4}\s+(.+)$/)
+    if (heading && parsedLines.length === 0) {
+      title = heading[1].trim()
+      continue
+    }
+    const field = line.match(/^([^：:]{2,20})[：:]\s*(.+)$/)
+    if (field) {
+      const label = field[1].trim()
+      const value = field[2].trim()
+      const newLine: ParsedLine = { kind: 'field', label, value }
+      parsedLines.push(newLine)
+      activeSnapshotLine = isWorkSnapshot(label, value) ? newLine : null
+    } else if (activeSnapshotLine && (line.includes('|') || /(?:19|20)\d{2}/.test(line) || /^[•●·*\-o]\s*/.test(line))) {
+      activeSnapshotLine.value = (activeSnapshotLine.value ? activeSnapshotLine.value + ' | ' : '') + line
+    } else if (line.includes('|') && /(?:19|20)\d{2}[./-]\d{1,2}/.test(line)) {
+      activeSnapshotLine = { kind: 'field', label: '任职履历快照', value: line }
+      parsedLines.push(activeSnapshotLine)
+    } else if (/^[•●·*\-]\s*/.test(line)) {
+      activeSnapshotLine = null
+      parsedLines.push({ kind: 'bullet', text: line.replace(/^[•●·*\-]\s*/, '') })
+    } else {
+      activeSnapshotLine = null
+      parsedLines.push({ kind: 'text', text: line })
+    }
+  }
+  return { title, lines: parsedLines.length ? parsedLines : [{ kind: 'text', text }] }
+}
+
+const originalParsedSections = computed<ParsedSection[]>(() => {
+  return parseContentToSections(parsedContent.value)
 })
+
+const activeSections = computed<ParsedSection[]>(() => {
+  if (isChineseView.value && translatedSections.value.length === originalParsedSections.value.length) {
+    return originalParsedSections.value.map((origSec, idx) => {
+      const secText = translatedSections.value[idx] || ''
+      const parsed = parseSectionText(secText, origSec.title)
+      parsed.title = origSec.title
+      return parsed
+    })
+  }
+  return originalParsedSections.value
+})
+
+const activeRawContent = computed<string>(() => {
+  if (isChineseView.value && translatedSections.value.length) {
+    return translatedSections.value.join('\n\n')
+  }
+  return parsedContent.value
+})
+
+interface SnapshotExperience { period: string; company: string; role: string; details: string[] }
+function parseWorkSnapshot(value: string): { facts: string[]; experiences: SnapshotExperience[] } {
+  const cleanedValue = value.replace(/\r?\n+/g, ' | ')
+  const tokens = cleanedValue.split(/\s*\|\s*/).map(part => {
+    let p = part.trim()
+    p = p.replace(/^[•●·*\-o]\s*/, '').trim()
+    return p
+  }).filter(part => part && part !== '•' && part !== '·' && part !== 'o' && part !== '-')
+  const facts: string[] = []
+  const experiences: SnapshotExperience[] = []
+  const periodPattern = /(?:19|20)\d{2}[./-]\d{1,2}\s*(?:[-—–~至]|到)\s*(?:(?:19|20)\d{2}[./-]\d{1,2}|至今|现在|今)/
+  const companyPattern = /公司|集团|研究院|实验室|医院|事务所|科技|大学|学院|中心$|控股|电子商务|银行|研究所|生物|医疗|tech|corp|inc|ltd/i
+  const rolePattern = /工程师|经理|总监|主管|专员|顾问|负责人|设计师|研究员|助理|分析师|架构师|测试员|开发者|开发|专家|采购员|技术员|代表|manager|lead|director|developer/i
+  let current: SnapshotExperience | null = null
+  for (const token of tokens) {
+    if (periodPattern.test(token)) {
+      current = { period: token, company: '', role: '', details: [] }
+      experiences.push(current)
+    } else if (!current) {
+      facts.push(token)
+    } else if (!current.company && companyPattern.test(token)) {
+      current.company = token
+    } else if (!current.role && rolePattern.test(token)) {
+      current.role = token
+    } else {
+      current.details.push(token)
+    }
+  }
+  return { facts, experiences }
+}
+
+function translationSourceSections(): string[] {
+  return originalParsedSections.value.map(section => [
+    `【${section.title}】`,
+    ...section.lines.map(line => {
+      if (line.kind === 'field') return `${line.label}：${line.value}`
+      if (line.kind === 'bullet') return `• ${line.text}`
+      return line.text || ''
+    })
+  ].join('\n'))
+}
+
+async function handleTranslateToChinese(force: boolean) {
+  const resumeID = resumeStore.selectedId
+  if (!resumeID || !parsedContent.value || translationBusy.value) return
+  if (!force && translatedSections.value.length === originalParsedSections.value.length) {
+    isChineseView.value = true
+    return
+  }
+  const request = ++translationRequest
+  translationBusy.value = true
+  translationError.value = ''
+  try {
+    const api: any = await import('../../wailsjs/go/main/App')
+    const sections = translationSourceSections()
+    const result: string[] = await api.TranslateResumeSections(resumeID, 'zh', force, sections)
+    if (request !== translationRequest || resumeStore.selectedId !== resumeID) return
+    if (result.length !== sections.length) throw new Error('译文分区与原文不一致，请重新翻译')
+    translatedSections.value = result
+    isChineseView.value = true
+    ElMessage.success('已一键翻译为中文')
+  } catch (err: any) {
+    if (request === translationRequest) translationError.value = err?.message || String(err)
+  } finally {
+    if (request === translationRequest) translationBusy.value = false
+  }
+}
 const contactBusy = ref(false)
 interface JobCommunicationOption {
   id: string
@@ -1391,21 +1532,6 @@ async function ensure51JobCandidateDetail(): Promise<boolean> {
     if (err !== 'cancel' && err !== 'close') ElMessage.error(err?.message || String(err))
     return false
   } finally { contactBusy.value = false }
-}
-
-async function supplementCompetencies() {
-  const resume = resumeStore.selectedResume
-  if (!resume || competencyBusy.value) return
-  competencyBusy.value = true
-  try {
-    const api: any = await import('../../wailsjs/go/main/App')
-    await api.SupplementResumeCompetencies(resume.id)
-    await resumeStore.loadProjectResumes(projectId.value)
-    if (resumeStore.selectedResume?.analysis?.experienceCompetencies?.length) radarMode.value = 'experience'
-    selectedRadarIndex.value = null
-    ElMessage.success('能力维度已按简历经历更新，请结合原文核实')
-  } catch (err: any) { await resumeStore.loadProjectResumes(projectId.value); ElMessage.error(err?.message || String(err)) }
-  finally { competencyBusy.value = false }
 }
 
 async function showSnapshotHistory() {
@@ -1857,13 +1983,23 @@ function handleStartAnalysis() {
 // 加载解析内容
 async function loadParsedContent() {
   if (!resumeStore.selectedId) { parsedContent.value = ''; return }
+  const requestedId = resumeStore.selectedId
   contentLoading.value = true
   try {
-    parsedContent.value = await resumeStore.getResumeContent(resumeStore.selectedId)
+    const content = await resumeStore.getResumeContent(requestedId)
+    if (resumeStore.selectedId === requestedId) {
+      if (parsedContent.value && parsedContent.value !== content) {
+        translationRequest++
+        translatedSections.value = []
+        isChineseView.value = false
+        translationBusy.value = false
+      }
+      parsedContent.value = content
+    }
   } catch {
-    parsedContent.value = ''
+    if (resumeStore.selectedId === requestedId) parsedContent.value = ''
   } finally {
-    contentLoading.value = false
+    if (resumeStore.selectedId === requestedId) contentLoading.value = false
   }
 }
 
@@ -1874,8 +2010,13 @@ watch(rightTab, (tab) => {
 
 // 选中简历变化时，如果在内容 Tab 则刷新
 watch(() => resumeStore.selectedId, () => {
-  radarMode.value = 'job'
   selectedRadarIndex.value = null
+  translationRequest++
+  translatedSections.value = []
+  isChineseView.value = false
+  translationBusy.value = false
+  translationError.value = ''
+  parsedContent.value = ''
   if (rightTab.value === 'content') { loadParsedContent() }
 })
 
@@ -2007,25 +2148,6 @@ onUnmounted(() => {
 </script>
 
 <style scoped lang="scss">
-.competency-mode-bar { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; margin: 12px 0; }
-.competency-mode-bar .header-tip { color: var(--wb-muted); font-size: 12px; line-height: 1.6; }
-.competency-count-badge {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  margin-left: 4px;
-  padding: 0 5px;
-  font-size: 11px;
-  font-weight: 600;
-  border-radius: 10px;
-  background: rgba(22, 119, 255, 0.1);
-  color: #1677ff;
-  line-height: 16px;
-}
-:deep(.el-radio-button.is-active) .competency-count-badge {
-  background: rgba(255, 255, 255, 0.25);
-  color: #fff;
-}
 .criterion-assessment { width: 100%; margin: 6px 0 0; color: var(--wb-muted); font-size: 12px; line-height: 1.6; }
 @import '../styles/macos-theme.scss';
 
@@ -3800,6 +3922,18 @@ details.candidate-portal-bar[open] > summary.portal-header { margin-bottom: 12px
         border-radius: 4px;
         color: $system-blue;
       }
+      .translation-status-pill {
+        display: inline-flex;
+        align-items: center;
+        padding: 2px 8px;
+        border-radius: 4px;
+        background: rgba(16, 185, 129, 0.1);
+        color: #059669;
+        font-size: 11px;
+        font-weight: 600;
+      }
+      .content-actions { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+      .content-actions :deep(.el-button + .el-button) { margin-left: 0; }
     }
 
     .content-hint {
@@ -3853,13 +3987,25 @@ details.candidate-portal-bar[open] > summary.portal-header { margin-bottom: 12px
       font-weight: 700;
     }
 
-    .parsed-section-body { display: grid; gap: 9px; max-width: 78ch; }
+    .parsed-section-body { display: grid; gap: 9px; min-width: 0; max-width: 78ch; }
     .parsed-field { display: grid; grid-template-columns: minmax(110px, 160px) minmax(0, 1fr); gap: 12px; line-height: 1.65; }
     .parsed-field-label { color: $text-secondary; font-size: 12px; font-weight: 600; }
     .parsed-field-value, .parsed-paragraph, .parsed-bullet { color: $text-primary; font-size: 13px; line-height: 1.7; overflow-wrap: anywhere; }
     .parsed-paragraph { margin: 0; }
     .parsed-bullet { display: flex; gap: 9px; }
     .parsed-bullet > span { color: $system-blue; font-weight: 700; }
+
+    .work-snapshot { display: grid; gap: 10px; min-width: 0; }
+    .work-snapshot h4 { margin: 0; color: $text-secondary; font-size: 12px; }
+    .snapshot-facts { display: flex; flex-wrap: wrap; gap: 6px; }
+    .snapshot-facts span { padding: 4px 8px; border-radius: 6px; background: $bg-primary; border: 1px solid $separator; color: $text-secondary; font-size: 12px; overflow-wrap: anywhere; }
+    .snapshot-experience { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 10px; padding: 12px 14px; border: 1px solid $separator; border-left: 3px solid $system-blue; border-radius: 8px; background: $bg-primary; }
+    .snapshot-period { color: $system-blue; font-size: 12px; font-weight: 700; }
+    .snapshot-experience strong { color: $text-primary; font-size: 13px; overflow-wrap: anywhere; }
+    .snapshot-role { color: $text-secondary; font-size: 12px; }
+    .snapshot-experience p { flex-basis: 100%; margin: 0; color: $text-secondary; font-size: 12px; line-height: 1.6; overflow-wrap: anywhere; }
+
+    .raw-content-view { display: block; width: 100%; }
 
     @media (max-width: 620px) {
       .parsed-field { grid-template-columns: 1fr; gap: 1px; }

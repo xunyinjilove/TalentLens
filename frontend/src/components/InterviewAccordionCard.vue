@@ -109,9 +109,12 @@ function setEval(idx: number, status: 'pass' | 'pending' | 'fail') {
 
 function getCategoryClass(category?: string): string {
   if (!category) return 'cat-tech'
-  if (category.includes('技术')) return 'cat-tech'
+  if (category.includes('能力') || category.includes('综合') || category.includes('沟通') || category.includes('协作') || category.includes('自驱') || category.includes('动机') || category.includes('抗压') || category.includes('规划')) {
+    return 'cat-ability'
+  }
+  if (category.includes('技术') || category.includes('专业')) return 'cat-tech'
   if (category.includes('项目') || category.includes('业务')) return 'cat-project'
-  if (category.includes('真实') || category.includes('防伪') || category.includes('疑点')) return 'cat-gap'
+  if (category.includes('真实') || category.includes('防伪') || category.includes('疑点') || category.includes('短板')) return 'cat-gap'
   return 'cat-tech'
 }
 
@@ -188,9 +191,10 @@ function handleCopySingleQA(item: QAItem, idx: number) {
           white-space: nowrap;
           flex-shrink: 0;
 
-          &.cat-tech { background: #eff6ff; color: #1d4ed8; }
-          &.cat-project { background: #f0fdf4; color: #15803d; }
-          &.cat-gap { background: #fef2f2; color: #b91c1c; }
+          &.cat-ability { background: #fdf2f8; color: #be185d; border: 1px solid #fbcfe8; }
+          &.cat-tech { background: #eff6ff; color: #1d4ed8; border: 1px solid #dbeafe; }
+          &.cat-project { background: #f0fdf4; color: #15803d; border: 1px solid #bbf7d0; }
+          &.cat-gap { background: #fef2f2; color: #b91c1c; border: 1px solid #fecaca; }
         }
 
         .qa-question-title {

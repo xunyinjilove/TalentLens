@@ -36,7 +36,7 @@ import (
 )
 
 // 版本信息
-const AppVersion = "1.8.22"
+const AppVersion = "1.8.23"
 const analysisFormatRetryVersion = "model-json-repair-v1"
 const GitHubRepo = "xunyinjilove/TalentLens"
 
@@ -305,6 +305,7 @@ type App struct {
 	bossMutex          sync.Mutex
 	interviewMutex     sync.Mutex
 	contactMutex       sync.Mutex
+	translationMutex   sync.Mutex
 	outreachMutex      sync.Mutex
 	contactPending     map[string]pending51JobHiQuote
 	analysisMutex      sync.Mutex
@@ -2910,7 +2911,25 @@ func (a *App) AnalyzeResume(resumeID string, cfg *AIConfig, jobCfg *JobConfig) (
 			analysis.ScoreDiff = resume.FinalScore - resume.InitialScore
 		}
 	} else {
-		resume.InitialScore = scoreInt
+		// 重新分析防跳跃与分差稳定性保障：
+		// 若为单简历重新分析（非双源附件终审），且已有前次初筛基准分（resume.InitialScore > 0），
+		// 校验当前分析结果与历史得分的偏离度。若偏离超过 ±5 分，执行平滑稳定校准，保证重新分析前后分差可控。
+		if resume.InitialScore > 0 {
+			diff := scoreInt - resume.InitialScore
+			if diff > 5 {
+				log.Printf("[AnalyzeResume] 重新分析得分防跳跃校准: %d -> %d (基准分: %d)", scoreInt, resume.InitialScore+5, resume.InitialScore)
+				scoreInt = resume.InitialScore + 5
+			} else if diff < -5 {
+				log.Printf("[AnalyzeResume] 重新分析得分防跳跃校准: %d -> %d (基准分: %d)", scoreInt, resume.InitialScore-5, resume.InitialScore)
+				scoreInt = resume.InitialScore - 5
+			}
+			analysis.OverallScore = float64(scoreInt)
+			analysis.AbilityScore = scoreInt
+			analysis.CoreMatch = float64(scoreInt)
+			refreshCandidateRecommendation(analysis)
+		} else {
+			resume.InitialScore = scoreInt
+		}
 	}
 	resume.Score = scoreInt
 	resume.Analysis = analysis
@@ -3055,6 +3074,20 @@ func (a *App) buildAnalysisPrompt(resume *Resume, jobCfg *JobConfig) string {
 		resumeBlock = fmt.Sprintf("文件名: %s\n```\n%s\n```", resume.FileName, a.truncateContent(resume.Content, 10000))
 	}
 
+	reAnalyzeAnchorBlock := ""
+	baseAnchor := resume.InitialScore
+	if baseAnchor == 0 {
+		baseAnchor = resume.Score
+	}
+	if baseAnchor > 0 && !resume.IsMergedAnalysis {
+		reAnalyzeAnchorBlock = fmt.Sprintf(
+			"### 重新分析基准锚定规定（防打分大起大落）：\n"+
+				"- 该候选人历史初筛评估基准分为 **%d 分**。\n"+
+				"- 在岗位要求与候选人简历材料未发生重大变动的前提下，本次重新分析的各项匹配度及 overall_score 必须严格围绕该基准进行客观细化微调，**严禁分差超过 ±5 分**，保证评分严密一致与可信度。\n\n",
+			baseAnchor,
+		)
+	}
+
 	userPrompt := fmt.Sprintf(
 		"## 招聘岗位信息\n"+
 			"- 岗位名称: %s\n"+
@@ -3071,22 +3104,28 @@ func (a *App) buildAnalysisPrompt(resume *Resume, jobCfg *JobConfig) string {
 			"%s\n\n"+
 			"## 分析任务\n\n"+
 			"请对候选人简历进行全方位、深度的专业分析。\n\n"+
-			"### 评分标准（严格执行）\n\n"+
+			"%s"+
+			"### 评分标准与稳定性严格规定（必须严格执行，杜绝主观任意给分）\n\n"+
+			"**核心原则**：评分必须客观严谨、具备极高的确定性与可复现性。严格根据简历中能核实的客观事实给出精准区间，禁止随意给出大起大落的估计分。\n\n"+
 			"**技能匹配度 (skill_match)**:\n"+
-			"- 90-100: 完全掌握所有核心技能，且有相关高级技能加分\n"+
-			"- 70-89: 掌握大部分核心技能，个别技能有欠缺\n"+
-			"- 50-69: 掌握部分核心技能，有较大技能差距\n"+
-			"- 0-49: 核心技能严重不足\n\n"+
+			"- 90-100: 完全掌握所有核心必备技能，且有可定位的大型项目主导实战成果\n"+
+			"- 75-89: 熟练掌握绝大多数核心必备技能（>=70%%），具备独立实操与交付经验\n"+
+			"- 60-74: 掌握约半数核心技能（约 50%%），部分关键技能欠缺实战经历或仅停留在了解阶段\n"+
+			"- 40-59: 仅涉及少数边缘技能，核心必备技能严重不足\n"+
+			"- 0-39: 完全不具备岗位要求的核心技能\n\n"+
 			"**经验匹配度 (experience_match)**:\n"+
-			"- 90-100: 工作年限超过要求，且有高度相关的项目经验\n"+
-			"- 70-89: 工作年限满足要求，有相关经验\n"+
-			"- 50-69: 工作年限略不足，或经验相关度不高\n"+
-			"- 0-49: 工作年限严重不足，或无相关经验\n\n"+
+			"- 90-100: 工作年限超过要求，业务场景与项目深度高度对口\n"+
+			"- 75-89: 工作年限达到要求，有良好且直接相关的项目实战经历\n"+
+			"- 60-74: 工作年限基本达标，但所属行业或业务场景有一定跨度\n"+
+			"- 40-59: 工作年限明显不足（缺口1-2年），或项目复杂度过低\n"+
+			"- 0-39: 无相关行业或岗位工作经验\n\n"+
 			"**学历匹配度 (education_match)**:\n"+
-			"- 90-100: 学历超过要求，且专业高度对口\n"+
-			"- 70-89: 学历满足要求，专业相关\n"+
-			"- 50-69: 学历勉强满足，专业有一定偏差\n"+
-			"- 0-49: 学历不满足要求\n\n"+
+			"- 90-100: 学历高于岗位最低要求，且专业完全对口\n"+
+			"- 75-89: 满足最低学历要求，专业对口或高度相关\n"+
+			"- 60-74: 满足最低学历要求，但专业有一定跨度\n"+
+			"- 0-59: 未达到岗位最低学历门槛要求\n\n"+
+			"**综合评分逻辑 (overall_score)**：\n"+
+			"overall_score 必须在逻辑上严密契合各分项得分，基准公式为：skill_match * 0.55 + experience_match * 0.35 + education_match * 0.10（四舍五入取整）。不得脱离单项评分凭主观臆断给出突变分数。\n\n"+
 			"**核心能力 (core_match)** 为直接相关项目和核心业务能力的 0-100 分。逐项返回 core_criterion_checks，criterion 必须与评分卡逐字一致，level 为 0-4。最终能力分由系统按各项等级等权计算；加分项经 HR 核实后只用于同档排序，不抬高能力分。\n\n"+
 			"同时从真实工作、项目和学习经历提炼 3–6 个 experience_competencies 补充能力（材料不足则少填或留空，不凑数）。两类能力的 evidence 必须是原文中的连续引用；assessment 写出判断与待核实项。仅职位名称最多给1级，不能推断未披露工具的熟练度。履历补充维度不计入岗位能力分。\n\n"+
 			"### 推荐等级\n"+
@@ -3140,29 +3179,29 @@ func (a *App) buildAnalysisPrompt(resume *Resume, jobCfg *JobConfig) string {
 			"  ],\n"+
 			"  \"interview_qa\": [\n"+
 			"    {\n"+
-			"      \"category\": \"技术深度\",\n"+
-			"      \"question\": \"针对岗位必备核心技能底层的深度技术问题\",\n"+
+			"      \"category\": \"个人能力\",\n"+
+			"      \"question\": \"【沟通协作与团队融合】针对跨部门沟通、冲突化解或与不同风格同事协同配合的实战提问（适用于HR初试考察非技术维度）\",\n"+
+			"      \"reference_answer\": \"基于候选人过往经历与背景，提炼出的考察重点与候选人应有的合理回答方向\"\n"+
+			"    },\n"+
+			"    {\n"+
+			"      \"category\": \"个人能力\",\n"+
+			"      \"question\": \"【自驱力与学习抗压】针对面临高压紧迫交付、业务方向调整或新技术攻坚时的态度与解决方式提问\",\n"+
+			"      \"reference_answer\": \"基于履历事实的考察要点与应对依据\"\n"+
+			"    },\n"+
+			"    {\n"+
+			"      \"category\": \"个人能力\",\n"+
+			"      \"question\": \"【职业规划与求职动机】针对候选人的跳槽动机、岗位期望、工作稳定性及长期职业目标的提问\",\n"+
+			"      \"reference_answer\": \"基于候选人跳槽频次、空窗期或职业路径的核实要点与评估建议\"\n"+
+			"    },\n"+
+			"    {\n"+
+			"      \"category\": \"专业技术\",\n"+
+			"      \"question\": \"针对岗位必备核心硬技能底层的深度技术问题\",\n"+
 			"      \"reference_answer\": \"基于候选人简历中写明的技能掌握情况和使用背景，提炼出的参考回答要点与事实依据\"\n"+
 			"    },\n"+
 			"    {\n"+
-			"      \"category\": \"技术深度\",\n"+
-			"      \"question\": \"针对另一核心技术栈/并发/存储/架构机制的深入提问\",\n"+
-			"      \"reference_answer\": \"基于简历技能背景的参考回答要点\"\n"+
-			"    },\n"+
-			"    {\n"+
-			"      \"category\": \"项目实战\",\n"+
-			"      \"question\": \"针对候选人简历中最重要核心项目的架构设计、技术选型或性能优化的追问\",\n"+
+			"      \"category\": \"专业技术\",\n"+
+			"      \"question\": \"针对候选人简历中最重要核心项目的架构设计、技术选型或性能优化/实战难题追问\",\n"+
 			"      \"reference_answer\": \"参考回答（必须引用简历中该项目的具体背景、职责、技术方案与量化成果）\"\n"+
-			"    },\n"+
-			"    {\n"+
-			"      \"category\": \"项目实战\",\n"+
-			"      \"question\": \"针对简历中另一关键项目或业务挑战/故障排查/高可用方案的追问\",\n"+
-			"      \"reference_answer\": \"参考回答（引用简历中的事实数据与方案）\"\n"+
-			"    },\n"+
-			"    {\n"+
-			"      \"category\": \"真实性与短板\",\n"+
-			"      \"question\": \"针对候选人简历中的技能短板、模糊表述或需现场核实的疑点提问\",\n"+
-			"      \"reference_answer\": \"面试官考察要点与简历中对应疑点/短板的分析说明\"\n"+
 			"    }\n"+
 			"  ],\n"+
 			"  \"manager_pitch\": \"【候选人极简推介卡】（用于HR发给业务主管微信/钉钉）：\\n👤 姓名：张三 | 现任：高级Go开发工程师\\n📌 背景：5年经验 | 本科-武汉大学-计算机科学\\n🎯 综合评估：85分（强力推荐）\\n✨ 核心亮点：\\n  1. 具备日活千万级高并发电商微服务经验；\\n  2. 深入精通Go/MySQL分库分表/K8s容器化；\\n  3. 贴合目前高并发岗位诉求，架构实战经验扎实。\\n⚠️ 关注点：有4个月换工作空窗期，初试建议核实原因。\",\n"+
@@ -3183,7 +3222,7 @@ func (a *App) buildAnalysisPrompt(resume *Resume, jobCfg *JobConfig) string {
 			"```\n\n"+
 			"注意事项：\n"+
 			"1. 所有分析与参考回答必须基于简历中的客观内容，不得编造简历中不存在的信息\n"+
-			"2. interview_qa 必须严格生成恰好 5 个问题（2道技术深度 + 2道项目实战 + 1道真实性与短板），且每个问题的 reference_answer 都要紧密结合候选人简历中写明的技能与项目事实\n"+
+			"2. interview_qa 必须严格生成恰好 5 个问题：前 3 道为适用于 HR 初试非技术层面的【个人能力】问题（依次考察：沟通协作与团队融合、自驱力与学习抗压、职业规划与求职动机），后 2 道为关于岗位必备核心硬技能与项目实战的【专业技术】问题；每个问题的 reference_answer 都要紧密结合候选人简历中的实际背景与客观事实\n"+
 			"3. strengths 至少3条，weaknesses 至少2条，每条都要具体且有事实依据\n"+
 			"4. summary 不能笼统，要结合候选人的具体情况给出有价值的判断\n"+
 			"5. 确保返回合法的JSON格式\n"+
@@ -3203,6 +3242,7 @@ func (a *App) buildAnalysisPrompt(resume *Resume, jobCfg *JobConfig) string {
 		requirements,
 		resumeBlock,
 		mergedInstruction,
+		reAnalyzeAnchorBlock,
 	)
 
 	// 使用 system + user 消息格式
