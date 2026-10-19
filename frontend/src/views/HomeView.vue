@@ -517,34 +517,35 @@
                     </div>
                   </div>
 
-                  <!-- 履历能力维度全景雷达 -->
+                  <!-- 岗位统一技能指标雷达 -->
                   <div class="score-section-card modern-competency-card">
                     <div class="section-card-header">
                       <div class="header-title">
                         <el-icon><Histogram /></el-icon>
-                        <span>履历能力维度全景雷达</span>
+                        <span>岗位统一技能指标雷达</span>
                       </div>
                     </div>
 
                     <el-alert v-if="resumeStore.selectedResume.analysis.competencyMessage" :title="resumeStore.selectedResume.analysis.competencyMessage" :type="resumeStore.selectedResume.analysis.competencyStatus === 'error' ? 'warning' : 'info'" :closable="false" show-icon style="margin:0 0 16px" />
+                    <el-alert v-else-if="hasHistoricalUncovered" title="提示：当前展示为岗位统一技能指标雷达。该简历为历史版本分析，部分指标未对齐，建议点击上方【重新分析】更新为完整雷达分析。" type="info" :closable="false" show-icon style="margin:0 0 16px" />
 
-                    <p class="score-explanation">根据实际经历提炼，逐项展示原文依据；这些补充维度不计入岗位证据分。</p>
+                    <p class="score-explanation">基于当前岗位配置的【技能要求与核心能力】构建统一雷达坐标，所有候选人以相同标准横向对比评估。</p>
 
                     <div class="competency-split-layout">
                       <!-- 左侧：原生 SVG 蜘蛛网雷达图 -->
                       <div class="radar-visual-col">
                         <SvgRadarChart
-                          v-if="activeRadarChecks.length >= 3"
+                          v-if="radarDisplayChecks.length >= 3"
                           :indicators="radarIndicators"
                           :candidate-values="radarCandidateValues"
                           :show-benchmark="false"
                           :selected-index="selectedRadarIndex"
                           @select="handleSelectRadarIndex"
                         />
-                        <p v-else class="score-explanation">目前仅有 {{ activeRadarChecks.length }} 项可引用的履历能力，材料不足时不补画无依据的维度。需要更新时可重新分析整份简历。</p>
+                        <p v-else class="score-explanation">当前岗位配置的技能与核心能力少于 3 项，建议在岗位设置中完善至少 3 项技能要求以生成雷达多边形。</p>
                       </div>
 
-                      <!-- 右侧：经历能力与原文线索 -->
+                      <!-- 右侧：技能能力与原文线索 -->
                       <div class="score-breakdown-box">
                         <div
                           v-for="(item, cIdx) in activeRadarChecks"
@@ -555,6 +556,7 @@
                         >
                           <div class="criterion-name-col">
                             <span class="criterion-name">{{ item.criterion }}</span>
+                            <span v-if="!item.isCovered" class="uncovered-tag">待重新评估</span>
                             <span class="criterion-level-badge" :class="'level-' + item.level">
                               {{ item.level }}/4 · {{ ['未体现', '相关经历线索', '参与', '独立完成', '主导并可复盘'][item.level] || '待核实' }}
                             </span>
@@ -565,7 +567,7 @@
                           <p v-if="item.assessment" class="criterion-assessment">{{ item.assessment }}</p>
                         </div>
                         <p v-if="!activeRadarChecks.length" class="score-explanation empty">
-                          暂无可引用的经历能力维度。可重新分析整份简历，并结合原文核实。
+                          暂无岗位技能指标。请先在岗位配置中设置技能要求或核心能力。
                         </p>
                       </div>
                     </div>
@@ -802,11 +804,11 @@
                 <div class="content-heading">
                   <span class="content-filename">{{ resumeStore.selectedResume.fileName }}</span>
                   <span class="content-stats">{{ $t('home.contentLength', { count: activeRawContent.length }) }}</span>
-                  <span v-if="isChineseView" class="translation-status-pill">已一键译为中文</span>
+                  <span v-if="translatedSections.length" class="translation-status-pill">已生成中文对照译文</span>
                 </div>
                 <div class="content-actions">
                   <el-button
-                    v-if="!isChineseView"
+                    v-if="!translatedSections.length"
                     size="small"
                     type="primary"
                     plain
@@ -817,23 +819,20 @@
                     一键翻译为中文
                   </el-button>
                   <template v-else>
-                    <el-button size="small" type="primary" plain @click="isChineseView = false">
-                      查看原文
+                    <el-button size="small" plain @click="toggleAllTranslations">
+                      {{ allTranslationsCollapsed ? '展开全部译文' : '折叠全部译文' }}
                     </el-button>
                     <el-button size="small" plain :loading="translationBusy" @click="handleTranslateToChinese(true)">
                       重新翻译
                     </el-button>
                   </template>
-                  <el-button v-if="!isChineseView && translatedSections.length" size="small" plain @click="isChineseView = true">
-                    查看中文译文
-                  </el-button>
                   <el-button size="small" plain @click="showRawContent = !showRawContent">
                     {{ showRawContent ? '查看分区排版' : '查看完整原文' }}
                   </el-button>
                 </div>
               </div>
               <div class="content-hint">
-                {{ isChineseView ? '当前展示为一键翻译后的中文内容，排版结构保持不变。重要事实请以原文核对。' : '以下内容只调整排版，不改写简历原文。' }}
+                {{ translatedSections.length ? '已在对应分区模块下方生成中文译文，保留完整原文以便中英核对。' : '以下内容只调整排版，不改写简历原文。' }}
               </div>
               <el-alert v-if="translationError" :title="translationError" type="warning" :closable="true" @close="translationError = ''" />
 
@@ -842,7 +841,7 @@
               </div>
 
               <div v-else class="parsed-sections">
-                <section v-for="(section, index) in activeSections" :key="index" class="parsed-section">
+                <section v-for="(section, index) in originalParsedSections" :key="index" class="parsed-section">
                   <div class="parsed-section-heading">
                     <span class="parsed-section-number">{{ String(index + 1).padStart(2, '0') }}</span>
                     <h3>{{ section.title }}</h3>
@@ -868,6 +867,43 @@
                       <div v-else-if="line.kind === 'bullet'" class="parsed-bullet"><span aria-hidden="true">•</span>{{ line.text }}</div>
                       <p v-else class="parsed-paragraph">{{ line.text }}</p>
                     </template>
+                  </div>
+
+                  <!-- 对应模块下方的中文译文卡片 -->
+                  <div v-if="parsedTranslatedSections[index]" class="section-translation-container">
+                    <div class="translation-card-header" @click="toggleSectionTranslation(index)">
+                      <div class="translation-badge">
+                        <el-icon><Reading /></el-icon>
+                        <span>中文译文</span>
+                        <span class="translated-section-title">【{{ parsedTranslatedSections[index].title }}】</span>
+                      </div>
+                      <el-button link size="small" type="primary">
+                        {{ isTranslationCollapsed(index) ? '展开译文' : '收起译文' }}
+                      </el-button>
+                    </div>
+
+                    <div v-show="!isTranslationCollapsed(index)" class="translation-card-body">
+                      <template v-for="(tLine, tIdx) in parsedTranslatedSections[index].lines" :key="tIdx">
+                        <div v-if="isLineWorkSnapshot(tLine)" class="work-snapshot translation-snapshot">
+                          <h4>{{ tLine.label || '任职履历快照' }}</h4>
+                          <div v-if="parseWorkSnapshot(getSnapshotRaw(tLine)).facts.length" class="snapshot-facts">
+                            <span v-for="(fact, fIdx) in parseWorkSnapshot(getSnapshotRaw(tLine)).facts" :key="fIdx">{{ fact }}</span>
+                          </div>
+                          <div v-for="(exp, expIdx) in parseWorkSnapshot(getSnapshotRaw(tLine)).experiences" :key="expIdx" class="snapshot-experience">
+                            <span class="snapshot-period">{{ exp.period }}</span>
+                            <strong v-if="exp.company">{{ exp.company }}</strong>
+                            <span v-if="exp.role" class="snapshot-role">{{ exp.role }}</span>
+                            <p v-if="exp.details.length">{{ exp.details.join(' · ') }}</p>
+                          </div>
+                        </div>
+                        <div v-else-if="tLine.kind === 'field'" class="parsed-field">
+                          <span class="parsed-field-label">{{ tLine.label }}</span>
+                          <span class="parsed-field-value">{{ tLine.value }}</span>
+                        </div>
+                        <div v-else-if="tLine.kind === 'bullet'" class="parsed-bullet"><span aria-hidden="true">•</span>{{ tLine.text }}</div>
+                        <p v-else class="parsed-paragraph">{{ tLine.text }}</p>
+                      </template>
+                    </div>
                   </div>
                 </section>
               </div>
@@ -1019,7 +1055,8 @@ import {
   CircleCheck, Warning, ChatLineSquare, Clock, Loading, CircleClose,
   RefreshRight, MoreFilled, Tickets, QuestionFilled, DocumentCopy, InfoFilled, Search,
   ChatDotRound, DocumentAdd, Connection, CloseBold, Paperclip, Compass, Check, Message,
-  Link, Plus, Share, Aim, Filter, Download, Delete, Finished, Histogram, Calendar
+  Link, Plus, Share, Aim, Filter, Download, Delete, Finished, Histogram, Calendar,
+  Reading
 } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import TitleBar from '../components/TitleBar.vue'
@@ -1052,7 +1089,85 @@ const projectName = computed(() => projectStore.currentProject?.name || '')
 const showOutreach = ref(false)
 const snapshotHistoryOpen = ref(false)
 const snapshotHistory = ref<any[]>([])
-const activeRadarChecks = computed(() => resumeStore.selectedResume?.analysis?.experienceCompetencies || [])
+interface RadarCheckItem {
+  criterion: string
+  level: number
+  evidence: string
+  assessment: string
+  isCovered: boolean
+}
+
+// 基于当前岗位配置的【技能要求 + 核心能力】构建统一雷达指标
+const unifiedJobMetrics = computed<string[]>(() => {
+  const jobCfg = projectStore.currentProject?.job_config
+  const set = new Set<string>()
+  if (jobCfg?.required_skills && Array.isArray(jobCfg.required_skills)) {
+    for (const s of jobCfg.required_skills) {
+      const trimmed = (s || '').trim()
+      if (trimmed) set.add(trimmed)
+    }
+  }
+  if (jobCfg?.core_criteria && Array.isArray(jobCfg.core_criteria)) {
+    for (const c of jobCfg.core_criteria) {
+      const trimmed = (c || '').trim()
+      if (trimmed) set.add(trimmed)
+    }
+  }
+  if (set.size === 0) {
+    return ['专业技能掌握度', '项目实战与交付', '业务领域匹配', '团队协作与自驱', '问题分析与解决']
+  }
+  return Array.from(set)
+})
+
+// 将当前候选人的评估记录对齐到岗位统一指标
+const activeRadarChecks = computed<RadarCheckItem[]>(() => {
+  const analysis = resumeStore.selectedResume?.analysis
+  const metrics = unifiedJobMetrics.value
+  if (!analysis) return []
+
+  const expComps: any[] = analysis.experienceCompetencies || []
+  const coreChecks: any[] = (analysis as any).coreCriterionChecks || []
+  const allExisting: any[] = [...expComps, ...coreChecks]
+
+  return metrics.map(metric => {
+    // 优先精确匹配
+    let matched = allExisting.find(item => item.criterion === metric || item.criterion?.trim().toLowerCase() === metric.trim().toLowerCase())
+    // 其次模糊包含匹配
+    if (!matched) {
+      matched = allExisting.find(item => item.criterion && (item.criterion.includes(metric) || metric.includes(item.criterion)))
+    }
+
+    if (matched) {
+      return {
+        criterion: metric,
+        level: typeof matched.level === 'number' ? Math.max(0, Math.min(4, matched.level)) : 0,
+        evidence: matched.evidence || '',
+        assessment: matched.assessment || '',
+        isCovered: true
+      }
+    }
+
+    return {
+      criterion: metric,
+      level: 0,
+      evidence: '该指标在历史简历分析中未对齐评估',
+      assessment: '建议点击右上角【重新分析】更新此项技能指标的深度核验',
+      isCovered: false
+    }
+  })
+})
+
+const hasHistoricalUncovered = computed(() => {
+  return activeRadarChecks.value.some(item => !item.isCovered)
+})
+
+// 雷达图渲染前 8 项指标，以保证视觉多边形饱满清晰
+const radarDisplayChecks = computed(() => {
+  const checks = activeRadarChecks.value
+  if (checks.length <= 8) return checks
+  return checks.slice(0, 8)
+})
+
 const rightTab = ref<'detail' | 'ranking' | 'content'>('detail')
 const detailSubTab = ref<'summary' | 'competency' | 'water' | 'interview'>('summary')
 
@@ -1063,7 +1178,7 @@ function handleSelectRadarIndex(idx: number) {
 }
 
 const radarIndicators = computed(() => {
-  return activeRadarChecks.value.map(c => ({ name: c.criterion, max: 4 }))
+  return radarDisplayChecks.value.map(c => ({ name: c.criterion, max: 4 }))
 })
 
 const holisticRadarScore = computed(() => {
@@ -1073,7 +1188,7 @@ const holisticRadarScore = computed(() => {
 })
 
 const radarCandidateValues = computed(() => {
-  return activeRadarChecks.value.map(c => c.level ?? 0)
+  return radarDisplayChecks.value.map(c => c.level ?? 0)
 })
 
 // 左右面板拖拽调整宽度 (Splitter Resizer)
@@ -1243,15 +1358,42 @@ const originalParsedSections = computed<ParsedSection[]>(() => {
   return parseContentToSections(parsedContent.value)
 })
 
+const collapsedTranslations = ref<Record<number, boolean>>({})
+
+function isTranslationCollapsed(index: number): boolean {
+  return !!collapsedTranslations.value[index]
+}
+
+function toggleSectionTranslation(index: number) {
+  collapsedTranslations.value[index] = !collapsedTranslations.value[index]
+}
+
+const allTranslationsCollapsed = computed(() => {
+  if (!translatedSections.value.length) return false
+  return originalParsedSections.value.every((_, idx) => !!collapsedTranslations.value[idx])
+})
+
+function toggleAllTranslations() {
+  const willCollapse = !allTranslationsCollapsed.value
+  const newMap: Record<number, boolean> = {}
+  originalParsedSections.value.forEach((_, idx) => {
+    newMap[idx] = willCollapse
+  })
+  collapsedTranslations.value = newMap
+}
+
+const parsedTranslatedSections = computed<ParsedSection[]>(() => {
+  if (!translatedSections.value.length) return []
+  return originalParsedSections.value.map((origSec, idx) => {
+    const secText = translatedSections.value[idx] || ''
+    if (!secText) return { title: origSec.title, lines: [] }
+    const parsed = parseSectionText(secText, origSec.title)
+    parsed.title = origSec.title
+    return parsed
+  })
+})
+
 const activeSections = computed<ParsedSection[]>(() => {
-  if (isChineseView.value && translatedSections.value.length === originalParsedSections.value.length) {
-    return originalParsedSections.value.map((origSec, idx) => {
-      const secText = translatedSections.value[idx] || ''
-      const parsed = parseSectionText(secText, origSec.title)
-      parsed.title = origSec.title
-      return parsed
-    })
-  }
   return originalParsedSections.value
 })
 
@@ -1991,6 +2133,7 @@ async function loadParsedContent() {
       if (parsedContent.value && parsedContent.value !== content) {
         translationRequest++
         translatedSections.value = []
+        collapsedTranslations.value = {}
         isChineseView.value = false
         translationBusy.value = false
       }
@@ -2013,6 +2156,7 @@ watch(() => resumeStore.selectedId, () => {
   selectedRadarIndex.value = null
   translationRequest++
   translatedSections.value = []
+  collapsedTranslations.value = {}
   isChineseView.value = false
   translationBusy.value = false
   translationError.value = ''
@@ -3241,7 +3385,15 @@ onUnmounted(() => {
             min-width: 0;
             font-size: 13px;
             font-weight: 600;
-            color: $text-primary;
+            .uncovered-tag {
+              font-size: 11px;
+              padding: 1px 6px;
+              border-radius: 4px;
+              background: #fff7ed;
+              color: #c2410c;
+              border: 1px solid #ffedd5;
+              font-weight: 500;
+            }
 
             .criterion-level-badge {
               font-size: 11px;
@@ -4004,6 +4156,49 @@ details.candidate-portal-bar[open] > summary.portal-header { margin-bottom: 12px
     .snapshot-experience strong { color: $text-primary; font-size: 13px; overflow-wrap: anywhere; }
     .snapshot-role { color: $text-secondary; font-size: 12px; }
     .snapshot-experience p { flex-basis: 100%; margin: 0; color: $text-secondary; font-size: 12px; line-height: 1.6; overflow-wrap: anywhere; }
+
+    .section-translation-container {
+      margin-top: 14px;
+      border-top: 1px dashed rgba(79, 70, 229, 0.25);
+      padding: 12px 14px;
+      background: rgba(79, 70, 229, 0.03);
+      border-radius: $radius-md;
+      border: 1px solid rgba(79, 70, 229, 0.12);
+
+      .translation-card-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        cursor: pointer;
+        user-select: none;
+
+        .translation-badge {
+          display: inline-flex;
+          align-items: center;
+          gap: 6px;
+          font-size: 12px;
+          font-weight: 600;
+          color: $system-blue;
+
+          .translated-section-title {
+            color: $text-secondary;
+            font-weight: normal;
+          }
+        }
+      }
+
+      .translation-card-body {
+        margin-top: 10px;
+        display: grid;
+        gap: 9px;
+        min-width: 0;
+        max-width: 78ch;
+      }
+
+      .translation-snapshot {
+        background: rgba(255, 255, 255, 0.7);
+      }
+    }
 
     .raw-content-view { display: block; width: 100%; }
 
