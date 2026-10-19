@@ -162,6 +162,9 @@ func (a *App) run51JobConversation(resume *Resume, action, message string, quote
 	if script == "" {
 		return JobConversationResult{Status: "error", Message: "缺少 51job 沟通脚本，请检查 scripts 目录"}
 	}
+	// 确保 51job 专用浏览器已启动
+	a.EnsurePlatformBrowser("51job")
+
 	timeout := 30 * time.Second
 	if action == "preview_hi" || action == "list_jobs" || action == "check_resume" || action == "check_replies" {
 		timeout = 75 * time.Second // 包括候选人入口就绪重试与职位、点数读取。

@@ -108,7 +108,12 @@
     <el-dialog v-model="budgetOpen" title="确认沟通职位并开始打招呼" width="min(560px, 92vw)" append-to-body :close-on-click-modal="false" :close-on-press-escape="!confirming" :show-close="!confirming">
       <p class="budget-hint">招聘岗位：{{ batch?.projectTitle }}。请确认本批沟通职位，系统将默认消耗 51job 平台 Hi 点数发起沟通（不设点数上限）。</p>
       <el-form label-position="top" @submit.prevent>
-        <el-alert v-if="jobsError" :title="jobsError" type="warning" :closable="false" style="margin-bottom:12px" />
+        <el-alert v-if="jobsError" :title="jobsError" type="warning" :closable="false" style="margin-bottom:12px">
+          <div style="margin-top: 8px; display: flex; gap: 8px;">
+            <el-button size="small" type="primary" plain @click="open51JobBrowser">打开 51job 浏览器</el-button>
+            <el-button size="small" :loading="jobsLoading" @click="loadJobs">刷新职位列表</el-button>
+          </div>
+        </el-alert>
         <el-form-item label="沟通职位（来自当前企业账号）">
           <el-select v-model="selectedJobID" placeholder="请选择沟通职位" style="width:100%" :loading="jobsLoading">
             <el-option v-for="job in jobOptions" :key="job.id" :value="job.id" :label="`${job.title} · ${job.workArea || job.company || ''} · ID ${job.id}`" />
@@ -267,6 +272,20 @@ async function regenerateAll() {
     regeneratingAll.value = false
   }
 }
+async function open51JobBrowser() {
+  try {
+    const api: any = await import('../../wailsjs/go/main/App')
+    if (api.EnsurePlatformBrowser) {
+      await api.EnsurePlatformBrowser('51job')
+    } else {
+      await api.OpenURL('https://ehire.51job.com')
+    }
+    ElMessage.success('已启动 51job 企业浏览器窗口，请在窗口中登录企业账号')
+  } catch (err: any) {
+    ElMessage.error(`启动浏览器失败: ${err?.message || err}`)
+  }
+}
+
 async function openBudget(){
   if(!batch.value || sendingBatch.value)return
   if(batch.value.status==='draft' && !batch.value.items.some(item=>selected.value[item.id])){ElMessage.warning('请至少选择一位候选人');return}
@@ -280,11 +299,21 @@ async function loadJobs(){
   jobsLoading.value=true; jobsError.value=''
   try{
     const api:any=await import('../../wailsjs/go/main/App')
+    if (api.EnsurePlatformBrowser) {
+      await api.EnsurePlatformBrowser('51job')
+    }
     const result=await api.ListOutreachCommunicationJobs(batch.value.id,'')
+    if(result.status==='needs_login' || (result.status!=='jobs' && String(result.message).includes('未启动'))){
+      if(api.EnsurePlatformBrowser) await api.EnsurePlatformBrowser('51job')
+      jobsError.value='已为您自动打开 51job 企业浏览器，请在弹出的窗口中登录企业账号后点击【刷新职位列表】。'
+      jobOptions.value=[]
+      selectedJobID.value=''
+      return
+    }
     if(result.status!=='jobs')throw new Error(result.message||'无法读取平台职位')
     jobOptions.value=result.jobs||[]; jobsHasMore.value=!!result.hasMore
     if(!jobOptions.value.some(job=>job.id===selectedJobID.value))selectedJobID.value=result.suggestedJobId||''
-    if(!jobOptions.value.length)jobsError.value='当前账号未找到在招职位'
+    if(!jobOptions.value.length)jobsError.value='当前账号未找到在招职位，请确认 51job 后台是否有在招职位'
   }catch(err:any){jobsError.value=err?.message||String(err);jobOptions.value=[];selectedJobID.value=''}
   finally{jobsLoading.value=false}
 }

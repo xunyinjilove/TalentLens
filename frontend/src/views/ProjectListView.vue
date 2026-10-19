@@ -719,6 +719,7 @@ async function handleCreate() {
     requirements: [],
     required_skills: [...currentJobConfig.requiredSkills],
     experience_years: currentJobConfig.experienceYears,
+    experience_text: currentJobConfig.experienceYears === 0 ? '经验不限' : `${currentJobConfig.experienceYears} 年以上`,
     education_level: currentJobConfig.educationLevel,
     job_description: currentJobConfig.jobDescription,
     red_lines: [...(currentJobConfig.redLines || [])],

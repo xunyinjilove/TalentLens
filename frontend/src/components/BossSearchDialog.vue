@@ -79,9 +79,8 @@
             <el-radio-group v-model="form.keywordStrategy" @change="selectKeywordStrategy">
               <el-radio label="precise">原词精准</el-radio>
               <el-radio label="balanced">AI 拓词均衡</el-radio>
-              <el-radio label="matrix">HR 自定配额</el-radio>
             </el-radio-group>
-            <span class="reservoir-hint">均衡方案给原词约一半名额；自定方案按下方词条比例执行，三种方案均可自行选择渠道。</span>
+            <span class="reservoir-hint">原词精准仅检索当前岗位原词；AI 拓词均衡结合同义词拓扑与配额矩阵全网寻才。</span>
           </div>
         </div>
 
@@ -132,8 +131,11 @@
               <el-button size="small" @click="addCustomSynonym">
                 <el-icon><Plus /></el-icon> 添加维度词
               </el-button>
-              <el-button size="small" @click="normalizeRatios">
-                <el-icon><ScaleToOriginal /></el-icon> 均摊/归一比例
+              <el-button size="small" @click="distributeEqually">
+                <el-icon><ScaleToOriginal /></el-icon> 均摊比例
+              </el-button>
+              <el-button size="small" @click="normalizeProportions">
+                <el-icon><Operation /></el-icon> 归一至 100%
               </el-button>
             </div>
           </div>
@@ -414,6 +416,7 @@ import {
   Opportunity,
   Histogram,
   ScaleToOriginal,
+  Operation,
   Delete,
   Refresh
 } from '@element-plus/icons-vue'
@@ -483,7 +486,7 @@ function getCategoryTagType(cat: string): '' | 'success' | 'warning' | 'danger' 
 
 async function handleToggleQuotaMatrix() {
   isQuotaMatrixActive.value = !isQuotaMatrixActive.value
-  if (isQuotaMatrixActive.value) form.keywordStrategy = 'matrix'
+  if (isQuotaMatrixActive.value) form.keywordStrategy = 'balanced'
   else form.keywordStrategy = 'precise'
   if (isQuotaMatrixActive.value && synonymList.value.length === 0) {
     await handleGenerateSynonyms()
@@ -491,24 +494,23 @@ async function handleToggleQuotaMatrix() {
 }
 
 async function selectKeywordStrategy() {
-  isQuotaMatrixActive.value = form.keywordStrategy !== 'precise'
+  isQuotaMatrixActive.value = form.keywordStrategy === 'balanced'
   if (isQuotaMatrixActive.value && synonymList.value.length === 0) await handleGenerateSynonyms()
 }
 
 function buildKeywordPlan() {
   if (form.keywordStrategy === 'precise') return []
-  const selected = activeQuotaList.value.map(item => ({ keyword: item.keyword.trim(), category: item.category, category_name: item.category_name, ratio: item.ratio }))
-  if (form.keywordStrategy === 'matrix') return selected
-  const original = form.keyword.trim() || props.jobTitle || ''
-  const alternatives = selected.filter(item => item.keyword !== original)
-  if (!alternatives.length) return []
-  const share = Math.floor(50 / alternatives.length)
-  return [{ keyword: original, category: 'standard', category_name: '岗位原词', ratio: 50 }, ...alternatives.map((item, index) => ({ ...item, ratio: index === alternatives.length - 1 ? 50 - share * (alternatives.length - 1) : share }))]
+  return activeQuotaList.value.map(item => ({
+    keyword: item.keyword.trim(),
+    category: item.category,
+    category_name: item.category_name,
+    ratio: item.ratio
+  }))
 }
 
 async function handleGenerateSynonyms() {
   const kw = form.keyword.trim() || props.jobTitle || '临床项目经理'
-  if (form.keywordStrategy === 'precise') form.keywordStrategy = 'matrix'
+  if (form.keywordStrategy === 'precise') form.keywordStrategy = 'balanced'
   isGeneratingSynonyms.value = true
   isQuotaMatrixActive.value = true
   try {
@@ -568,26 +570,53 @@ function removeSynonym(index: number) {
   normalizeRatios()
 }
 
+// 均摊比例：各选中词条平分 100%
+function distributeEqually() {
+  const selected = synonymList.value.filter(s => s.selected)
+  if (selected.length === 0) {
+    ElMessage.warning('请先勾选需要分配配额的词条')
+    return
+  }
+  const avg = Math.floor(100 / selected.length)
+  selected.forEach((s, idx) => {
+    s.ratio = idx === selected.length - 1 ? 100 - avg * (selected.length - 1) : avg
+  })
+  ElMessage.success(`已均摊比例：共 ${selected.length} 个词条，每项约 ${avg}% (总计 100%)`)
+}
+
+// 归一化比例：保持各词条现有高低权重，按比例缩放到总和 100%
+function normalizeProportions() {
+  const selected = synonymList.value.filter(s => s.selected)
+  if (selected.length === 0) {
+    ElMessage.warning('请先勾选需要分配配额的词条')
+    return
+  }
+  const currentTotal = selected.reduce((sum, s) => sum + (Number(s.ratio) || 0), 0)
+  if (currentTotal <= 0) {
+    distributeEqually()
+    return
+  }
+  let acc = 0
+  selected.forEach((s, idx) => {
+    if (idx === selected.length - 1) {
+      s.ratio = Math.max(1, 100 - acc)
+    } else {
+      const scaled = Math.max(1, Math.round((s.ratio / currentTotal) * 100))
+      s.ratio = scaled
+      acc += scaled
+    }
+  })
+  ElMessage.success(`已按现有权重比例归一化至 100%`)
+}
+
 function normalizeRatios() {
   const selected = synonymList.value.filter(s => s.selected)
   if (selected.length === 0) return
   const currentTotal = selected.reduce((sum, s) => sum + (Number(s.ratio) || 0), 0)
   if (currentTotal <= 0) {
-    const avg = Math.floor(100 / selected.length)
-    selected.forEach((s, idx) => {
-      s.ratio = idx === selected.length - 1 ? 100 - avg * (selected.length - 1) : avg
-    })
+    distributeEqually()
   } else if (currentTotal !== 100) {
-    let acc = 0
-    selected.forEach((s, idx) => {
-      if (idx === selected.length - 1) {
-        s.ratio = Math.max(1, 100 - acc)
-      } else {
-        const scaled = Math.max(1, Math.round((s.ratio / currentTotal) * 100))
-        s.ratio = scaled
-        acc += scaled
-      }
-    })
+    normalizeProportions()
   }
 }
 
@@ -865,11 +894,7 @@ async function handleStartSearch() {
     ElMessage.warning('同一个关键词只能分配一次配额')
     return
   }
-  if (form.keywordStrategy === 'balanced' && !selectedKeywords.some(word => word !== form.keyword.trim())) {
-    ElMessage.warning('AI 拓词均衡方案需要至少一个经过 HR 核对的不同词条；也可选择“原词精准”')
-    return
-  }
-  if (form.keywordStrategy === 'matrix' && (selectedKeywords.length === 0 || totalRatio.value <= 0)) {
+  if (form.keywordStrategy === 'balanced' && (selectedKeywords.length === 0 || totalRatio.value <= 0)) {
     ElMessage.warning('请给至少一个词条设置大于 0 的配额比例')
     return
   }

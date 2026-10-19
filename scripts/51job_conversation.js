@@ -592,9 +592,18 @@ async function main(argv = process.argv.slice(2)) {
     try {
       browser = await puppeteer.connect({ browserURL: 'http://127.0.0.1:9503', defaultViewport: null });
     } catch (error) {
-      if (args.action === 'confirm_hi') throw error;
-      process.stdout.write(JSON.stringify({ status: 'needs_login', message: '51job 企业浏览器未启动，正在准备打开登录窗口' }) + '\n');
-      return;
+      for (let i = 0; i < 5; i++) {
+        await new Promise(r => setTimeout(r, 600));
+        try {
+          browser = await puppeteer.connect({ browserURL: 'http://127.0.0.1:9503', defaultViewport: null });
+          if (browser) break;
+        } catch (_) {}
+      }
+      if (!browser) {
+        if (args.action === 'confirm_hi') throw error;
+        process.stdout.write(JSON.stringify({ status: 'needs_login', message: '51job 企业浏览器未就绪或尚未登录，已为您打开登录窗口，请在浏览器中登录后重试' }) + '\n');
+        return;
+      }
     }
     if (args.action === 'confirm_hi') {
       const result = await confirmHiChat(browser, args, expected);
