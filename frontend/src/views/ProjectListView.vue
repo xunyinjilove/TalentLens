@@ -281,11 +281,6 @@
                 <span class="info-label">需求:</span>
                 <span class="info-val"><strong>{{ project.headcount || 1 }}</strong> 人</span>
               </div>
-              <div class="info-item" v-if="project.recruiter">
-                <el-icon><UserFilled /></el-icon>
-                <span class="info-label">HR:</span>
-                <span class="info-val">{{ project.recruiter }}</span>
-              </div>
               <div class="info-item date-item">
                 <el-icon><Calendar /></el-icon>
                 <span class="info-val">{{ formatDate(project.created_at) }}</span>
@@ -384,16 +379,10 @@
           </el-select>
         </div>
 
-        <!-- 计划招聘人数 与 招聘负责人 -->
-        <div class="form-row">
-          <div class="form-item flex-1">
-            <label>{{ $t('project.headcount') }}</label>
-            <el-input-number v-model="newProject.headcount" :min="1" :max="100" style="width: 100%" />
-          </div>
-          <div class="form-item flex-1">
-            <label>{{ $t('project.recruiter') }}</label>
-            <el-input v-model="newProject.recruiter" :placeholder="$t('project.recruiterPlaceholder')" />
-          </div>
+        <!-- 计划招聘人数 -->
+        <div class="form-item">
+          <label>{{ $t('project.headcount') }}</label>
+          <el-input-number v-model="newProject.headcount" :min="1" :max="100" style="width: 100%" />
         </div>
 
         <!-- 项目说明/备注 -->
@@ -558,7 +547,7 @@ const newProject = reactive({
   name: '',
   department: '临床部',
   headcount: 1,
-  recruiter: '杨孝荣',
+  recruiter: '',
   remark: ''
 })
 

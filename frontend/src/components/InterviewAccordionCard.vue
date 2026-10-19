@@ -167,7 +167,7 @@ function handleCopySingleQA(item: QAItem, idx: number) {
 
       .head-left {
         display: flex;
-        align-items: center;
+        align-items: flex-start;
         gap: 8px;
         min-width: 0;
         flex: 1;
@@ -181,6 +181,7 @@ function handleCopySingleQA(item: QAItem, idx: number) {
           padding: 1px 6px;
           border-radius: 6px;
           flex-shrink: 0;
+          margin-top: 1px;
         }
 
         .qa-category-tag {
@@ -190,6 +191,7 @@ function handleCopySingleQA(item: QAItem, idx: number) {
           border-radius: 6px;
           white-space: nowrap;
           flex-shrink: 0;
+          margin-top: 1px;
 
           &.cat-ability { background: #fdf2f8; color: #be185d; border: 1px solid #fbcfe8; }
           &.cat-tech { background: #eff6ff; color: #1d4ed8; border: 1px solid #dbeafe; }
@@ -201,9 +203,10 @@ function handleCopySingleQA(item: QAItem, idx: number) {
           font-size: 13.5px;
           font-weight: 600;
           color: #1e293b;
-          white-space: nowrap;
-          overflow: hidden;
-          text-overflow: ellipsis;
+          line-height: 1.5;
+          word-break: break-word;
+          overflow-wrap: anywhere;
+          white-space: normal;
         }
       }
 
