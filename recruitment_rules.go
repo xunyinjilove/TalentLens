@@ -140,8 +140,8 @@ func (a *App) SuggestJobRules(projectID string, withAI bool) ([]JobRule, error) 
 	}
 	suggestions := jobRuleTemplate(project.JobConfig)
 	if withAI {
-		if strings.TrimSpace(a.config.AI.APIKey) == "" {
-			return nil, fmt.Errorf("AI 未配置，请先在设置中填写 API Key")
+		if strings.TrimSpace(a.config.AI.APIKey) == "" || a.config.AI.APIKey == "custom-client-key-123" {
+			return nil, fmt.Errorf("AI 未配置有效 Key，请先在【设置 -> AI 模型配置】中填写并保存您的 API Key")
 		}
 		prompt := fmt.Sprintf(`你是招聘岗位规则起草助手。依据岗位职责和技能，分别建议红线与加分项各 3–4 条、核心能力最多 4 条；已有条目也计入上限。红线必须是直接影响履职、能够核实的必要技能或经验；证据不足时可以少于 3 条或没有，绝不凑数。加分项须与岗位核心技能高度相关且是非必需优势。不要以年龄、性别、学校名气、企业名气或外包身份作为规则。AI 建议仅作为 HR 审批草稿，不能直接淘汰候选人。每项必须附 basis，原样引用下方职责、必需技能或核心能力中的一个具体词组，并在 criterion 中包含该词组；无法引用的建议不要输出。不得重复已有条目。只输出 JSON 数组，每项包含 kind（redline/core/bonus）、criterion（中文）和 basis（原样引用的依据）。
 岗位：%s

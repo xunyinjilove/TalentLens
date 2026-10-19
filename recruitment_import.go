@@ -275,6 +275,7 @@ func (a *App) ImportApplications(platform string) (ApplicationImportResult, erro
 	if script == "" {
 		return result, fmt.Errorf("缺少 51job 主动投递适配器")
 	}
+	a.EnsurePlatformBrowser("51job")
 	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, "node", script)
