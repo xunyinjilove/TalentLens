@@ -17,16 +17,6 @@
             @keyup.enter="handleGlobalSearch"
           />
         </div>
-        <button class="nav-icon-btn" title="深色/浅色模式切换" @click="toggleTheme">
-          <el-icon><Moon /></el-icon>
-        </button>
-        <button class="nav-icon-btn notification-btn" title="系统通知">
-          <el-icon><Bell /></el-icon>
-          <span class="notification-badge"></span>
-        </button>
-        <div class="user-avatar-circle" title="当前登录账户">
-          <span>林</span>
-        </div>
       </div>
     </header>
 
@@ -82,7 +72,7 @@
 
     <!-- 现代表格主体卡片 -->
     <div class="modern-table-card">
-      <div class="table-responsive">
+      <div ref="tableResponsiveRef" class="table-responsive">
         <table class="saas-table">
           <thead>
             <tr>
@@ -215,9 +205,6 @@
                       <el-dropdown-menu>
                         <el-dropdown-item command="sourcing">
                           <el-icon><Position /></el-icon>全渠道矩阵寻才
-                        </el-dropdown-item>
-                        <el-dropdown-item command="rules">
-                          <el-icon><SetUp /></el-icon>AI 规则与评分配置
                         </el-dropdown-item>
                         <el-dropdown-item command="mapping51">
                           <el-icon><Link /></el-icon>关联 51job 平台职位
@@ -375,10 +362,6 @@
             @blur="syncInterviewQuestions"
           />
         </el-form-item>
-        <div class="rule-suggestion-entry">
-          <el-button type="primary" plain :disabled="!isEditing" @click="openRuleSuggestionsFromEditor">AI 建议红线与加分项</el-button>
-          <span>{{ isEditing ? '基于已保存的岗位职责与技能起草，每条由 HR 审批。修改职位后请先保存。' : '请先保存新职位，再生成 AI 建议。' }}</span>
-        </div>
       </el-form>
 
       <template #footer>
@@ -399,9 +382,6 @@
       </template>
     </el-dialog>
 
-    <!-- 规则审批组件 -->
-    <JobRulesDialog v-model="rulesOpen" :project="ruleProject" />
-
     <!-- 矩阵寻才对话框 -->
     <BossSearchDialog
       v-if="sourcingProject"
@@ -418,12 +398,10 @@
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, onMounted, reactive, ref } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, reactive, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import {
   Search,
-  Moon,
-  Bell,
   Plus,
   Loading,
   EditPen,
@@ -439,7 +417,6 @@ import {
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { useProjectStore, type Project } from '../composables/useProjectStore'
 import { useRecruitmentStore } from '../composables/useRecruitmentStore'
-import JobRulesDialog from '../components/JobRulesDialog.vue'
 import BossSearchDialog from '../components/BossSearchDialog.vue'
 
 interface JobStats {
@@ -463,11 +440,24 @@ const selectedDepartment = ref('')
 const selectedStatus = ref('')
 const jobStatsMap = ref<Record<string, JobStats>>({})
 
+// 表格横向滚轮滚动
+const tableResponsiveRef = ref<HTMLElement | null>(null)
+
+function handleTableWheel(e: WheelEvent) {
+  const el = tableResponsiveRef.value
+  if (!el) return
+  if (el.scrollWidth > el.clientWidth) {
+    if (Math.abs(e.deltaY) >= Math.abs(e.deltaX)) {
+      el.scrollLeft += e.deltaY
+      e.preventDefault()
+    }
+  }
+}
+
 // 弹窗状态
 const editModalVisible = ref(false)
 const isEditing = ref(false)
 const currentEditProjectId = ref<string | null>(null)
-const ruleProject = ref<Project | null>(null)
 const sourcingProject = ref<Project | null>(null)
 const showSourcingDialog = ref(false)
 
@@ -478,10 +468,6 @@ const mappings = ref<Array<{ projectId: string; platform: string; platformJobId:
 const mappingOpen = computed({
   get: () => !!mapProject.value,
   set: val => { if (!val) mapProject.value = null }
-})
-const rulesOpen = computed({
-  get: () => !!ruleProject.value,
-  set: val => { if (!val) ruleProject.value = null }
 })
 
 // 表单数据
@@ -528,21 +514,6 @@ function syncSkills() {
   // synced when saving
 }
 function syncInterviewQuestions() {}
-
-function openRuleSuggestionsFromEditor() {
-  const project = projectStore.projects.find(item => item.id === currentEditProjectId.value)
-  if (!project) return
-  const config = project.job_config
-  if (jobForm.title.trim() !== (config.title || project.name) ||
-      jobForm.job_description.trim() !== (config.job_description || '') ||
-      splitTags(skillsInput.value).join('\x00') !== (config.required_skills || []).join('\x00') ||
-      splitTags(interviewQuestionsInput.value).join('\x00') !== (config.interview_questions || []).join('\x00')) {
-    ElMessage.warning('请先保存本次职位配置，AI 才能依据最新的岗位职责与技能生成建议')
-    return
-  }
-  editModalVisible.value = false
-  ruleProject.value = project
-}
 
 // 部门选项
 const departmentOptions = computed(() => {
@@ -864,11 +835,10 @@ function handleGlobalSearch() {
   }
 }
 
-function toggleTheme() {
-  ElMessage.info('已适配系统界面明亮视觉')
-}
-
 onMounted(async () => {
+  if (tableResponsiveRef.value) {
+    tableResponsiveRef.value.addEventListener('wheel', handleTableWheel, { passive: false })
+  }
   await load()
   const editId = String(route.query.edit || '')
   if (!editId) return
@@ -876,11 +846,15 @@ onMounted(async () => {
   if (project) openEditModal(project)
   else ElMessage.warning('目标职位不存在或已删除')
 })
+
+onUnmounted(() => {
+  if (tableResponsiveRef.value) {
+    tableResponsiveRef.value.removeEventListener('wheel', handleTableWheel)
+  }
+})
 </script>
 
 <style scoped>
-.rule-suggestion-entry { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin: 2px 0 16px; }
-.rule-suggestion-entry span { color: #64748b; font-size: 12px; line-height: 1.5; }
 .job-management-view {
   display: flex;
   flex-direction: column;
