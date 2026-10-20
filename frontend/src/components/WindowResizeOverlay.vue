@@ -37,10 +37,18 @@ async function checkMaximizedState() {
 }
 
 // 启动原生拉伸逻辑
-function startResize(edge: string, event: MouseEvent) {
+async function startResize(edge: string, event: MouseEvent) {
   // 必须阻止默认行为，避免选中文本或触发 TitleBar 拖拽
   event.preventDefault()
   event.stopPropagation()
+
+  try {
+    const WailsApp = await import('../../wailsjs/go/main/App')
+    if (WailsApp && typeof WailsApp.StartWindowResize === 'function') {
+      await WailsApp.StartWindowResize(edge)
+      return
+    }
+  } catch {}
 
   const wailsObj = (window as any).wails
   if (wailsObj && wailsObj.flags) {
@@ -112,70 +120,70 @@ onUnmounted(() => {
   -webkit-app-region: no-drag;
 }
 
-/* 顶部与底部边缘：厚度 6px，两端各预留 10px 给角落 */
+/* 顶部与底部边缘：厚度 7px，两端各预留 14px 给角落 */
 .resize-handle.top {
   top: 0;
-  left: 10px;
-  right: 10px;
-  height: 6px;
+  left: 14px;
+  right: 14px;
+  height: 7px;
   cursor: n-resize;
 }
 
 .resize-handle.bottom {
   bottom: 0;
-  left: 10px;
-  right: 10px;
-  height: 6px;
+  left: 14px;
+  right: 14px;
+  height: 7px;
   cursor: s-resize;
 }
 
-/* 左侧与右侧边缘：厚度 6px，两端各预留 10px 给角落 */
+/* 左侧与右侧边缘：厚度 7px，两端各预留 14px 给角落 */
 .resize-handle.left {
   left: 0;
-  top: 10px;
-  bottom: 10px;
-  width: 6px;
+  top: 14px;
+  bottom: 14px;
+  width: 7px;
   cursor: w-resize;
 }
 
 .resize-handle.right {
   right: 0;
-  top: 10px;
-  bottom: 10px;
-  width: 6px;
+  top: 14px;
+  bottom: 14px;
+  width: 7px;
   cursor: e-resize;
 }
 
-/* 四个角落手柄：10px × 10px */
+/* 四个角落手柄：14px × 14px */
 .resize-handle.top-left {
   top: 0;
   left: 0;
-  width: 10px;
-  height: 10px;
+  width: 14px;
+  height: 14px;
   cursor: nw-resize;
 }
 
 .resize-handle.top-right {
   top: 0;
   right: 0;
-  width: 10px;
-  height: 10px;
+  width: 14px;
+  height: 14px;
   cursor: ne-resize;
 }
 
 .resize-handle.bottom-left {
   bottom: 0;
   left: 0;
-  width: 10px;
-  height: 10px;
+  width: 14px;
+  height: 14px;
   cursor: sw-resize;
 }
 
 .resize-handle.bottom-right {
   bottom: 0;
   right: 0;
-  width: 10px;
-  height: 10px;
+  width: 14px;
+  height: 14px;
   cursor: se-resize;
 }
 </style>

@@ -330,6 +330,52 @@ func (a *App) UpdateCandidateFollowUp(projectCandidateID, stage, owner, nextActi
 	return tx.Commit()
 }
 
+// BatchUpdateCandidateStage 批量调整人才库候选人招聘阶段
+func (a *App) BatchUpdateCandidateStage(projectCandidateIDs []string, stage, note, actor string) error {
+	if !recruitmentStages[stage] {
+		return fmt.Errorf("未知招聘阶段: %s", stage)
+	}
+	if len(projectCandidateIDs) == 0 {
+		return fmt.Errorf("请选择要调整阶段的候选人")
+	}
+	db, err := a.getRecruitmentDB()
+	if err != nil {
+		return err
+	}
+	tx, err := db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	for _, id := range projectCandidateIDs {
+		id = strings.TrimSpace(id)
+		if id == "" {
+			continue
+		}
+		var oldStage string
+		_ = tx.QueryRow("SELECT stage FROM project_candidates WHERE id=?", id).Scan(&oldStage)
+
+		if _, err := tx.Exec(`UPDATE project_candidates SET stage=?,updated_at=? WHERE id=?`, stage, now, id); err != nil {
+			return err
+		}
+		if oldStage != stage || strings.TrimSpace(note) != "" {
+			eventType := "stage_change"
+			if oldStage == stage {
+				eventType = "note"
+			}
+			if _, err := tx.Exec(`INSERT INTO follow_up_events
+				(id,project_candidate_id,event_type,from_stage,to_stage,note,actor,created_at)
+				VALUES(?,?,?,?,?,?,?,?)`, recruitmentID("followup"), id,
+				eventType, oldStage, stage, strings.TrimSpace(note), strings.TrimSpace(actor), now); err != nil {
+				return err
+			}
+		}
+	}
+	return tx.Commit()
+}
+
 func (a *App) AddCandidateCommunication(projectCandidateID, channel, content, actor string) error {
 	if strings.TrimSpace(content) == "" || strings.TrimSpace(actor) == "" {
 		return fmt.Errorf("请填写沟通内容和记录人")

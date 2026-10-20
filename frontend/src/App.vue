@@ -69,7 +69,7 @@ onMounted(async () => {
 
 // 全局无死角窗口拖拽移动与双击最大化分发器
 function initGlobalWindowDrag() {
-  window.addEventListener('mousedown', (e: MouseEvent) => {
+  window.addEventListener('mousedown', async (e: MouseEvent) => {
     if (e.button !== 0) return
 
     const target = e.target as HTMLElement | null
@@ -83,6 +83,14 @@ function initGlobalWindowDrag() {
     // 命中可拖拽头部或品牌区域
     const dragContainer = target.closest('[data-wails-drag], .title-bar, .wb-header, .sidebar-brand, .wails-draggable')
     if (dragContainer) {
+      try {
+        const WailsApp = await import('../wailsjs/go/main/App')
+        if (WailsApp && typeof WailsApp.StartWindowDrag === 'function') {
+          await WailsApp.StartWindowDrag()
+          return
+        }
+      } catch {}
+
       if (typeof (window as any).WailsInvoke === 'function') {
         (window as any).WailsInvoke('drag')
       }

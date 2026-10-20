@@ -8,3 +8,5 @@ import "os/exec"
 func hideConsoleWindow(cmd *exec.Cmd) {
 	// POSIX 系统下无 CMD 窗口概念，无需处理
 }
+
+func startWindowNCDown(hitTest uintptr) {}
