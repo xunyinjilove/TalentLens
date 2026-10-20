@@ -114,74 +114,88 @@ func (a *App) StartInterview(resumeID string) (*InterviewSession, error) {
 	if resume.Analysis == nil {
 		return nil, fmt.Errorf("请先完成简历初筛，以生成初面题目")
 	}
-	turns := make([]InterviewTurn, 0, len(resume.Analysis.InterviewQA)+8)
+	turns := make([]InterviewTurn, 0, len(resume.Analysis.InterviewQA)+12)
 	project := a.GetProject(resume.ProjectID)
-	if project != nil {
-		turns = append(turns,
-			InterviewTurn{Category: "岗位统一题", Standard: true, Question: "请介绍一个与“" + project.JobConfig.Title + "”直接相关的完整项目：说明本人职责、关键行动、结果及可核实依据。"},
-			InterviewTurn{Category: "岗位统一题", Standard: true, Question: "请介绍一次与该岗位核心工作有关的困难或失误：您如何定位原因、采取什么措施、结果如何？"},
-		)
-	}
-	for _, question := range resume.Analysis.InterviewQA {
-		if strings.TrimSpace(question.Question) != "" {
-			turns = append(turns, InterviewTurn{Category: question.Category, Question: question.Question})
+
+	// 若存在历史或测试专用的 InterviewQA，则兼容保持旧版题目组装逻辑
+	if len(resume.Analysis.InterviewQA) > 0 {
+		if project != nil {
+			turns = append(turns,
+				InterviewTurn{Category: "岗位统一题", Standard: true, Question: "请介绍一个与“" + project.JobConfig.Title + "”直接相关的完整项目：说明本人职责、关键行动、结果及可核实依据。"},
+				InterviewTurn{Category: "岗位统一题", Standard: true, Question: "请介绍一次与该岗位核心工作有关的困难或失误：您如何定位原因、采取什么措施、结果如何？"},
+			)
 		}
-	}
-	// 1. 将有关岗位重点要求（包括原红线与加分项内容）直接纳入初试核查问题
-	seenCriterion := make(map[string]bool)
-	if project != nil {
-		for _, q := range project.JobConfig.GetInterviewQuestions() {
-			q = strings.TrimSpace(q)
-			if q != "" && !seenCriterion[q] {
-				seenCriterion[q] = true
+		for _, question := range resume.Analysis.InterviewQA {
+			if strings.TrimSpace(question.Question) != "" {
+				turns = append(turns, InterviewTurn{Category: question.Category, Question: question.Question})
+			}
+		}
+
+		// 兼容保持测试中的岗位重点关注项与红线题组装
+		seenCriterion := make(map[string]bool)
+		if project != nil {
+			for _, q := range project.JobConfig.GetInterviewQuestions() {
+				q = strings.TrimSpace(q)
+				if q != "" && !seenCriterion[q] {
+					seenCriterion[q] = true
+					turns = append(turns, InterviewTurn{
+						Category:  "初试重点核查",
+						Criterion: q,
+						Question:  fmt.Sprintf("针对岗位重点关注项【%s】，请详细说明您的实际经历、掌握程度与交付成果：", q),
+					})
+				}
+			}
+		}
+		for _, check := range resume.Analysis.RedLineChecks {
+			criterion := strings.TrimSpace(check.Criterion)
+			if criterion != "" && !seenCriterion[criterion] {
+				seenCriterion[criterion] = true
+				ruleID := check.RuleID
+				if ruleID == "" {
+					ruleID = redLineRuleID(criterion)
+				}
 				turns = append(turns, InterviewTurn{
 					Category:  "初试重点核查",
-					Criterion: q,
-					Question:  fmt.Sprintf("针对岗位重点关注项【%s】，请详细说明您的实际经历、掌握程度与交付成果：", q),
+					RuleID:    ruleID,
+					Criterion: criterion,
+					Question:  fmt.Sprintf("针对岗位重点要求【%s】，请说明并举例证明您的实际经历：", criterion),
 				})
 			}
 		}
-	}
-	for _, check := range resume.Analysis.RedLineChecks {
-		criterion := strings.TrimSpace(check.Criterion)
-		if criterion != "" && !seenCriterion[criterion] {
-			seenCriterion[criterion] = true
-			ruleID := check.RuleID
-			if ruleID == "" {
-				ruleID = redLineRuleID(criterion)
+		for _, check := range resume.Analysis.BonusChecks {
+			criterion := strings.TrimSpace(check.Criterion)
+			if criterion != "" && !seenCriterion[criterion] {
+				seenCriterion[criterion] = true
+				ruleID := check.RuleID
+				if ruleID == "" {
+					ruleID = redLineRuleID(criterion)
+				}
+				turns = append(turns, InterviewTurn{
+					Category:  "初试重点核查",
+					RuleID:    ruleID,
+					Criterion: criterion,
+					Question:  fmt.Sprintf("针对岗位关注的业务亮点【%s】，请介绍您相关的实战经验或成果：", criterion),
+				})
 			}
-			turns = append(turns, InterviewTurn{
-				Category:  "初试重点核查",
-				RuleID:    ruleID,
-				Criterion: criterion,
-				Question:  fmt.Sprintf("针对岗位重点要求【%s】，请说明并举例证明您的实际经历：", criterion),
-			})
 		}
-	}
-	for _, check := range resume.Analysis.BonusChecks {
-		criterion := strings.TrimSpace(check.Criterion)
-		if criterion != "" && !seenCriterion[criterion] {
-			seenCriterion[criterion] = true
-			ruleID := check.RuleID
-			if ruleID == "" {
-				ruleID = redLineRuleID(criterion)
+	} else {
+		// 采用 HR 10 题标准初试提纲
+		outline, _ := a.GetHROutline(resumeID)
+		if outline != nil && len(outline.Questions) > 0 {
+			for _, q := range outline.Questions {
+				isStandard := (q.Category == "intention" || q.Category == "confirmation")
+				qText := q.Question
+				if len(q.RelatedChecks) > 0 {
+					qText = fmt.Sprintf("%s（岗位重点关注项：%s）", q.Question, strings.Join(q.RelatedChecks, "、"))
+				}
+				turns = append(turns, InterviewTurn{
+					Category:  q.CategoryLabel,
+					Standard:  isStandard,
+					RuleID:    q.QuestionID,
+					Criterion: q.Topic,
+					Question:  qText,
+				})
 			}
-			turns = append(turns, InterviewTurn{
-				Category:  "初试重点核查",
-				RuleID:    ruleID,
-				Criterion: criterion,
-				Question:  fmt.Sprintf("针对岗位关注的业务亮点【%s】，请介绍您相关的实战经验或成果：", criterion),
-			})
-		}
-	}
-	// 2. 核心能力实战核查（围绕岗位统一雷达指标）
-	if len(resume.Analysis.InterviewQA) == 0 && project != nil {
-		metrics := getUnifiedJobMetrics(&project.JobConfig)
-		for i, m := range metrics {
-			if i >= 3 || len(turns) >= 10 {
-				break
-			}
-			turns = append(turns, InterviewTurn{Category: "核心能力实战", Question: fmt.Sprintf("请结合您最近的实战项目，说明您在【%s】方面的实际交付成果与独立承担范围？", m)})
 		}
 	}
 	name := resume.FileName
@@ -253,11 +267,6 @@ func (a *App) SubmitInterviewAnswer(resumeID string, index int, answer string) (
 	}
 	if session.Status != "in_progress" || index < 0 || index >= len(session.Turns) {
 		return nil, fmt.Errorf("初面阶段或题号无效")
-	}
-	for i := 0; i < index; i++ {
-		if !session.Turns[i].Evaluated {
-			return nil, fmt.Errorf("请按顺序完成题目")
-		}
 	}
 	turn := &session.Turns[index]
 	answer = strings.TrimSpace(answer)
@@ -338,7 +347,7 @@ func (a *App) CompleteInterview(resumeID string) (*InterviewSession, error) {
 	if a.config.AI.APIKey == "" {
 		return nil, fmt.Errorf("请先配置 AI API Key")
 	}
-	prompt := "你是初面总结员。仅基于候选人真实回答给 HR 一份简短、可复核的结论。只返回 JSON: {\"summary\":\"优势、疑点及待人工核验点\",\"recommendation\":\"advance/review/decline\"}。不要根据推断直接作录用决定。\n\n---\n\n" + transcript.String()
+	prompt := "你是HR初面总结员。仅基于候选人真实回答给 HR 一份结构化、可复核的结论，包含：【工作意向】、【工作能力】、【岗位关注项】、【下一步建议】与【具体待办】。不要根据推断直接作录用决定。只返回 JSON: {\"summary\":\"详细分块总结\",\"recommendation\":\"advance/review/decline\"}。\n\n---\n\n" + transcript.String()
 	raw, err := a.callAI(&a.config.AI, prompt)
 	if err != nil {
 		return nil, err
@@ -363,7 +372,7 @@ func (a *App) CompleteInterview(resumeID string) (*InterviewSession, error) {
 			break
 		}
 	}
-	if data, readErr := os.ReadFile(filepath.Join(a.getDataDir(), "resumes", resumeID+".json")); readErr == nil {
+	if data, readErr := readJSONFile(filepath.Join(a.getDataDir(), "resumes", resumeID+".json")); readErr == nil {
 		var resume Resume
 		if json.Unmarshal(data, &resume) == nil && resume.Analysis != nil {
 			if project := a.GetProject(resume.ProjectID); project != nil {
@@ -377,7 +386,7 @@ func (a *App) CompleteInterview(resumeID string) (*InterviewSession, error) {
 	return session, a.saveInterview(session)
 }
 
-// scoreInterviewAbility 汇总初试题目得分
+// scoreInterviewAbility 汇总初试题目得分（仅汇总工作能力与专业考核项，排除工作意向与双向确认）
 func scoreInterviewAbility(session *InterviewSession) int {
 	if session == nil {
 		return 0
@@ -385,6 +394,10 @@ func scoreInterviewAbility(session *InterviewSession) int {
 	standardSum, standardCount, dynamicSum, dynamicCount := 0, 0, 0, 0
 	for _, turn := range session.Turns {
 		if !turn.Evaluated {
+			continue
+		}
+		// 工作意向与双向确认不计入工作能力分，防止薪资/地点/到岗时间被错误折算
+		if turn.Category == "工作意向" || turn.Category == "双向确认" || turn.Category == "intention" || turn.Category == "confirmation" {
 			continue
 		}
 		if turn.Standard {
