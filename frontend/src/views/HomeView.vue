@@ -3,7 +3,7 @@
     <!-- macOS 风格标题栏 -->
     <TitleBar :title="projectName || $t('app.title')" :show-back="!!projectId">
       <div class="titlebar-actions">
-        <span class="job-badge">
+        <span v-if="jobTitle && jobTitle !== projectName" class="job-badge">
           <el-icon><Briefcase /></el-icon>
           {{ jobTitle }}
         </span>
@@ -28,8 +28,23 @@
 
     <main class="app-main">
       <!-- 左侧面板 -->
-      <aside class="left-panel" :style="{ width: leftPanelWidth + 'px' }">
-        <DropZone @select-files="handleSelectFiles" />
+      <aside
+        class="left-panel"
+        :class="{ 'is-panel-dragging': isPanelDragging }"
+        :style="{ width: leftPanelWidth + 'px' }"
+        @dragenter.prevent="handlePanelDragEnter"
+        @dragleave.prevent="handlePanelDragLeave"
+        @dragover.prevent
+        @drop.prevent="handlePanelDrop"
+      >
+        <!-- 拖拽覆盖层（拖动外部文件悬停在左侧面板时展示） -->
+        <Transition name="fade">
+          <div v-if="isPanelDragging" class="panel-drag-overlay">
+            <el-icon class="drag-overlay-icon"><UploadFilled /></el-icon>
+            <div class="drag-overlay-title">松开鼠标即可添加简历</div>
+            <div class="drag-overlay-sub">支持 PDF / Word / 图片格式，自动开始分析</div>
+          </div>
+        </Transition>
 
         <div class="resume-section">
           <div class="resume-toolbar">
@@ -59,6 +74,10 @@
                   </button>
                   <template #dropdown>
                     <el-dropdown-menu class="resume-more-dropdown">
+                      <el-dropdown-item command="import-local">
+                        <el-icon><UploadFilled /></el-icon>
+                        <span>导入本地简历（PDF/Word/图片）</span>
+                      </el-dropdown-item>
                       <el-dropdown-item command="reanalyze" :disabled="resumeStore.isAnalyzing || !hasReanalyzableResumes">
                         <el-icon><RefreshRight /></el-icon>
                         <span>{{ $t('home.reAnalyzeAll') }}</span>
@@ -82,7 +101,7 @@
               </div>
             </div>
 
-            <!-- 第二行：三项核心操作按钮（矩阵寻才、继续寻才、开始分析/已全部分析）(Q1, Q3) -->
+            <!-- 第二行：三项核心操作按钮（矩阵寻才、继续寻才、开始分析/已完成）(Q1, Q3) -->
             <div class="resume-toolbar-actions">
               <button
                 class="action-btn boss-btn"
@@ -112,8 +131,8 @@
                 <el-icon v-else-if="resumeStore.analysisReadyCount > 0"><VideoPlay /></el-icon>
                 <el-icon v-else><CircleCheck /></el-icon>
                 <span v-if="resumeStore.isAnalyzing">{{ $t('home.analyzing') }}</span>
-                <span v-else-if="resumeStore.analysisReadyCount > 0">手动分析（{{ resumeStore.analysisReadyCount }}）</span>
-                <span v-else>{{ $t('home.allAnalyzed') }}</span>
+                <span v-else-if="resumeStore.analysisReadyCount > 0">分析 ({{ resumeStore.analysisReadyCount }})</span>
+                <span v-else>已完成</span>
               </button>
             </div>
           </div>
@@ -129,7 +148,9 @@
               @re-analyze="handleReAnalyze"
               @delete="resumeStore.deleteResume"
             />
-            <el-empty v-if="resumeStore.resumes.length === 0" :description="$t('home.dragHint')" />
+            <div v-if="resumeStore.resumes.length === 0" class="empty-dropzone-box">
+              <DropZone @select-files="handleSelectFiles" />
+            </div>
           </div>
         </div>
       </aside>
@@ -928,7 +949,7 @@ import {
   RefreshRight, MoreFilled, Tickets, QuestionFilled, DocumentCopy, InfoFilled, Search,
   ChatDotRound, DocumentAdd, Connection, CloseBold, Paperclip, Compass, Check, Message,
   Link, Plus, Share, Aim, Filter, Download, Delete, Finished, Histogram, Calendar,
-  Reading
+  Reading, UploadFilled
 } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import TitleBar from '../components/TitleBar.vue'
@@ -2130,6 +2151,29 @@ function loadJobTitle() {
   }
 }
 
+// 拖拽文件进入左侧面板时的交互反馈
+const isPanelDragging = ref(false)
+let panelDragCounter = 0
+
+function handlePanelDragEnter(e: DragEvent) {
+  panelDragCounter++
+  if (panelDragCounter > 0) isPanelDragging.value = true
+}
+
+function handlePanelDragLeave(e: DragEvent) {
+  panelDragCounter--
+  if (panelDragCounter <= 0) {
+    panelDragCounter = 0
+    isPanelDragging.value = false
+  }
+}
+
+function handlePanelDrop(e: DragEvent) {
+  panelDragCounter = 0
+  isPanelDragging.value = false
+  // Wails 原生 runtime.OnFileDrop 会自动捕获并处理真实文件路径
+}
+
 // 点击选择文件 → 调用 Wails 原生文件对话框
 async function handleSelectFiles() {
   try {
@@ -2205,6 +2249,7 @@ async function handleReAnalyzeAll() {
 }
 
 function handleResumeMenuCommand(command: string) {
+  if (command === 'import-local') void handleSelectFiles()
   if (command === 'reanalyze') void handleReAnalyzeAll()
   if (command === 'export') void handleExport()
   if (command === 'clear') void handleClearProject()
@@ -2458,6 +2503,38 @@ onUnmounted(() => {
   background: $bg-primary;
   flex-shrink: 0;
   transition: width 0.04s ease;
+  position: relative;
+
+  .panel-drag-overlay {
+    position: absolute;
+    inset: 8px;
+    z-index: 50;
+    background: rgba(240, 247, 255, 0.95);
+    backdrop-filter: blur(4px);
+    border: 2px dashed #2563eb;
+    border-radius: 12px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    color: #1e40af;
+    pointer-events: none;
+    box-shadow: 0 8px 24px rgba(37, 99, 235, 0.15);
+
+    .drag-overlay-icon {
+      font-size: 40px;
+      color: #2563eb;
+    }
+    .drag-overlay-title {
+      font-size: 15px;
+      font-weight: 600;
+    }
+    .drag-overlay-sub {
+      font-size: 12px;
+      color: #64748b;
+    }
+  }
 
   .resume-section {
     flex: 1;
@@ -2465,6 +2542,14 @@ onUnmounted(() => {
     flex-direction: column;
     overflow: hidden;
   }
+}
+
+.empty-dropzone-box {
+  padding: 12px;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
 // 左右拖拽手柄
@@ -2640,19 +2725,19 @@ onUnmounted(() => {
   .resume-toolbar-actions {
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: 6px;
     width: 100%;
     min-width: 0;
 
     .action-btn {
       flex: 1 1 0;
       min-width: 0;
-      height: 35px;
+      height: 34px;
       display: inline-flex;
       align-items: center;
       justify-content: center;
-      gap: 5px;
-      padding: 0 8px;
+      gap: 4px;
+      padding: 0 6px;
       border-radius: 8px;
       font-size: 12px;
       font-weight: 600;
@@ -2662,7 +2747,7 @@ onUnmounted(() => {
       line-height: 1;
 
       .el-icon {
-        font-size: 14px;
+        font-size: 13px;
         flex-shrink: 0;
       }
 

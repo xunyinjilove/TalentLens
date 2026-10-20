@@ -29,7 +29,7 @@
         <span v-if="projectCount > 0" class="nav-badge">{{ projectCount }}</span>
       </router-link>
 
-      <router-link to="/talent" class="nav-item" :class="{ active: route.path === '/talent' }">
+      <router-link to="/talent" class="nav-item" :class="{ active: isTalentActive }">
         <el-icon class="nav-icon"><Document /></el-icon>
         <span class="nav-label">简历人才库</span>
       </router-link>
@@ -95,9 +95,14 @@ const assistantStore = useAIAssistantStore()
 
 const projectCount = computed(() => projectStore.projects.length)
 
-// 判断项目列表是否处于激活态（包含详情页）
+// 判断职位管理是否处于激活态
 const isProjectsActive = computed(() => {
-  return route.path.startsWith('/jobs') || route.path.startsWith('/project/')
+  return route.path.startsWith('/jobs')
+})
+
+// 判断简历人才库是否处于激活态（包含人才库及项目完整评测详情页）
+const isTalentActive = computed(() => {
+  return route.path.startsWith('/talent') || route.path.startsWith('/project/')
 })
 </script>
 
