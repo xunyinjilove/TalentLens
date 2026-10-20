@@ -146,3 +146,59 @@ func TestVerifiedPlatformIdentityLinksOneCandidateAcrossProjects(t *testing.T) {
 		t.Fatalf("unified profile lost project or source history: %+v", profile)
 	}
 }
+
+func TestBatchUpdateCandidateStage(t *testing.T) {
+	dir := t.TempDir()
+	app := NewApp()
+	app.dataDirOverride = dir
+	defer app.closeRecruitmentDB()
+
+	now := time.Now()
+	writeLegacyJSON(t, dir, "projects", "proj_batch", &Project{
+		ID:        "proj_batch",
+		Name:      "批量测试岗位",
+		JobConfig: JobConfig{Title: "批量测试岗位"},
+		ResumeIDs: []string{"res_1", "res_2"},
+		CreatedAt: now,
+		UpdatedAt: now,
+	})
+	writeLegacyJSON(t, dir, "resumes", "res_1", &Resume{
+		ID:        "res_1",
+		ProjectID: "proj_batch",
+		FileName:  "候选人甲.pdf",
+		Status:    "done",
+		Analysis:  &AnalysisResult{CandidateName: "候选人甲", OverallScore: 85},
+		CreatedAt: now,
+	})
+	writeLegacyJSON(t, dir, "resumes", "res_2", &Resume{
+		ID:        "res_2",
+		ProjectID: "proj_batch",
+		FileName:  "候选人乙.pdf",
+		Status:    "done",
+		Analysis:  &AnalysisResult{CandidateName: "候选人乙", OverallScore: 80},
+		CreatedAt: now,
+	})
+
+	list, err := app.ListTalentCandidates("proj_batch")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(list) != 2 {
+		t.Fatalf("expected 2 candidates, got %d", len(list))
+	}
+
+	pcIDs := []string{list[0].ProjectCandidateID, list[1].ProjectCandidateID}
+	if err := app.BatchUpdateCandidateStage(pcIDs, "first_interview", "批量进入初试", "HR"); err != nil {
+		t.Fatalf("BatchUpdateCandidateStage failed: %v", err)
+	}
+
+	updatedList, err := app.ListTalentCandidates("proj_batch")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range updatedList {
+		if c.Stage != "first_interview" {
+			t.Fatalf("expected stage 'first_interview', got '%s' for candidate %s", c.Stage, c.Name)
+		}
+	}
+}

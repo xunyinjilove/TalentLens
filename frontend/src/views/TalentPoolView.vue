@@ -252,6 +252,9 @@
             </el-button>
             <template v-if="manageMode">
               <el-button size="small" @click="selectVisibleCandidates">全选当前结果</el-button>
+              <el-button size="small" type="primary" plain :disabled="!selectedCandidateIds.length" @click="openBatchStageDialog">
+                批量调整阶段（{{ selectedCandidateIds.length }}）
+              </el-button>
               <el-button size="small" type="primary" plain :disabled="!selectedCandidateIds.length" @click="startBatchOutreach(selectedCandidateIds)">
                 批量打招呼（{{ selectedCandidateIds.length }}）
               </el-button>
@@ -344,7 +347,14 @@
               <span class="wb-pill" :class="statusClass(item.analysisStatus)">
                 {{ statusLabel(item.analysisStatus) }}
               </span>
-              <span class="wb-pill stage-pill">{{ stageLabels[item.stage] || item.stage }}</span>
+              <span
+                class="wb-pill stage-pill clickable-stage-pill"
+                title="点击调整招聘阶段"
+                @click.stop="openSingleStageDialog(item)"
+              >
+                {{ stageLabels[item.stage] || item.stage }}
+                <el-icon class="stage-edit-icon"><Edit /></el-icon>
+              </span>
             </div>
 
             <div class="candidate-skill-list" aria-label="已核对的能力标签">
@@ -363,6 +373,7 @@
                   <el-button size="small" class="candidate-more-action" aria-label="更多候选人操作">更多<el-icon><ArrowDown /></el-icon></el-button>
                   <template #dropdown>
                     <el-dropdown-menu>
+                      <el-dropdown-item command="stage">调整招聘阶段</el-dropdown-item>
                       <el-dropdown-item command="move">调配分库</el-dropdown-item>
                       <el-dropdown-item v-if="item.analysisStatus === 'error'" command="retry">重新分析</el-dropdown-item>
                       <el-dropdown-item command="archive" divided>删除岗位简历</el-dropdown-item>
@@ -443,10 +454,16 @@
               </template>
             </el-table-column>
 
-            <el-table-column label="招聘阶段" width="110" align="center">
+            <el-table-column label="招聘阶段" width="120" align="center">
               <template #default="{ row }">
-                <span class="wb-pill stage-pill" style="font-size: 11px;">
+                <span
+                  class="wb-pill stage-pill clickable-stage-pill"
+                  style="font-size: 11px;"
+                  title="点击调整招聘阶段"
+                  @click.stop="openSingleStageDialog(row)"
+                >
                   {{ stageLabels[row.stage] || row.stage }}
+                  <el-icon class="stage-edit-icon"><Edit /></el-icon>
                 </span>
               </template>
             </el-table-column>
@@ -469,10 +486,11 @@
               </template>
             </el-table-column>
 
-            <el-table-column label="操作" width="250" fixed="right" align="center">
+            <el-table-column label="操作" width="280" fixed="right" align="center">
               <template #default="{ row }">
                 <div class="table-row-actions" @click.stop>
                   <el-button link type="primary" size="small" @click="navigateToEvaluation(row)">查看测评</el-button>
+                  <el-button link type="primary" size="small" @click="openSingleStageDialog(row)">阶段</el-button>
                   <el-button link type="primary" size="small" @click="openInterviewInvite(row)">邀约面试</el-button>
                   <el-button link type="primary" size="small" @click="openMoveDialog(row)">调配</el-button>
                   <el-button link type="danger" size="small" @click="archiveOneCandidate(row)">删除</el-button>
@@ -680,6 +698,59 @@
       </template>
     </el-dialog>
 
+    <!-- 调整招聘阶段对话框 -->
+    <el-dialog
+      v-model="stageDialogOpen"
+      :title="isBatchStageMode ? `批量调整招聘阶段（已选 ${selectedCandidateIds.length} 人）` : `调整招聘阶段 · ${stageCandidate?.name || ''}`"
+      width="460px"
+      class="stage-adjust-dialog"
+    >
+      <div class="stage-dialog-body">
+        <p v-if="isBatchStageMode" class="dialog-tip-text">
+          即将把选中的 <strong>{{ selectedCandidateIds.length }}</strong> 位候选人流转至新招聘阶段，系统将自动记录流转轨迹：
+        </p>
+        <p v-else class="dialog-tip-text">
+          调整 <strong>{{ stageCandidate?.name }}</strong>（{{ stageCandidate?.jobTitle || stageCandidate?.projectName }}）当前的招聘进程：
+        </p>
+
+        <el-form label-position="top" style="margin-top: 14px;">
+          <el-form-item label="目标招聘阶段 *" required>
+            <el-select v-model="targetStage" placeholder="请选择招聘阶段" style="width: 100%">
+              <el-option
+                v-for="(label, key) in stageLabels"
+                :key="key"
+                :label="label"
+                :value="key"
+              >
+                <div style="display: flex; justify-content: space-between; align-items: center;">
+                  <span>{{ label }}</span>
+                  <span style="color: var(--el-text-color-secondary); font-size: 12px;">{{ key }}</span>
+                </div>
+              </el-option>
+            </el-select>
+          </el-form-item>
+
+          <el-form-item label="跟进备注 / 阶段说明（可选）">
+            <el-input
+              v-model="stageNote"
+              type="textarea"
+              :rows="3"
+              maxlength="200"
+              show-word-limit
+              placeholder="记录阶段变更原因或后续建议，例如：初面表现优秀，推荐进入复面..."
+            />
+          </el-form-item>
+        </el-form>
+      </div>
+
+      <template #footer>
+        <el-button @click="stageDialogOpen = false">取消</el-button>
+        <el-button type="primary" :loading="updatingStage" @click="confirmUpdateStage">
+          确认调整
+        </el-button>
+      </template>
+    </el-dialog>
+
     <!-- 寻才与打招呼对话框 -->
     <TopTenOutreachDialog
       v-model="showOutreach"
@@ -792,7 +863,8 @@ import {
   Warning,
   Loading,
   Document,
-  Calendar
+  Calendar,
+  Edit
 } from '@element-plus/icons-vue'
 import { useProjectStore, type Project } from '../composables/useProjectStore'
 import { useRecruitmentStore, stageLabels, type TalentCandidate } from '../composables/useRecruitmentStore'
@@ -858,9 +930,71 @@ function archiveSelectedCandidates() {
 }
 
 function handleCandidateAction(command: string, item: TalentCandidate) {
+  if (command === 'stage') openSingleStageDialog(item)
   if (command === 'move') openMoveDialog(item)
   if (command === 'retry') void retryAnalysis(item.resumeId)
   if (command === 'archive') archiveOneCandidate(item)
+}
+
+// 招聘阶段调整相关状态与方法
+const stageDialogOpen = ref(false)
+const stageCandidate = ref<TalentCandidate | null>(null)
+const isBatchStageMode = ref(false)
+const targetStage = ref('communicating')
+const stageNote = ref('')
+const updatingStage = ref(false)
+
+function openSingleStageDialog(candidate: TalentCandidate) {
+  stageCandidate.value = candidate
+  isBatchStageMode.value = false
+  targetStage.value = candidate.stage || 'new'
+  stageNote.value = ''
+  stageDialogOpen.value = true
+}
+
+function openBatchStageDialog() {
+  if (!selectedCandidateIds.value.length) {
+    ElMessage.warning('请先勾选需要调整阶段的候选人')
+    return
+  }
+  stageCandidate.value = null
+  isBatchStageMode.value = true
+  targetStage.value = 'communicating'
+  stageNote.value = ''
+  stageDialogOpen.value = true
+}
+
+async function confirmUpdateStage() {
+  if (!targetStage.value) {
+    ElMessage.warning('请选择目标招聘阶段')
+    return
+  }
+  updatingStage.value = true
+  try {
+    const stageName = stageLabels[targetStage.value] || targetStage.value
+    if (isBatchStageMode.value) {
+      const ids = [...selectedCandidateIds.value]
+      await recruitment.batchUpdateStage(ids, targetStage.value, stageNote.value)
+      ElMessage.success(`已成功批量将 ${ids.length} 位候选人流转至【${stageName}】阶段`)
+      selectedCandidateIds.value = []
+    } else if (stageCandidate.value) {
+      await recruitment.updateFollowUp(
+        stageCandidate.value,
+        targetStage.value,
+        stageCandidate.value.owner || 'HR',
+        stageCandidate.value.nextActionAt || '',
+        stageNote.value || `阶段调整为：${stageName}`
+      )
+      ElMessage.success(`已将【${stageCandidate.value.name}】流转至【${stageName}】阶段`)
+    }
+    stageDialogOpen.value = false
+    stageCandidate.value = null
+    await refresh()
+  } catch (err: any) {
+    ElMessage.error(err?.message || String(err))
+  } finally {
+    updatingStage.value = false
+  }
 }
 
 const hasActiveFilters = computed(() => {
@@ -2221,6 +2355,37 @@ onMounted(() => {
   background-color: #f1f5f9;
   color: #0f172a;
   font-weight: 600;
+}
+
+.clickable-stage-pill {
+  cursor: pointer;
+  transition: all 0.2s ease;
+  user-select: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
+
+.clickable-stage-pill:hover {
+  background-color: #e2e8f0;
+  color: #2563eb;
+  transform: translateY(-1px);
+}
+
+.stage-edit-icon {
+  font-size: 11px;
+  opacity: 0.6;
+}
+
+.clickable-stage-pill:hover .stage-edit-icon {
+  opacity: 1;
+}
+
+.stage-adjust-dialog .dialog-tip-text {
+  font-size: 13px;
+  color: #475569;
+  line-height: 1.6;
+  margin: 0;
 }
 
 .candidate-owner-line {

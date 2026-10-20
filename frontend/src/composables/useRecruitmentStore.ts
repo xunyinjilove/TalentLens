@@ -169,6 +169,18 @@ export const useRecruitmentStore = defineStore('recruitment', () => {
     await Promise.all([loadCandidates(), loadDashboard()])
   }
 
+  async function batchUpdateStage(projectCandidateIds: string[], stage: string, note = '') {
+    const api: any = await recruitmentAPI()
+    if (typeof api.BatchUpdateCandidateStage === 'function') {
+      await api.BatchUpdateCandidateStage(projectCandidateIds, stage, note, 'HR')
+    } else {
+      for (const id of projectCandidateIds) {
+        await api.UpdateCandidateFollowUp(id, stage, '', '', note, 'HR')
+      }
+    }
+    await Promise.all([loadCandidates(), loadDashboard()])
+  }
+
   async function saveInterview(item: RecruitmentInterview) {
     const api: any = await recruitmentAPI()
     await api.SaveRecruitmentInterview(item)
@@ -228,5 +240,5 @@ export const useRecruitmentStore = defineStore('recruitment', () => {
   return { candidates, interviews, dashboard, sourcingTasks, taskCenterOpen, loading, error, loadCandidates,
     loadDashboard, loadInterviews, loadSourcingTasks, resumeSourcingTask, stopSourcingTask,
     deleteSourcingTask, clearFinishedSourcingTasks,
-    updateFollowUp, saveInterview, cancelInterview, moveCandidate, archiveCandidates, initEvents }
+    updateFollowUp, batchUpdateStage, saveInterview, cancelInterview, moveCandidate, archiveCandidates, initEvents }
 })

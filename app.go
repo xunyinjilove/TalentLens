@@ -36,7 +36,7 @@ import (
 )
 
 // 版本信息
-const AppVersion = "1.8.37"
+const AppVersion = "1.8.38"
 const analysisFormatRetryVersion = "model-json-repair-v1"
 const GitHubRepo = "xunyinjilove/TalentLens"
 
@@ -475,6 +475,28 @@ func (a *App) WindowClose() {
 		isMax := runtime.WindowIsMaximised(a.ctx)
 		_ = a.SaveWindowSettings(w, h, isMax)
 		runtime.Quit(a.ctx)
+	}
+}
+
+// StartWindowDrag 启动原生平滑窗口拖动（传递当前真实光标绝对坐标）
+func (a *App) StartWindowDrag() {
+	go startWindowNCDown(2 /* HTCAPTION */)
+}
+
+// StartWindowResize 启动原生无死角八方窗口尺寸调整（传递当前真实光标绝对坐标）
+func (a *App) StartWindowResize(edge string) {
+	borderMap := map[string]uintptr{
+		"n-resize":  12, // HTTOP
+		"ne-resize": 14, // HTTOPRIGHT
+		"e-resize":  11, // HTRIGHT
+		"se-resize": 17, // HTBOTTOMRIGHT
+		"s-resize":  15, // HTBOTTOM
+		"sw-resize": 16, // HTBOTTOMLEFT
+		"w-resize":  10, // HTLEFT
+		"nw-resize": 13, // HTTOPLEFT
+	}
+	if border, ok := borderMap[edge]; ok {
+		go startWindowNCDown(border)
 	}
 }
 
@@ -1260,6 +1282,8 @@ func (a *App) saveProject(p *Project) {
 }
 
 // CreateProject 创建招聘项目
+var projectIDSeq atomic.Int64
+
 func (a *App) CreateProject(name string, department string, headcount int, recruiter string, remark string, jobCfg *JobConfig) *Project {
 	if headcount <= 0 {
 		headcount = 1
@@ -1269,8 +1293,9 @@ func (a *App) CreateProject(name string, department string, headcount int, recru
 	} else if jobCfg.Title == "" {
 		jobCfg.Title = name
 	}
+	seq := projectIDSeq.Add(1)
 	p := &Project{
-		ID:         fmt.Sprintf("proj_%d", time.Now().UnixNano()),
+		ID:         fmt.Sprintf("proj_%d_%d", time.Now().UnixNano(), seq),
 		Name:       name,
 		Department: department,
 		Headcount:  headcount,
