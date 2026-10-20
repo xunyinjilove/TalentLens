@@ -523,6 +523,10 @@
                       <div class="header-title">
                         <el-icon><Histogram /></el-icon>
                         <span>岗位统一技能指标雷达</span>
+                        <span v-if="isGeneratingMetrics" class="ai-generating-tag">
+                          <el-icon class="is-loading"><Loading /></el-icon>
+                          AI正在自动推导岗位技能画像...
+                        </span>
                       </div>
                     </div>
 
@@ -542,7 +546,10 @@
                           :selected-index="selectedRadarIndex"
                           @select="handleSelectRadarIndex"
                         />
-                        <p v-else class="score-explanation">当前岗位配置的技能与核心能力少于 3 项，建议在岗位设置中完善至少 3 项技能要求以生成雷达多边形。</p>
+                        <div v-else class="radar-generating-box">
+                          <el-icon class="is-loading"><Loading /></el-icon>
+                          <span>AI 正在为该岗位自动构建统一技能指标雷达...</span>
+                        </div>
                       </div>
 
                       <!-- 右侧：技能能力与原文线索 -->
@@ -1097,6 +1104,27 @@ interface RadarCheckItem {
   isCovered: boolean
 }
 
+const isGeneratingMetrics = ref(false)
+
+// 自动检测并由 AI 生成/补齐岗位统一技能画像与核心能力
+async function checkAndAutoGenerateMetrics() {
+  const pId = projectId.value
+  if (!pId || isGeneratingMetrics.value) return
+  const curP = projectStore.currentProject
+  if (!curP) return
+  const set = new Set<string>()
+  ;(curP.job_config?.required_skills || []).forEach(s => s && set.add(s.trim()))
+  ;(curP.job_config?.core_criteria || []).forEach(c => c && set.add(c.trim()))
+  if (set.size < 3) {
+    isGeneratingMetrics.value = true
+    try {
+      await projectStore.ensureProjectJobMetrics(pId)
+    } finally {
+      isGeneratingMetrics.value = false
+    }
+  }
+}
+
 // 基于当前岗位配置的【技能要求 + 核心能力】构建统一雷达指标
 const unifiedJobMetrics = computed<string[]>(() => {
   const jobCfg = projectStore.currentProject?.job_config
@@ -1113,8 +1141,13 @@ const unifiedJobMetrics = computed<string[]>(() => {
       if (trimmed) set.add(trimmed)
     }
   }
-  if (set.size === 0) {
-    return ['专业技能掌握度', '项目实战与交付', '业务领域匹配', '团队协作与自驱', '问题分析与解决']
+  // 若当前指标仍少于 3 项，智能补齐通用保底指标，确保雷达图绝不出现少于 3 项的空白
+  if (set.size < 3) {
+    const fallbacks = ['专业技能掌握度', '核心业务交付', '复杂问题分析与排查', '工程化规范与落地', '团队沟通与自驱协同']
+    for (const fb of fallbacks) {
+      set.add(fb)
+      if (set.size >= 5) break
+    }
   }
   return Array.from(set)
 })
@@ -2256,6 +2289,8 @@ onMounted(async () => {
     if (projectStore.currentProject) {
       jobTitle.value = projectStore.currentProject.job_config?.title || jobTitle.value
     }
+    // 静默检查并由 AI 自动推导补齐岗位统一技能指标
+    await checkAndAutoGenerateMetrics()
     // 加载项目下的简历
     await resumeStore.loadProjectResumes(projectId.value)
     selectTargetResumeFromRoute()
@@ -3293,6 +3328,19 @@ onUnmounted(() => {
           font-weight: 700;
           color: $text-primary;
           .el-icon { color: $system-blue; }
+
+          .ai-generating-tag {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            font-size: 11px;
+            font-weight: 500;
+            color: $system-blue;
+            background: rgba(0, 122, 255, 0.08);
+            padding: 2px 8px;
+            border-radius: 4px;
+            margin-left: 6px;
+          }
         }
 
         .header-tip {
@@ -3322,6 +3370,23 @@ onUnmounted(() => {
           padding: 14px 16px;
           border-radius: 12px;
           border: 1px solid $separator;
+          min-height: 220px;
+
+          .radar-generating-box {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            gap: 10px;
+            color: $system-blue;
+            font-size: 13px;
+            padding: 30px 20px;
+            text-align: center;
+
+            .el-icon {
+              font-size: 24px;
+            }
+          }
         }
 
         .score-breakdown-box {
