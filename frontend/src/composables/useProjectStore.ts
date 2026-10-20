@@ -171,6 +171,24 @@ export const useProjectStore = defineStore('project', () => {
     } catch {}
   }
 
+  // 确保项目具有统一岗位技能指标（若少于3项由AI/行业画像自动生成并持久化）
+  async function ensureProjectJobMetrics(id: string): Promise<Project | null> {
+    await loadWails()
+    if (!isWailsEnv || !WailsApp) return null
+    try {
+      const result = await WailsApp.EnsureProjectJobMetrics(id)
+      if (result) {
+        const idx = projects.value.findIndex(p => p.id === id)
+        if (idx >= 0) projects.value[idx] = result
+        else projects.value.unshift(result)
+        return result
+      }
+    } catch (err: any) {
+      devLog('error', `自动补齐岗位技能失败: ${err.message || err}`)
+    }
+    return null
+  }
+
   // 导出报告
   async function exportReport(projectId: string): Promise<string> {
     await loadWails()
@@ -216,6 +234,7 @@ export const useProjectStore = defineStore('project', () => {
     updateProject,
     deleteProject,
     refreshProject,
+    ensureProjectJobMetrics,
     exportReport,
     migrateExisting
   }

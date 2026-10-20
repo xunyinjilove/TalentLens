@@ -36,7 +36,7 @@ import (
 )
 
 // 版本信息
-const AppVersion = "1.8.27"
+const AppVersion = "1.8.28"
 const analysisFormatRetryVersion = "model-json-repair-v1"
 const GitHubRepo = "xunyinjilove/TalentLens"
 
@@ -2882,6 +2882,13 @@ func (a *App) AnalyzeResume(resumeID string, cfg *AIConfig, jobCfg *JobConfig) (
 		"progress": 10,
 	})
 
+	// 确保所属项目已完备统一技能与核心能力指标（若不足3项则静默生成并持久化）
+	if resume.ProjectID != "" {
+		if updatedP := a.EnsureProjectJobMetrics(resume.ProjectID); updatedP != nil {
+			jobCfg = &updatedP.JobConfig
+		}
+	}
+
 	// 构建 Prompt - 进度 30%
 	prompt := a.buildAnalysisPrompt(&resume, jobCfg)
 	runtime.EventsEmit(a.ctx, "analysis:progress", map[string]interface{}{
@@ -4041,6 +4048,223 @@ func (a *App) getFallbackJobSynonyms(title string) []JobSynonymItem {
 		{Keyword: title + "专家", Category: "senior", CategoryName: "高阶下探", Description: "具备深厚业务落地沉淀的技术业务专家", Ratio: 30},
 		{Keyword: title + "负责人", Category: "senior", CategoryName: "业务总揽", Description: "具备统筹管理与结果交付责任人", Ratio: 15},
 		{Keyword: "资深" + title, Category: "derivative", CategoryName: "业务衍生", Description: "具备多年一线攻坚与实战经验", Ratio: 15},
+	}
+}
+
+type JobMetricsDraft struct {
+	RequiredSkills []string `json:"required_skills"`
+	CoreCriteria   []string `json:"core_criteria"`
+}
+
+// EnsureProjectJobMetrics 检查并确保项目拥有充足的岗位技能与核心能力指标（若不足3项则自动调用AI或行业知识库补齐并持久化）
+func (a *App) EnsureProjectJobMetrics(projectID string) *Project {
+	p := a.GetProject(projectID)
+	if p == nil {
+		return nil
+	}
+	if p.JobConfig.Title == "" {
+		p.JobConfig.Title = p.Name
+	}
+
+	// 统计现有去重指标数
+	seen := make(map[string]bool)
+	for _, s := range p.JobConfig.RequiredSkills {
+		s = strings.TrimSpace(s)
+		if s != "" {
+			seen[s] = true
+		}
+	}
+	for _, c := range p.JobConfig.CoreCriteria {
+		c = strings.TrimSpace(c)
+		if c != "" {
+			seen[c] = true
+		}
+	}
+
+	// 如果已有 3 项以上，完全尊重既有设置，无需再生成
+	if len(seen) >= 3 {
+		return p
+	}
+
+	jobTitle := strings.TrimSpace(p.JobConfig.Title)
+	if jobTitle == "" {
+		jobTitle = strings.TrimSpace(p.Name)
+	}
+	if jobTitle == "" {
+		jobTitle = "通用专业岗位"
+	}
+
+	jobDesc := strings.TrimSpace(p.JobConfig.JobDescription)
+	log.Printf("[EnsureProjectJobMetrics] 项目 %s (%s) 技能指标不足(当前%d项)，开始由AI自动推导生成...", p.ID, jobTitle, len(seen))
+
+	var generated JobMetricsDraft
+	aiSuccess := false
+
+	// 1. 若配置了 AI APIKey，优先请求大模型生成定制化画像
+	if a.config.AI.APIKey != "" {
+		descSnippet := jobDesc
+		if len(descSnippet) > 600 {
+			descSnippet = descSnippet[:600] + "..."
+		}
+
+		prompt := fmt.Sprintf(`你是一位拥有15年招聘与人才测评经验的资深人力资源架构专家。
+当前正在评估目标岗位【%s】的候选人简历，但该岗位尚未配置详细的专业技能与核心能力要求。
+为了确保所有候选人能在一套科学严谨、统一公允的标尺（多边形能力雷达图）上进行横向对比，请你为该岗位提炼出专属的统一技能与能力维度。
+
+岗位职责参考（若有）：
+%s
+
+要求：
+1. required_skills: 提取 3~4 项该岗位最关键的专业硬技能、核心技术工具或业务实操能力（名称简练，每个2~8个字，如“Go并发架构”、“MySQL/SQL调优”）；
+2. core_criteria: 提取 2~3 项该岗位核心业务交付、复杂问题排查或团队协同综合素养（名称简练，每个4~10个字，如“业务建模与系统抽象”、“高可用容灾与性能排障”）；
+3. 严格输出合法 JSON 对象，严禁包裹 markdown 代码块外的其他文字：
+{
+  "required_skills": ["技能1", "技能2", "技能3", "技能4"],
+  "core_criteria": ["核心能力1", "核心能力2", "核心能力3"]
+}`, jobTitle, descSnippet)
+
+		respText, err := a.callAI(&a.config.AI, prompt)
+		if err == nil && respText != "" {
+			reJson := regexp.MustCompile(`\{\s*"required_skills"[\s\S]*\}`)
+			matches := reJson.FindString(respText)
+			targetJson := respText
+			if matches != "" {
+				targetJson = matches
+			} else {
+				start := strings.Index(respText, "{")
+				end := strings.LastIndex(respText, "}")
+				if start != -1 && end != -1 && end > start {
+					targetJson = respText[start : end+1]
+				}
+			}
+
+			var draft JobMetricsDraft
+			if jsonErr := json.Unmarshal([]byte(targetJson), &draft); jsonErr == nil {
+				if len(draft.RequiredSkills)+len(draft.CoreCriteria) >= 3 {
+					generated = draft
+					aiSuccess = true
+					log.Printf("[EnsureProjectJobMetrics] AI 成功为岗位【%s】派生 %d 项硬技能与 %d 项核心能力", jobTitle, len(draft.RequiredSkills), len(draft.CoreCriteria))
+				}
+			}
+		}
+	}
+
+	// 2. 若 AI 未能生成或离线异常，无缝启用行业标准专家画像库兜底
+	if !aiSuccess {
+		generated = a.getFallbackJobMetrics(jobTitle)
+		log.Printf("[EnsureProjectJobMetrics] 采用行业标准画像为岗位【%s】兜底补齐 %d 项指标", jobTitle, len(generated.RequiredSkills)+len(generated.CoreCriteria))
+	}
+
+	// 3. 将生成的指标无缝融入当前项目岗位配置（去重合并）
+	for _, s := range generated.RequiredSkills {
+		s = strings.TrimSpace(s)
+		if s != "" && !seen[s] {
+			seen[s] = true
+			p.JobConfig.RequiredSkills = append(p.JobConfig.RequiredSkills, s)
+		}
+	}
+	for _, c := range generated.CoreCriteria {
+		c = strings.TrimSpace(c)
+		if c != "" && !seen[c] {
+			seen[c] = true
+			p.JobConfig.CoreCriteria = append(p.JobConfig.CoreCriteria, c)
+		}
+	}
+
+	// 持久化保存到项目 JSON
+	a.saveProject(p)
+	log.Printf("[EnsureProjectJobMetrics] 项目 %s (%s) 技能指标持久化保存成功，合计 %d 项统一指标", p.ID, jobTitle, len(seen))
+	return p
+}
+
+// getFallbackJobMetrics 行业标准岗位画像兜底矩阵（涵盖主流技术、产品、运营、医药、职能等领域）
+func (a *App) getFallbackJobMetrics(jobTitle string) JobMetricsDraft {
+	t := strings.ToLower(jobTitle)
+
+	// 前端 / Web / 客户端
+	if strings.Contains(t, "前端") || strings.Contains(t, "web") || strings.Contains(t, "javascript") || strings.Contains(t, "vue") || strings.Contains(t, "react") || strings.Contains(t, "ios") || strings.Contains(t, "android") {
+		return JobMetricsDraft{
+			RequiredSkills: []string{"JavaScript/TypeScript", "主流前端框架(Vue/React)", "组件化与工程化构建", "页面性能与跨端适配"},
+			CoreCriteria:   []string{"复杂交互业务落地", "代码规范与调优", "前后端协同与交付"},
+		}
+	}
+
+	// 后端 / Go / Java / Python / C++ / PHP
+	if strings.Contains(t, "后端") || strings.Contains(t, "开发") || strings.Contains(t, "架构") || strings.Contains(t, "java") || strings.Contains(t, "go") || strings.Contains(t, "golang") || strings.Contains(t, "python") || strings.Contains(t, "c++") || strings.Contains(t, "c#") || strings.Contains(t, "php") {
+		return JobMetricsDraft{
+			RequiredSkills: []string{"核心编程语言与框架", "关系型数据库与SQL调优", "Redis/中间件与缓存", "高并发与分布式微服务"},
+			CoreCriteria:   []string{"业务抽象与系统建模", "生产故障排障与高可用", "工程化规范与交付结果"},
+		}
+	}
+
+	// 测试 / QA
+	if strings.Contains(t, "测试") || strings.Contains(t, "qa") || strings.Contains(t, "质检") {
+		return JobMetricsDraft{
+			RequiredSkills: []string{"功能与业务测试用例设计", "接口测试与抓包排查", "自动化测试脚本编写", "性能与压力测试评估"},
+			CoreCriteria:   []string{"缺陷敏锐定位与复盘", "质量风险阻断与把控", "研测流程协同推进"},
+		}
+	}
+
+	// 运维 / DevOps / 云原生
+	if strings.Contains(t, "运维") || strings.Contains(t, "devops") || strings.Contains(t, "sre") || strings.Contains(t, "云原生") || strings.Contains(t, "网络") {
+		return JobMetricsDraft{
+			RequiredSkills: []string{"Linux系统与脚本运维", "Docker与K8s容器化编排", "CI/CD持续集成流水线", "监控报警与链路排查"},
+			CoreCriteria:   []string{"生产突发故障快速响应", "系统容灾与高可用保障", "资源成本优化与安全合规"},
+		}
+	}
+
+	// 数据 / 算法 / AI
+	if strings.Contains(t, "算法") || strings.Contains(t, "ai") || strings.Contains(t, "数据") || strings.Contains(t, "模型") || strings.Contains(t, "nlp") || strings.Contains(t, "cv") {
+		return JobMetricsDraft{
+			RequiredSkills: []string{"Python/SQL数据处理", "机器学习/深度学习框架", "特征工程与算法建模", "模型工程化部署与调优"},
+			CoreCriteria:   []string{"业务问题算法转化", "指标评测与持续迭代", "跨业务协同赋能"},
+		}
+	}
+
+	// 临床 / 医疗 / IVD / CRA / CPM
+	if strings.Contains(t, "临床") || strings.Contains(t, "cra") || strings.Contains(t, "cpm") || strings.Contains(t, "crc") || strings.Contains(t, "医学") || strings.Contains(t, "药") || strings.Contains(t, "ivd") || strings.Contains(t, "试剂") {
+		return JobMetricsDraft{
+			RequiredSkills: []string{"临床试验方案与SOP执行", "GCP法规与合规质控", "试验中心监查与进度把控", "临床数据核查与闭环管理"},
+			CoreCriteria:   []string{"研究中心沟通协调", "风险预警与应急处置", "多中心里程碑高质量交付"},
+		}
+	}
+
+	// 产品经理 / PM
+	if strings.Contains(t, "产品") || strings.Contains(t, "pm") || strings.Contains(t, "需求") {
+		return JobMetricsDraft{
+			RequiredSkills: []string{"业务需求分析与PRD撰写", "用户调研与原型设计", "数据分析与业务指标拆解", "业务流程与功能规划"},
+			CoreCriteria:   []string{"商业逻辑抽象与洞察", "跨部门资源推动与协调", "产品全生命周期高质量迭代"},
+		}
+	}
+
+	// 运营 / 市场 / 策划
+	if strings.Contains(t, "运营") || strings.Contains(t, "市场") || strings.Contains(t, "策划") || strings.Contains(t, "增长") || strings.Contains(t, "媒介") {
+		return JobMetricsDraft{
+			RequiredSkills: []string{"活动策划与文案撰写", "用户增长与转化漏斗分析", "多渠道分发与传播推广", "数据复盘与精细化运营"},
+			CoreCriteria:   []string{"市场敏锐度与创意洞察", "跨职能资源协同调度", "核心ROI与运营目标交付"},
+		}
+	}
+
+	// 销售 / 商务 / BD
+	if strings.Contains(t, "销售") || strings.Contains(t, "商务") || strings.Contains(t, "bd") || strings.Contains(t, "招商") || strings.Contains(t, "客户经理") {
+		return JobMetricsDraft{
+			RequiredSkills: []string{"客户画像挖掘与线索开拓", "商务谈判与合同促成", "客户关系维护与复购挖掘", "行业市场分析与竞品研究"},
+			CoreCriteria:   []string{"商机嗅觉与抗压破局", "客户信任建立与维系", "业绩指标达成与兑现"},
+		}
+	}
+
+	// 人事 / 行政 / 财务 / 职能
+	if strings.Contains(t, "人事") || strings.Contains(t, "hr") || strings.Contains(t, "招聘") || strings.Contains(t, "财务") || strings.Contains(t, "会计") || strings.Contains(t, "行政") {
+		return JobMetricsDraft{
+			RequiredSkills: []string{"专业业务实操与标准规范", "合规风控与制度落地", "数据核算与报表汇总分析", "办公协同系统高效应用"},
+			CoreCriteria:   []string{"严谨细致与职业素养", "跨部门沟通与组织服务", "流程优化与降本增效"},
+		}
+	}
+
+	// 通用岗位兜底
+	return JobMetricsDraft{
+		RequiredSkills: []string{"岗位核心专业技能", "专业工具与系统应用", "行业专业知识与实操规范", "业务流程熟练执行"},
+		CoreCriteria:   []string{"业务分析与问题解决", "高质量交付与自驱推进", "团队协同与顺畅沟通"},
 	}
 }
 
