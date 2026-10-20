@@ -411,9 +411,6 @@ func (a *App) PreviewBatchOutreach(projectID string, candidateIDs []string, temp
 			if !allowedIDs[linkID] && !allowedIDs[resume.ID] && !allowedIDs[sourceID] {
 				continue
 			}
-		} else if len(candidateIDs) == 0 && len(targets) >= 10 {
-			// 未传入具体人选且为排名前十快捷范围时，默认取前 10
-			break
 		}
 		if seenLinks[linkID] {
 			continue

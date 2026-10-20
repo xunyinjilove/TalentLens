@@ -27,7 +27,7 @@
           class="outreach-action-btn"
           :disabled="!selectedProjectId"
           @click="startBatchOutreach()"
-          :title="selectedProjectId ? '一键向当前分库筛选候选人或前十名发起批量沟通' : '请先选择左侧具体职位分库'"
+          :title="selectedProjectId ? '一键向当前分库筛选候选人发起批量沟通' : '请先选择左侧具体职位分库'"
         >
           <el-icon><ChatRound /></el-icon><span>批量打招呼</span>
         </el-button>

@@ -167,7 +167,7 @@
             <div class="tab-actions" v-if="rightTab === 'ranking'">
               <button class="action-btn primary" :disabled="!projectId || !rankedResumes.length" @click="showOutreach = true">
                 <el-icon><Message /></el-icon>
-                前十名打招呼
+                批量打招呼
               </button>
               <button class="action-btn" @click="handleExport">
                 <el-icon><Document /></el-icon>
@@ -796,7 +796,7 @@
                 </div>
                 <div class="rank-scores">
                   <span class="rank-score-main" :class="getScoreClass(r.score)">{{ r.score }}</span>
-                  <span>{{ !r.analysis ? '待分析' : r.analysis.redLineStatus === 'failed' ? '必备条件不满足' : r.analysis.redLineStatus === 'pending' ? '必备条件待核实' : r.analysis.redLineStatus === 'not_configured' ? '未配置红线' : '红线已核实' }} · 已确认优势 {{ r.analysis?.confirmedBonusCount || 0 }}</span>
+                  <span v-if="!r.analysis" class="rank-status-pending">待分析</span>
                   <div class="rank-score-detail">
                     <span>技能 {{ r.analysis?.skillMatch || 0 }}</span>
                     <span>经验 {{ r.analysis?.experienceMatch || 0 }}</span>
@@ -2086,15 +2086,11 @@ const sortedResumes = computed(() => {
   })
 })
 
-// 排名先看准入，再按 5 分能力档、已确认优势、能力原分比较。
+// 排名按综合得分降序排列
 const rankedResumes = computed(() => {
-  const eligibility = (status?: string) => status === 'failed' ? 2 : status === 'pending' ? 1 : 0
   return resumeStore.resumes
     .filter(r => r.status === 'done' && r.score)
-    .sort((a, b) => eligibility(a.analysis?.redLineStatus) - eligibility(b.analysis?.redLineStatus)
-      || Math.floor((b.analysis?.abilityScore ?? b.score) / 5) - Math.floor((a.analysis?.abilityScore ?? a.score) / 5)
-      || (b.analysis?.confirmedBonusCount || 0) - (a.analysis?.confirmedBonusCount || 0)
-      || (b.analysis?.abilityScore ?? b.score) - (a.analysis?.abilityScore ?? a.score))
+    .sort((a, b) => (b.score || 0) - (a.score || 0))
 })
 
 // 导出报告

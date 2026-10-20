@@ -195,7 +195,7 @@ const dialogTitle = computed(() => {
   if (props.candidateIds && props.candidateIds.length > 0) {
     return `批量沟通 · 定制打招呼 (已选 ${props.candidateIds.length} 人)`
   }
-  return '批量沟通 · 定制打招呼 (排名前十)'
+  return '批量沟通 · 定制打招呼'
 })
 
 const selectedCount = computed(() => {
