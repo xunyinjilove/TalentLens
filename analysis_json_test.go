@@ -10,9 +10,8 @@ import (
 
 func TestAnalysisPromptShowsEscapedNewlinesInJSONExample(t *testing.T) {
 	prompt := (&App{}).buildAnalysisPrompt(&Resume{FileName: "synthetic.txt", Content: "synthetic resume"}, &JobConfig{Title: "Synthetic role"})
-	if !strings.Contains(prompt, `\n👤`) {
-		t.Fatal("manager_pitch JSON example must escape its line breaks")
-	}
+	// 轻量初筛已将推介卡与防伪雷达移至后端本地基于结构化事实生成，减轻 Token 消耗
+	// 验证提示词中不应再强制要求大模型返回 manager_pitch 且不应包含未转义的非法字符串换行
 	if strings.Contains(prompt, "）：\n👤") {
 		t.Fatal("manager_pitch example contains a literal line break inside a JSON string")
 	}

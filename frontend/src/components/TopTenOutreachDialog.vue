@@ -1,14 +1,14 @@
 <template>
-  <el-dialog v-model="visible" title="项目排名前十 · 定制招呼预览" width="min(920px, 94vw)" :close-on-click-modal="!sendingBatch" :close-on-press-escape="!sendingBatch" :show-close="!sendingBatch">
-    <el-alert title="核对名单和文案后，确认本批沟通职位与点数预算。软件在预算内逐人实时核点发送；超预算、职位变化或回执不明时暂停。红线待核实者须主动勾选。" type="info" :closable="false" style="margin-bottom:16px" />
-    <div v-if="loading" class="wb-empty">正在生成排名快照与 AI 深度定制招呼语…</div>
+  <el-dialog v-model="visible" :title="dialogTitle" width="min(940px, 94vw)" :close-on-click-modal="!sendingBatch" :close-on-press-escape="!sendingBatch" :show-close="!sendingBatch">
+    <el-alert title="核对名单和文案后，确认本批沟通职位与点数预算。软件在预算内逐人实时核点发送；超预算、职位变化或回执不明时暂停。未初筛或红线待核实者须主动勾选。" type="info" :closable="false" style="margin-bottom:16px" />
+    <div v-if="loading" class="wb-empty">正在生成沟通名单快照与招呼文案…</div>
     <div v-else-if="error" class="wb-empty">{{ error }}</div>
     <div v-else-if="batch">
       <div v-if="batch.status === 'confirmed'" class="outreach-run-state">
         <span>{{ sendingBatch ? '正在逐人处理发送队列…' : '本批已确认；逐人结果如下' }}</span>
         <el-button v-if="!sendingBatch && batch.items.some(item => item.status === 'queued' || item.status === 'awaiting_confirmation')" size="small" type="primary" @click="openBudget">确认预算并继续</el-button>
         <el-button v-if="sendingBatch" size="small" :disabled="stopRequested" @click="stopRequested=true">{{ stopRequested ? '当前人完成后暂停' : '暂停后续发送' }}</el-button>
-        <el-button v-if="!sendingBatch" size="small" @click="preview(true)">重新生成排名预览</el-button>
+        <el-button v-if="!sendingBatch" size="small" @click="preview(true)">重新生成预览</el-button>
       </div>
       <div v-if="batch.authorization" class="budget-summary" role="status" aria-live="polite">
         <strong>{{ batch.authorization.jobTitle }}</strong>
@@ -26,6 +26,10 @@
             一键全选 / 纳入本批
           </el-checkbox>
           <span class="selected-badge">已选 {{ selectedCount }} / {{ batch.items.length }} 人</span>
+          <el-radio-group v-model="templateMode" size="small" @change="() => preview(true)" style="margin-left: 8px">
+            <el-radio-button label="template">⚡ 极速企业模板 (0 AI消耗)</el-radio-button>
+            <el-radio-button label="ai">✨ AI 深度定制</el-radio-button>
+          </el-radio-group>
         </div>
         <div class="toolbar-right">
           <el-button
@@ -35,7 +39,7 @@
             :loading="regeneratingAll"
             @click="regenerateAll"
           >
-            ✨ 全员 AI 定制招呼语
+            ✨ 全员 AI 润色
           </el-button>
           <el-button
             size="small"
@@ -52,7 +56,8 @@
       <article v-for="item in batch.items" :key="item.id" class="outreach-row">
         <div class="outreach-head">
           <strong>#{{ item.rank }} {{ item.candidateName }}</strong>
-          <span class="wb-pill">能力 {{ item.abilityScore }}</span>
+          <span class="wb-pill" v-if="item.abilityScore > 0">能力 {{ item.abilityScore }}</span>
+          <span class="wb-pill wb-muted" v-else>待初筛</span>
           <span class="wb-pill" :class="item.redLineStatus === 'pending' ? 'warn' : ''">红线：{{ item.redLineStatus === 'pending' ? '待核实' : '已核实／未配置' }}</span>
           <span class="wb-muted">{{ item.platform || '平台未确认' }} · {{ item.platformCandidateId || '缺少稳定 ID' }}</span>
           <el-button v-if="item.profileUrl" size="small" link @click="openProfile(item.profileUrl)">打开候选人网页</el-button>
@@ -155,9 +160,16 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 interface Item { id:string; rank:number; candidateName:string; platform:string; platformCandidateId:string; profileUrl:string; redLineStatus:string; abilityScore:number; evidence:string; message:string; status:string; result:string }
 interface JobOption { id:string; title:string; company?:string; workArea?:string }
 interface Batch { id:string; status:string; projectTitle:string; items:Item[]; authorization?:{jobId:string; jobTitle:string; perPersonLimit:number; totalLimit:number; reservedPoints:number; status:string; message:string} }
-const props = defineProps<{ modelValue:boolean; projectId:string }>()
+const props = withDefaults(defineProps<{
+  modelValue: boolean
+  projectId: string
+  candidateIds?: string[]
+}>(), {
+  candidateIds: () => []
+})
 const emit = defineEmits<{ 'update:modelValue':[value:boolean]; updated:[] }>()
 const visible = computed({ get:()=>props.modelValue, set:value=>emit('update:modelValue',value) })
+const templateMode = ref<'template' | 'ai'>('template')
 const batch=ref<Batch|null>(null)
 const loading=ref(false)
 const confirming=ref(false)
@@ -180,6 +192,13 @@ const receiptItem=ref<Item|null>(null)
 const receiptStatus=ref('sent')
 const receiptText=ref('')
 const receiptActor=ref('HR')
+
+const dialogTitle = computed(() => {
+  if (props.candidateIds && props.candidateIds.length > 0) {
+    return `批量沟通 · 定制打招呼 (已选 ${props.candidateIds.length} 人)`
+  }
+  return '批量沟通 · 定制打招呼 (排名前十)'
+})
 
 const selectedCount = computed(() => {
   if (!batch.value) return 0
@@ -212,9 +231,10 @@ async function preview(forceNew=false){
   loading.value=true;error.value='';batch.value=null
   try{
     const api:any=await import('../../wailsjs/go/main/App')
+    const ids = props.candidateIds && props.candidateIds.length > 0 ? props.candidateIds : []
     const storageKey=`talentlens-outreach-batch:${props.projectId}`
     const savedID=localStorage.getItem(storageKey)
-    if(savedID && !forceNew){
+    if(ids.length === 0 && savedID && !forceNew){
       try{
         const saved:Batch=await api.GetOutreachBatch(savedID)
         if(saved.status==='confirmed' && saved.items.some(item=>['queued','awaiting_confirmation','needs_manual','partial','uncertain','sending'].includes(item.status))){
@@ -224,8 +244,12 @@ async function preview(forceNew=false){
       }catch{}
       localStorage.removeItem(storageKey)
     }
-    batch.value=await api.PreviewTopTenOutreach(props.projectId)
-    if(batch.value?.id)localStorage.setItem(storageKey,batch.value.id)
+    if (api.PreviewBatchOutreach) {
+      batch.value = await api.PreviewBatchOutreach(props.projectId, ids, templateMode.value)
+    } else {
+      batch.value = await api.PreviewTopTenOutreach(props.projectId)
+    }
+    if(batch.value?.id && ids.length === 0)localStorage.setItem(storageKey,batch.value.id)
     for(const item of batch.value?.items||[]){
       selected.value[item.id]=item.redLineStatus!=='pending'
       pendingConfirmed.value[item.id]=false
@@ -403,6 +427,7 @@ async function saveReceipt(){
   }catch(err:any){ElMessage.error(err?.message||String(err))}
 }
 watch(()=>props.modelValue,value=>{if(value)void preview()})
+watch(()=>props.candidateIds,()=>{if(props.modelValue)void preview(true)},{deep:true})
 </script>
 
 <style scoped>
