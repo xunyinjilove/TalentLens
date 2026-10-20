@@ -531,9 +531,18 @@
                     </div>
 
                     <el-alert v-if="resumeStore.selectedResume.analysis.competencyMessage" :title="resumeStore.selectedResume.analysis.competencyMessage" :type="resumeStore.selectedResume.analysis.competencyStatus === 'error' ? 'warning' : 'info'" :closable="false" show-icon style="margin:0 0 16px" />
-                    <el-alert v-else-if="hasHistoricalUncovered" title="提示：当前展示为岗位统一技能指标雷达。该简历为历史版本分析，部分指标未对齐，建议点击上方【重新分析】更新为完整雷达分析。" type="info" :closable="false" show-icon style="margin:0 0 16px" />
 
-                    <p class="score-explanation">基于当前岗位配置的【技能要求与核心能力】构建统一雷达坐标，所有候选人以相同标准横向对比评估。</p>
+                    <div class="radar-header-summary">
+                      <p class="score-explanation">基于当前岗位配置的【技能要求与核心能力】构建统一雷达坐标，所有候选人以相同标准横向对比评估。</p>
+                      <div class="radar-meta-row" v-if="radarCoverageRatio > 0">
+                        <span class="coverage-pill" :class="{ 'is-eligible': isRankEligible }">
+                          已知指标覆盖率: <strong>{{ (radarCoverageRatio * 100).toFixed(1) }}%</strong>
+                          <span v-if="isRankEligible" class="eligible-badge">（达排名门槛 ≥80%）</span>
+                          <span v-else class="ineligible-badge">（覆盖不足80%，建议核查）</span>
+                        </span>
+                        <span class="bounds-text" v-if="radarScoreBounds">全维度得分区间: {{ radarScoreBounds }}</span>
+                      </div>
+                    </div>
 
                     <div class="competency-split-layout">
                       <!-- 左侧：原生 SVG 蜘蛛网雷达图 -->
@@ -563,9 +572,8 @@
                         >
                           <div class="criterion-name-col">
                             <span class="criterion-name">{{ item.criterion }}</span>
-                            <span v-if="!item.isCovered" class="uncovered-tag">待重新评估</span>
-                            <span class="criterion-level-badge" :class="'level-' + item.level">
-                              {{ item.level }}/4 · {{ ['未体现', '相关经历线索', '参与', '独立完成', '主导并可复盘'][item.level] || '待核实' }}
+                            <span class="criterion-level-badge" :class="item.isUnknown ? 'level-unknown' : ('level-' + item.level)">
+                              {{ item.isUnknown ? '未提及 (待核查)' : (item.level + '/4 · ' + (['明确未达标', '相关线索', '参与', '独立完成', '主导并可复盘'][item.level] || '待核实')) }}
                             </span>
                           </div>
                           <div v-if="item.evidence" class="criterion-evidence-col">
@@ -1124,6 +1132,7 @@ interface RadarCheckItem {
   evidence: string
   assessment: string
   isCovered: boolean
+  isUnknown?: boolean
 }
 
 const isGeneratingMetrics = ref(false)
@@ -1193,28 +1202,58 @@ const activeRadarChecks = computed<RadarCheckItem[]>(() => {
     }
 
     if (matched) {
+      const lvl = typeof matched.level === 'number' ? Math.max(0, Math.min(4, matched.level)) : 0
+      const hasEv = !!(matched.evidence && matched.evidence.trim())
+      const isKnown = matched.evidence_status === 'known' || hasEv || (lvl === 0 && matched.assessment && !matched.assessment.includes('未提及') && !matched.assessment.includes('未提供') && !matched.assessment.includes('材料未提及'))
       return {
         criterion: metric,
-        level: typeof matched.level === 'number' ? Math.max(0, Math.min(4, matched.level)) : 0,
+        level: lvl,
         evidence: matched.evidence || '',
-        assessment: matched.assessment || '',
-        isCovered: true
+        assessment: matched.assessment || (isKnown ? (lvl === 0 ? '经核验明确未达到最低锚点' : '') : '材料未提及该项技能或证据不足'),
+        isCovered: true,
+        isUnknown: !isKnown
       }
     }
 
     return {
       criterion: metric,
       level: 0,
-      evidence: '该指标在历史简历分析中未对齐评估',
-      assessment: '建议点击右上角【重新分析】更新此项技能指标的深度核验',
-      isCovered: false
+      evidence: '',
+      assessment: '材料未提及该项技能或证据不足',
+      isCovered: true,
+      isUnknown: true
     }
   })
 })
 
-const hasHistoricalUncovered = computed(() => {
-  return activeRadarChecks.value.some(item => !item.isCovered)
+const radarCoverageRatio = computed(() => {
+  const a = resumeStore.selectedResume?.analysis as any
+  if (a && typeof a.radar_coverage === 'number') {
+    return a.radar_coverage
+  }
+  const checks = activeRadarChecks.value
+  if (!checks.length) return 0
+  const knownCount = checks.filter(c => !c.isUnknown).length
+  return knownCount / checks.length
 })
+
+const isRankEligible = computed(() => {
+  const a = resumeStore.selectedResume?.analysis as any
+  if (a && typeof a.rank_eligible === 'boolean') {
+    return a.rank_eligible
+  }
+  return radarCoverageRatio.value >= 0.8
+})
+
+const radarScoreBounds = computed(() => {
+  const a = resumeStore.selectedResume?.analysis as any
+  if (a && typeof a.score_lower_bound === 'number' && typeof a.score_upper_bound === 'number') {
+    return `${a.score_lower_bound.toFixed(1)} ~ ${a.score_upper_bound.toFixed(1)} 分`
+  }
+  return ''
+})
+
+const hasHistoricalUncovered = computed(() => false)
 
 // 雷达图渲染前 8 项指标，以保证视觉多边形饱满清晰
 const radarDisplayChecks = computed(() => {
@@ -3473,10 +3512,96 @@ onUnmounted(() => {
           }
         }
 
-        .score-breakdown-box {
+        .radar-header-summary {
+        margin-bottom: 12px;
+        .radar-meta-row {
+          margin-top: 6px;
+          display: flex;
+          align-items: center;
+          flex-wrap: wrap;
+          gap: 12px;
+          font-size: 12px;
+
+          .coverage-pill {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            padding: 2px 8px;
+            border-radius: 4px;
+            background: #f1f5f9;
+            color: #475569;
+            border: 1px solid #e2e8f0;
+
+            &.is-eligible {
+              background: #f0fdf4;
+              color: #166534;
+              border-color: #bbf7d0;
+            }
+
+            .eligible-badge {
+              color: #15803d;
+              font-size: 11px;
+            }
+            .ineligible-badge {
+              color: #b45309;
+              font-size: 11px;
+            }
+          }
+
+          .bounds-text {
+            color: #64748b;
+            font-size: 12px;
+          }
+        }
+      }
+
+      .score-breakdown-box {
           flex: 1;
           min-width: 0;
           width: 100%;
+        }
+      }
+
+      .radar-header-summary {
+        margin-bottom: 12px;
+        .radar-meta-row {
+          margin-top: 6px;
+          display: flex;
+          align-items: center;
+          flex-wrap: wrap;
+          gap: 12px;
+          font-size: 12px;
+
+          .coverage-pill {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            padding: 2px 8px;
+            border-radius: 4px;
+            background: #f1f5f9;
+            color: #475569;
+            border: 1px solid #e2e8f0;
+
+            &.is-eligible {
+              background: #f0fdf4;
+              color: #166534;
+              border-color: #bbf7d0;
+            }
+
+            .eligible-badge {
+              color: #15803d;
+              font-size: 11px;
+            }
+            .ineligible-badge {
+              color: #b45309;
+              font-size: 11px;
+            }
+          }
+
+          .bounds-text {
+            color: #64748b;
+            font-size: 12px;
+          }
         }
       }
 
@@ -3534,15 +3659,6 @@ onUnmounted(() => {
             min-width: 0;
             font-size: 13px;
             font-weight: 600;
-            .uncovered-tag {
-              font-size: 11px;
-              padding: 1px 6px;
-              border-radius: 4px;
-              background: #fff7ed;
-              color: #c2410c;
-              border: 1px solid #ffedd5;
-              font-weight: 500;
-            }
 
             .criterion-level-badge {
               font-size: 11px;
@@ -3554,6 +3670,7 @@ onUnmounted(() => {
               &.level-3 { background: #eff6ff; color: #1d4ed8; }
               &.level-2 { background: #f8fafc; color: #475569; }
               &.level-1, &.level-0 { background: #fef2f2; color: #b91c1c; }
+              &.level-unknown { background: #f1f5f9; color: #64748b; border: 1px dashed #cbd5e1; }
             }
           }
 
