@@ -36,9 +36,23 @@ import (
 )
 
 // 版本信息
-const AppVersion = "1.8.34"
+const AppVersion = "1.8.35"
 const analysisFormatRetryVersion = "model-json-repair-v1"
 const GitHubRepo = "xunyinjilove/TalentLens"
+
+// cleanJSONBytes 自动移除 UTF-8 BOM 头，防御 Windows/PowerShell 等工具引入的 \xef\xbb\xbf
+func cleanJSONBytes(data []byte) []byte {
+	return bytes.TrimPrefix(data, []byte("\xef\xbb\xbf"))
+}
+
+// readJSONFile 读取文件并自动剔除 UTF-8 BOM
+func readJSONFile(path string) ([]byte, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	return cleanJSONBytes(data), nil
+}
 
 //go:embed all:frontend/dist
 var assets embed.FS
@@ -551,7 +565,7 @@ func (a *App) startup(ctx context.Context) {
 
 			// 通知前端（包含提取的内容）
 			resumePath := filepath.Join(a.getDataDir(), "resumes", id+".json")
-			data, _ := os.ReadFile(resumePath)
+			data, _ := readJSONFile(resumePath)
 			var resume Resume
 			json.Unmarshal(data, &resume)
 			runtime.EventsEmit(a.ctx, "resume:dropped", &resume)
@@ -587,7 +601,7 @@ func (a *App) retryLegacyFormatFailuresOnce() {
 			continue
 		}
 		path := filepath.Join(dir, entry.Name())
-		data, err := os.ReadFile(path)
+		data, err := readJSONFile(path)
 		if err != nil {
 			continue
 		}
@@ -650,7 +664,7 @@ func (a *App) SelectResumeFiles(projectID string) int {
 
 		// 通知前端
 		resumePath := filepath.Join(a.getDataDir(), "resumes", id+".json")
-		data, _ := os.ReadFile(resumePath)
+		data, _ := readJSONFile(resumePath)
 		var resume Resume
 		json.Unmarshal(data, &resume)
 		runtime.EventsEmit(a.ctx, "resume:dropped", &resume)
@@ -697,7 +711,7 @@ func (a *App) getConfigPath() string {
 }
 
 func (a *App) loadConfig() {
-	data, err := os.ReadFile(a.getConfigPath())
+	data, err := readJSONFile(a.getConfigPath())
 	if err != nil {
 		a.config = Config{
 			AI: AIConfig{
@@ -998,7 +1012,7 @@ func (a *App) GetResumes() []*Resume {
 		if entry.IsDir() || filepath.Ext(entry.Name()) != ".json" {
 			continue
 		}
-		data, _ := os.ReadFile(filepath.Join(dir, entry.Name()))
+		data, _ := readJSONFile(filepath.Join(dir, entry.Name()))
 		var r Resume
 		if json.Unmarshal(data, &r) != nil {
 			continue
@@ -1019,7 +1033,7 @@ func (a *App) DeleteResume(id string) error {
 
 func (a *App) ReAnalyzeResume(id string) error {
 	path := filepath.Join(a.getDataDir(), "resumes", id+".json")
-	data, err := os.ReadFile(path)
+	data, err := readJSONFile(path)
 	if err != nil {
 		return err
 	}
@@ -1282,7 +1296,7 @@ func (a *App) GetProjects() []*Project {
 		if entry.IsDir() || filepath.Ext(entry.Name()) != ".json" {
 			continue
 		}
-		data, err := os.ReadFile(filepath.Join(dir, entry.Name()))
+		data, err := readJSONFile(filepath.Join(dir, entry.Name()))
 		if err != nil {
 			continue
 		}
@@ -1304,7 +1318,7 @@ func (a *App) GetProjects() []*Project {
 
 // GetProject 获取单个项目
 func (a *App) GetProject(id string) *Project {
-	data, err := os.ReadFile(filepath.Join(a.getProjectsDir(), id+".json"))
+	data, err := readJSONFile(filepath.Join(a.getProjectsDir(), id+".json"))
 	if err != nil {
 		return nil
 	}
@@ -1530,7 +1544,7 @@ func (a *App) GetProjectResumes(projectID string) []*Resume {
 	var resumes []*Resume
 	for _, rid := range p.ResumeIDs {
 		path := filepath.Join(a.getDataDir(), "resumes", rid+".json")
-		data, err := os.ReadFile(path)
+		data, err := readJSONFile(path)
 		if err != nil {
 			continue
 		}
@@ -3106,7 +3120,7 @@ func (a *App) AnalyzeResume(resumeID string, cfg *AIConfig, jobCfg *JobConfig) (
 
 	// 读取简历
 	path := filepath.Join(a.getDataDir(), "resumes", resumeID+".json")
-	data, err := os.ReadFile(path)
+	data, err := readJSONFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("简历不存在: %v", err)
 	}
@@ -3757,13 +3771,21 @@ func redLineRuleID(criterion string) string {
 	return fmt.Sprintf("%x", digest[:8])
 }
 
-func scoreCandidate(result *AnalysisResult, criteria []string) {
+func scoreCandidate(result *AnalysisResult, criteria []string, initialScores ...int) {
 	if result == nil {
 		return
 	}
+	initialScore := 0
+	if len(initialScores) > 0 {
+		initialScore = initialScores[0]
+	}
+
 	if len(criteria) == 0 {
 		if result.CoreMatch == 0 {
 			result.CoreMatch = result.SkillMatch*0.55 + result.ExperienceMatch*0.45
+		}
+		if initialScore > 0 && result.CoreMatch < float64(initialScore) {
+			result.CoreMatch = float64(initialScore)
 		}
 		result.AbilityScore = int(math.Round(result.CoreMatch))
 		result.OverallScore = float64(result.AbilityScore)
@@ -3774,6 +3796,9 @@ func scoreCandidate(result *AnalysisResult, criteria []string) {
 	if len(result.CoreCriterionChecks) == 0 {
 		if result.CoreMatch == 0 {
 			result.CoreMatch = result.SkillMatch*0.55 + result.ExperienceMatch*0.45
+		}
+		if initialScore > 0 && result.CoreMatch < float64(initialScore) {
+			result.CoreMatch = float64(initialScore)
 		}
 		result.AbilityScore = int(math.Round(result.CoreMatch))
 		result.OverallScore = float64(result.AbilityScore)
@@ -3841,6 +3866,9 @@ func scoreCandidate(result *AnalysisResult, criteria []string) {
 	if result.SkillMatch > 0 || result.ExperienceMatch > 0 {
 		macroScore = clampFloat(result.SkillMatch*0.55+result.ExperienceMatch*0.45, 0, 100)
 	}
+	if initialScore > 0 && macroScore < float64(initialScore) {
+		macroScore = float64(initialScore)
+	}
 
 	if macroScore > 0 {
 		result.CoreMatch = math.Round(macroScore)
@@ -3862,6 +3890,10 @@ func scoreCandidate(result *AnalysisResult, criteria []string) {
 	} else {
 		result.CoreMatch = 0
 		result.ScoreBasis = "provisional"
+	}
+
+	if initialScore > 0 && result.CoreMatch < float64(initialScore) {
+		result.CoreMatch = float64(initialScore)
 	}
 
 	result.AbilityScore = int(math.Round(result.CoreMatch))
@@ -3946,7 +3978,11 @@ func (a *App) applyJobDecision(result *AnalysisResult, job *JobConfig, resume *R
 		}
 		result.ExperienceCompetencies = extra
 	}
-	scoreCandidate(result, criteria)
+	initialScore := 0
+	if resume != nil && resume.InitialScore > 0 {
+		initialScore = resume.InitialScore
+	}
+	scoreCandidate(result, criteria, initialScore)
 	if len(job.RedLines) > 0 || len(job.BonusPoints) > 0 {
 		proposedBonus := result.BonusChecks
 		checks := make([]RedLineCheck, 0, len(job.RedLines))

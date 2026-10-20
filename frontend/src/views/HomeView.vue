@@ -328,18 +328,6 @@
 
                 <button
                   class="subtab-btn"
-                  :class="{ active: detailSubTab === 'water' }"
-                  @click="detailSubTab = 'water'"
-                >
-                  <el-icon><Aim /></el-icon>
-                  <span>防伪与注水雷达</span>
-                  <span class="subtab-badge" :class="waterRiskLevel === 'high' ? 'danger' : waterRiskLevel === 'medium' ? 'warning' : 'safe'">
-                    {{ waterRiskLevel === 'high' ? '高风险' : waterRiskLevel === 'medium' ? '中风险' : '低风险' }} · {{ waterScore }}分
-                  </span>
-                </button>
-
-                <button
-                  class="subtab-btn"
                   :class="{ active: detailSubTab === 'interview' }"
                   @click="detailSubTab = 'interview'"
                 >
@@ -556,114 +544,7 @@
                   </div>
                 </div>
 
-                <!-- ==================== SUB-TAB 3: 防伪与注水雷达 ==================== -->
-                <div v-show="detailSubTab === 'water'" class="subtab-pane water-pane">
-                  <div class="water-radar-card modern-card" :class="getWaterRiskClass(resumeStore.selectedResume.analysis?.water_check?.risk_level)">
-                    <div class="water-radar-header-bar">
-                      <div class="radar-title-group">
-                        <div class="radar-icon-shield" :class="resumeStore.selectedResume.analysis?.water_check?.risk_level || 'low'">
-                          <el-icon><Warning v-if="resumeStore.selectedResume.analysis?.water_check?.risk_level === 'high'" /><Check v-else /></el-icon>
-                        </div>
-                        <div class="radar-title-text-wrap">
-                          <div class="radar-main-title">
-                            <span class="title-bold">🛡️ 简历防伪注水与破绽雷达</span>
-                            <span class="radar-risk-pill" :class="resumeStore.selectedResume.analysis?.water_check?.risk_level || 'low'">
-                              {{ getWaterRiskTitle(resumeStore.selectedResume.analysis?.water_check) }}
-                            </span>
-                          </div>
-                          <span class="radar-sub-desc">基于履历时间轴断层、跳槽频率及量化指标真实度检测</span>
-                        </div>
-                      </div>
-                      <div class="radar-score-box" :class="resumeStore.selectedResume.analysis?.water_check?.risk_level || 'low'">
-                        <div class="radar-score-num">{{ resumeStore.selectedResume.analysis?.water_check?.water_score ?? 15 }}</div>
-                        <div class="radar-score-caption">注水破绽分 (越低越真实)</div>
-                      </div>
-                    </div>
-
-                    <!-- 可视化履历时间轴与空窗断层追踪 (Work Timeline) -->
-                    <WorkTimeline
-                      :gaps="resumeStore.selectedResume.analysis?.water_check?.gaps"
-                      :work-years="resumeStore.selectedResume.analysis?.workYears"
-                      :current-role="resumeStore.selectedResume.analysis?.currentRole"
-                      class="water-timeline-embed"
-                    />
-
-                    <div class="water-radar-grid">
-                      <!-- 1. 职场时间断层侦测 -->
-                      <div class="radar-grid-item gaps-box">
-                        <div class="grid-item-title">
-                          <el-icon><Clock /></el-icon> 职场时间断层与空窗侦测
-                        </div>
-                        <div class="grid-item-content">
-                          <div v-if="hasGaps(resumeStore.selectedResume.analysis?.water_check)" class="gap-list">
-                            <div v-for="(gap, gIdx) in resumeStore.selectedResume.analysis?.water_check?.gaps" :key="gIdx" class="gap-item alert">
-                              <span class="gap-dot">⚠️</span>
-                              <span class="gap-text">{{ gap }}</span>
-                            </div>
-                          </div>
-                          <div v-else class="gap-item safe">
-                            <el-icon><CircleCheck /></el-icon> 履历时间线连贯，未侦测到异常离职断层
-                          </div>
-                        </div>
-                      </div>
-
-                      <!-- 2. 假大空与欠缺量化佐证 -->
-                      <div class="radar-grid-item vague-box">
-                        <div class="grid-item-title">
-                          <el-icon><Aim /></el-icon> 欠缺量化佐证 / 夸大嫌疑
-                        </div>
-                        <div class="grid-item-content">
-                          <div v-if="hasVagueClaims(resumeStore.selectedResume.analysis?.water_check)" class="vague-list">
-                            <div v-for="(claim, cIdx) in resumeStore.selectedResume.analysis?.water_check?.vague_claims" :key="cIdx" class="vague-item alert">
-                              <span class="claim-dot">🔍</span>
-                              <span class="claim-text">{{ claim }}</span>
-                            </div>
-                          </div>
-                          <div v-else class="vague-item safe">
-                            <el-icon><CircleCheck /></el-icon> 项目职责与业绩成果具备具体量化指标，扎实度高
-                          </div>
-                        </div>
-                      </div>
-
-                      <!-- 3. 外包派遣与履历动荡风险 -->
-                      <div class="radar-grid-item stability-box">
-                        <div class="grid-item-title">
-                          <el-icon><Briefcase /></el-icon> 外包驻场 & 稳定性研判
-                        </div>
-                        <div class="grid-item-content">
-                          <div v-if="resumeStore.selectedResume.analysis?.water_check?.outsourcing_warning && !resumeStore.selectedResume.analysis?.water_check?.outsourcing_warning.includes('无')" class="alert-pill outsourcing">
-                            <span class="pill-label">🏢 外包/驻场提醒:</span>
-                            <span class="pill-msg">{{ resumeStore.selectedResume.analysis?.water_check?.outsourcing_warning }}</span>
-                          </div>
-                          <div v-if="resumeStore.selectedResume.analysis?.water_check?.frequent_hop_warning && !resumeStore.selectedResume.analysis?.water_check?.frequent_hop_warning.includes('合理') && !resumeStore.selectedResume.analysis?.water_check?.frequent_hop_warning.includes('无') && !resumeStore.selectedResume.analysis?.water_check?.frequent_hop_warning.includes('稳定')" class="alert-pill hopping">
-                            <span class="pill-label">⏳ 稳定性提醒:</span>
-                            <span class="pill-msg">{{ resumeStore.selectedResume.analysis?.water_check?.frequent_hop_warning }}</span>
-                          </div>
-                          <div v-if="isStabilityClean(resumeStore.selectedResume.analysis?.water_check)" class="stability-safe">
-                            <el-icon><CircleCheck /></el-icon> 无明显外包挂靠痕迹，跳槽频率在健康合理区间
-                          </div>
-                        </div>
-                      </div>
-
-                      <!-- 4. 初试防伪一针见血反问 -->
-                      <div class="radar-grid-item interview-probe-box" v-if="resumeStore.selectedResume.analysis?.water_check?.advise_questions?.length">
-                        <div class="grid-item-title">
-                          <el-icon><QuestionFilled /></el-icon> 初试防伪反问建议（破水核验）
-                        </div>
-                        <div class="grid-item-content">
-                          <div class="probe-list">
-                            <div v-for="(q, qIdx) in resumeStore.selectedResume.analysis?.water_check?.advise_questions" :key="qIdx" class="probe-item">
-                              <span class="probe-num">追问{{ qIdx + 1 }}</span>
-                              <span class="probe-text">{{ q }}</span>
-                            </div>
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-
-                <!-- ==================== SUB-TAB 4: 初试提纲与建议 ==================== -->
+                <!-- ==================== SUB-TAB 3: 初试提纲与建议 ==================== -->
                 <div v-show="detailSubTab === 'interview'" class="subtab-pane interview-pane">
                   <!-- AI 初试提纲与参考回答 -->
                   <div v-if="resumeStore.selectedResume.analysis.interviewQA && resumeStore.selectedResume.analysis.interviewQA.length > 0" class="qa-section-card">
@@ -1042,7 +923,6 @@ import AIInterviewDialog from '../components/AIInterviewDialog.vue'
 import TopTenOutreachDialog from '../components/TopTenOutreachDialog.vue'
 import SvgDonutRing from '../components/charts/SvgDonutRing.vue'
 import SvgRadarChart from '../components/charts/SvgRadarChart.vue'
-import WorkTimeline from '../components/WorkTimeline.vue'
 import InterviewAccordionCard from '../components/InterviewAccordionCard.vue'
 import { useResumeStore } from '../composables/useResumeStore'
 import { useProjectStore } from '../composables/useProjectStore'
@@ -1198,7 +1078,7 @@ const radarDisplayChecks = computed(() => {
 })
 
 const rightTab = ref<'detail' | 'ranking' | 'content'>('detail')
-const detailSubTab = ref<'summary' | 'competency' | 'water' | 'interview'>('summary')
+const detailSubTab = ref<'summary' | 'competency' | 'interview'>('summary')
 
 // 蜘蛛网雷达图维度与数值提取
 const selectedRadarIndex = ref<number | null>(null)
@@ -1274,14 +1154,6 @@ function resetPanelWidth() {
 const unverifiedRedLineCount = computed(() => {
   const checks = resumeStore.selectedResume?.analysis?.redLineChecks || []
   return checks.filter(c => c.status === 'unknown' || !c.status).length
-})
-
-// 防伪风险信息
-const waterRiskLevel = computed(() => {
-  return resumeStore.selectedResume?.analysis?.water_check?.risk_level || 'low'
-})
-const waterScore = computed(() => {
-  return resumeStore.selectedResume?.analysis?.water_check?.water_score ?? 15
 })
 
 // 面试题数量
@@ -2028,43 +1900,6 @@ async function copyPitchText() {
   } catch (err: any) {
     ElMessage.error(`复制失败: ${err.message || err}`)
   }
-}
-
-// ---------------------------------------------------------------------
-// 简历防伪注水雷达与断层侦测器
-// ---------------------------------------------------------------------
-function getWaterRiskClass(riskLevel?: string): string {
-  if (riskLevel === 'high') return 'risk-high'
-  if (riskLevel === 'medium') return 'risk-medium'
-  return 'risk-low'
-}
-
-function getWaterRiskTitle(waterCheck?: any): string {
-  if (!waterCheck) return '真实度高 · 扎实可信'
-  if (waterCheck.risk_level === 'high') return '注水嫌疑高 · 高风险'
-  if (waterCheck.risk_level === 'medium') return '存在疑点 · 中风险'
-  return '真实度高 · 扎实可信'
-}
-
-function hasGaps(waterCheck?: any): boolean {
-  if (!waterCheck || !waterCheck.gaps || waterCheck.gaps.length === 0) return false
-  const first = waterCheck.gaps[0]
-  if (first.includes('时间线连贯') || first.includes('无显著断层')) return false
-  return true
-}
-
-function hasVagueClaims(waterCheck?: any): boolean {
-  if (!waterCheck || !waterCheck.vague_claims || waterCheck.vague_claims.length === 0) return false
-  const first = waterCheck.vague_claims[0]
-  if (first.includes('量化明确') || first.includes('详实') || first.includes('无')) return false
-  return true
-}
-
-function isStabilityClean(waterCheck?: any): boolean {
-  if (!waterCheck) return true
-  const hasOutsourcing = waterCheck.outsourcing_warning && !waterCheck.outsourcing_warning.includes('无')
-  const hasHopping = waterCheck.frequent_hop_warning && !waterCheck.frequent_hop_warning.includes('合理') && !waterCheck.frequent_hop_warning.includes('无') && !waterCheck.frequent_hop_warning.includes('稳定')
-  return !hasOutsourcing && !hasHopping
 }
 
 async function handleCopyError(resume: any) {
