@@ -26,10 +26,10 @@
         <el-button
           class="outreach-action-btn"
           :disabled="!selectedProjectId"
-          @click="showOutreach = true"
-          :title="selectedProjectId ? '一键向当前分库前十名匹配候选人打招呼' : '请先选择左侧具体职位分库'"
+          @click="startBatchOutreach()"
+          :title="selectedProjectId ? '一键向当前分库筛选候选人或前十名发起批量沟通' : '请先选择左侧具体职位分库'"
         >
-          <el-icon><ChatRound /></el-icon><span>前十名打招呼</span>
+          <el-icon><ChatRound /></el-icon><span>批量打招呼</span>
         </el-button>
 
         <el-dropdown trigger="click" @command="handleLibraryAction">
@@ -252,6 +252,9 @@
             </el-button>
             <template v-if="manageMode">
               <el-button size="small" @click="selectVisibleCandidates">全选当前结果</el-button>
+              <el-button size="small" type="primary" plain :disabled="!selectedCandidateIds.length" @click="startBatchOutreach(selectedCandidateIds)">
+                批量打招呼（{{ selectedCandidateIds.length }}）
+              </el-button>
               <el-button size="small" type="danger" plain :disabled="!selectedCandidateIds.length" @click="archiveSelectedCandidates">
                 批量删除（{{ selectedCandidateIds.length }}）
               </el-button>
@@ -694,7 +697,12 @@
     </el-dialog>
 
     <!-- 寻才与打招呼对话框 -->
-    <TopTenOutreachDialog v-model="showOutreach" :project-id="selectedProjectId" @updated="refresh" />
+    <TopTenOutreachDialog
+      v-model="showOutreach"
+      :project-id="selectedProjectId"
+      :candidate-ids="outreachCandidateIds"
+      @updated="refresh"
+    />
     <BossSearchDialog
       v-if="selectedProject"
       v-model="showSearch"
@@ -884,6 +892,18 @@ function resetFilters() {
 
 const showSearch = ref(false)
 const showOutreach = ref(false)
+const outreachCandidateIds = ref<string[]>([])
+
+function startBatchOutreach(ids?: string[]) {
+  if (ids && ids.length > 0) {
+    outreachCandidateIds.value = [...ids]
+  } else if (hasActiveFilters.value && filtered.value.length > 0) {
+    outreachCandidateIds.value = filtered.value.map(item => item.projectCandidateId || item.id)
+  } else {
+    outreachCandidateIds.value = []
+  }
+  showOutreach.value = true
+}
 const importing = ref(false)
 const inboxOpen = ref(false)
 const pendingApplications = ref<PendingApplication[]>([])

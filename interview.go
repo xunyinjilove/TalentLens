@@ -111,11 +111,12 @@ func (a *App) StartInterview(resumeID string) (*InterviewSession, error) {
 	if err = json.Unmarshal(data, &resume); err != nil {
 		return nil, err
 	}
-	if resume.Analysis == nil || len(resume.Analysis.InterviewQA) == 0 {
-		return nil, fmt.Errorf("请先完成简历分析，生成初面题目")
+	if resume.Analysis == nil {
+		return nil, fmt.Errorf("请先完成简历初筛，以生成初面题目")
 	}
-	turns := make([]InterviewTurn, 0, len(resume.Analysis.InterviewQA)+len(resume.Analysis.RedLineChecks))
-	if project := a.GetProject(resume.ProjectID); project != nil {
+	turns := make([]InterviewTurn, 0, len(resume.Analysis.InterviewQA)+len(resume.Analysis.RedLineChecks)+len(resume.Analysis.BonusChecks)+4)
+	project := a.GetProject(resume.ProjectID)
+	if project != nil {
 		turns = append(turns,
 			InterviewTurn{Category: "岗位统一题", Standard: true, Question: "请介绍一个与“" + project.JobConfig.Title + "”直接相关的完整项目：说明本人职责、关键行动、结果及可核实依据。"},
 			InterviewTurn{Category: "岗位统一题", Standard: true, Question: "请介绍一次与该岗位核心工作有关的困难或失误：您如何定位原因、采取什么措施、结果如何？"},
@@ -126,13 +127,31 @@ func (a *App) StartInterview(resumeID string) (*InterviewSession, error) {
 			turns = append(turns, InterviewTurn{Category: question.Category, Question: question.Question})
 		}
 	}
+	if len(resume.Analysis.InterviewQA) == 0 && project != nil {
+		metrics := getUnifiedJobMetrics(&project.JobConfig)
+		for i, m := range metrics {
+			if i >= 3 {
+				break
+			}
+			turns = append(turns, InterviewTurn{Category: "核心能力核实", Question: fmt.Sprintf("请结合您最近的实战项目，说明您在【%s】方面的实际交付成果与独立承担范围？", m)})
+		}
+	}
 	for _, check := range resume.Analysis.RedLineChecks {
 		if check.Status == "unknown" {
 			ruleID := check.RuleID
 			if ruleID == "" {
 				ruleID = redLineRuleID(check.Criterion)
 			}
-			turns = append(turns, InterviewTurn{Category: "红线核实", RuleID: ruleID, Criterion: check.Criterion, Question: "请说明并举例证明：" + check.Criterion})
+			turns = append(turns, InterviewTurn{Category: "红线核实", RuleID: ruleID, Criterion: check.Criterion, Question: "请说明并举例证明您是否满足岗位必备要求：" + check.Criterion})
+		}
+	}
+	for _, check := range resume.Analysis.BonusChecks {
+		if check.Status == "unknown" {
+			ruleID := check.RuleID
+			if ruleID == "" {
+				ruleID = redLineRuleID(check.Criterion)
+			}
+			turns = append(turns, InterviewTurn{Category: "加分核实", RuleID: ruleID, Criterion: check.Criterion, Question: "针对岗位优先加分项【" + check.Criterion + "】，请介绍您相关的实战经验或项目成果？"})
 		}
 	}
 	name := resume.FileName
@@ -273,9 +292,15 @@ func (a *App) CompleteInterview(resumeID string) (*InterviewSession, error) {
 		return nil, fmt.Errorf("初面题目为空")
 	}
 	var transcript strings.Builder
-	for _, turn := range session.Turns {
-		if !turn.Evaluated {
-			return nil, fmt.Errorf("仍有题目未完成")
+	for i := range session.Turns {
+		turn := &session.Turns[i]
+		if !turn.Evaluated && strings.TrimSpace(turn.Answer) != "" {
+			_ = a.evaluateInterviewTurn(session, i, false)
+		}
+		if !turn.Evaluated && strings.TrimSpace(turn.Answer) == "" {
+			turn.Score = 0
+			turn.Assessment = "候选人未对该题作答"
+			turn.Evaluated = true
 		}
 		fmt.Fprintf(&transcript, "问题：%s\n回答：%s\n追问：%s\n追问回答：%s\n单题评价：%s\n", turn.Question, turn.Answer, turn.FollowUp, turn.FollowUpAnswer, turn.Assessment)
 	}

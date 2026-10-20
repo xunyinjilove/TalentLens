@@ -36,7 +36,7 @@ import (
 )
 
 // 版本信息
-const AppVersion = "1.8.31"
+const AppVersion = "1.8.32"
 const analysisFormatRetryVersion = "model-json-repair-v1"
 const GitHubRepo = "xunyinjilove/TalentLens"
 
@@ -239,6 +239,10 @@ type AnalysisResult struct {
 	// AI 预面试提纲与参考回答（5组）
 	InterviewQA []InterviewQuestion `json:"interview_qa,omitempty"`
 
+	// 性能、成本与阶段记录
+	TokenUsage    *AIUsage `json:"token_usage,omitempty"`
+	AnalysisStage string   `json:"analysis_stage,omitempty"` // screening | deep_report
+
 	AnalyzedAt string `json:"analyzed_at"`
 }
 
@@ -302,11 +306,27 @@ type ChatMessage struct {
 	Content string `json:"content"`
 }
 
+// AIUsage 记录单次大模型调用的 Token 消耗详情
+type AIUsage struct {
+	PromptTokens     int `json:"prompt_tokens"`
+	CompletionTokens int `json:"completion_tokens"`
+	TotalTokens      int `json:"total_tokens"`
+	ReasoningTokens  int `json:"reasoning_tokens,omitempty"`
+}
+
 type ChatResponse struct {
 	ID      string `json:"id"`
 	Choices []struct {
 		Message ChatMessage `json:"message"`
 	} `json:"choices"`
+	Usage *struct {
+		PromptTokens            int `json:"prompt_tokens"`
+		CompletionTokens        int `json:"completion_tokens"`
+		TotalTokens             int `json:"total_tokens"`
+		CompletionTokensDetails *struct {
+			ReasoningTokens int `json:"reasoning_tokens"`
+		} `json:"completion_tokens_details,omitempty"`
+	} `json:"usage,omitempty"`
 	Error *struct {
 		Message string `json:"message"`
 		Type    string `json:"type"`
@@ -3172,23 +3192,7 @@ func (a *App) AnalyzeResume(resumeID string, cfg *AIConfig, jobCfg *JobConfig) (
 			analysis.ScoreDiff = resume.FinalScore - resume.InitialScore
 		}
 	} else {
-		// 重新分析防跳跃与分差稳定性保障：
-		// 若为单简历重新分析（非双源附件终审），且已有前次初筛基准分（resume.InitialScore > 0），
-		// 校验当前分析结果与历史得分的偏离度。若偏离超过 ±5 分，执行平滑稳定校准，保证重新分析前后分差可控。
-		if resume.InitialScore > 0 {
-			diff := scoreInt - resume.InitialScore
-			if diff > 5 {
-				log.Printf("[AnalyzeResume] 重新分析得分防跳跃校准: %d -> %d (基准分: %d)", scoreInt, resume.InitialScore+5, resume.InitialScore)
-				scoreInt = resume.InitialScore + 5
-			} else if diff < -5 {
-				log.Printf("[AnalyzeResume] 重新分析得分防跳跃校准: %d -> %d (基准分: %d)", scoreInt, resume.InitialScore-5, resume.InitialScore)
-				scoreInt = resume.InitialScore - 5
-			}
-			analysis.OverallScore = float64(scoreInt)
-			analysis.AbilityScore = scoreInt
-			analysis.CoreMatch = float64(scoreInt)
-			refreshCandidateRecommendation(analysis)
-		} else {
+		if resume.InitialScore == 0 {
 			resume.InitialScore = scoreInt
 		}
 	}
@@ -3209,16 +3213,20 @@ func (a *App) AnalyzeResume(resumeID string, cfg *AIConfig, jobCfg *JobConfig) (
 // analyzeModelWithFormatRetry repairs predictable schema deviations locally,
 // then asks the model once more only if its JSON is still unusable.
 func (a *App) analyzeModelWithFormatRetry(cfg *AIConfig, prompt string) (*AnalysisResult, error) {
-	result, err := a.callAI(cfg, prompt)
+	result, usage, err := a.callAIWithUsage(cfg, prompt)
 	if err != nil {
 		return nil, err
 	}
 	analysis, parseErr := a.parseAnalysisResult(result)
 	if parseErr == nil {
+		if usage != nil {
+			analysis.TokenUsage = usage
+		}
+		analysis.AnalysisStage = "screening"
 		return analysis, nil
 	}
 	strictPrompt := prompt + "\n\n上一次返回内容无法解析。请重新生成完整分析，只返回合法 JSON：对象键必须使用双引号，字符串内换行必须转义，gaps、vague_claims、advise_questions 等列表必须是字符串数组。"
-	result, err = a.callAI(cfg, strictPrompt)
+	result, retryUsage, err := a.callAIWithUsage(cfg, strictPrompt)
 	if err != nil {
 		return nil, fmt.Errorf("解析AI返回失败；格式重试请求失败: %w", err)
 	}
@@ -3226,6 +3234,12 @@ func (a *App) analyzeModelWithFormatRetry(cfg *AIConfig, prompt string) (*Analys
 	if err != nil {
 		return nil, fmt.Errorf("解析AI返回失败（已自动重试 1 次）: %w", err)
 	}
+	if retryUsage != nil {
+		analysis.TokenUsage = retryUsage
+	} else if usage != nil {
+		analysis.TokenUsage = usage
+	}
+	analysis.AnalysisStage = "screening"
 	return analysis, nil
 }
 
@@ -3465,8 +3479,7 @@ func (a *App) buildAnalysisPrompt(resume *Resume, jobCfg *JobConfig) string {
 			"  ],\n"+
 			"  \"strengths\": [\n"+
 			"    \"具体的优势1（必须引用简历中的事实依据）\",\n"+
-			"    \"具体的优势2\",\n"+
-			"    \"具体的优势3\"\n"+
+			"    \"具体的优势2\"\n"+
 			"  ],\n"+
 			"  \"weaknesses\": [\n"+
 			"    \"具体的不足1（必须基于岗位要求指出差距）\",\n"+
@@ -3476,60 +3489,17 @@ func (a *App) buildAnalysisPrompt(resume *Resume, jobCfg *JobConfig) string {
 			"    \"潜在风险或需关注事项，如频繁跳槽、职业路径不连贯等\"\n"+
 			"  ],\n"+
 			"  \"interview_suggestions\": [\n"+
-			"    \"如果进入面试环节，建议重点考察的问题或方向\"\n"+
+			"    \"如果进入初试环节，建议重点核查的问题或方向\"\n"+
 			"  ],\n"+
-			"  \"interview_qa\": [\n"+
-			"    {\n"+
-			"      \"category\": \"个人能力\",\n"+
-			"      \"question\": \"【沟通协作与团队融合】针对跨部门沟通、冲突化解或与不同风格同事协同配合的实战提问（适用于HR初试考察非技术维度）\",\n"+
-			"      \"reference_answer\": \"基于候选人过往经历与背景，提炼出的考察重点与候选人应有的合理回答方向\"\n"+
-			"    },\n"+
-			"    {\n"+
-			"      \"category\": \"个人能力\",\n"+
-			"      \"question\": \"【自驱力与学习抗压】针对面临高压紧迫交付、业务方向调整或新技术攻坚时的态度与解决方式提问\",\n"+
-			"      \"reference_answer\": \"基于履历事实的考察要点与应对依据\"\n"+
-			"    },\n"+
-			"    {\n"+
-			"      \"category\": \"个人能力\",\n"+
-			"      \"question\": \"【职业规划与求职动机】针对候选人的跳槽动机、岗位期望、工作稳定性及长期职业目标的提问\",\n"+
-			"      \"reference_answer\": \"基于候选人跳槽频次、空窗期或职业路径的核实要点与评估建议\"\n"+
-			"    },\n"+
-			"    {\n"+
-			"      \"category\": \"专业技术\",\n"+
-			"      \"question\": \"针对岗位必备核心硬技能底层的深度技术问题\",\n"+
-			"      \"reference_answer\": \"基于候选人简历中写明的技能掌握情况和使用背景，提炼出的参考回答要点与事实依据\"\n"+
-			"    },\n"+
-			"    {\n"+
-			"      \"category\": \"专业技术\",\n"+
-			"      \"question\": \"针对候选人简历中最重要核心项目的架构设计、技术选型或性能优化/实战难题追问\",\n"+
-			"      \"reference_answer\": \"参考回答（必须引用简历中该项目的具体背景、职责、技术方案与量化成果）\"\n"+
-			"    }\n"+
-			"  ],\n"+
-			"  \"manager_pitch\": \"【候选人极简推介卡】（用于HR发给业务主管微信/钉钉）：\\n👤 姓名：张三 | 现任：高级Go开发工程师\\n📌 背景：5年经验 | 本科-武汉大学-计算机科学\\n🎯 综合评估：85分（强力推荐）\\n✨ 核心亮点：\\n  1. 具备日活千万级高并发电商微服务经验；\\n  2. 深入精通Go/MySQL分库分表/K8s容器化；\\n  3. 贴合目前高并发岗位诉求，架构实战经验扎实。\\n⚠️ 关注点：有4个月换工作空窗期，初试建议核实原因。\",\n"+
-			"  \"water_check\": {\n"+
-			"    \"water_score\": 18,\n"+
-			"    \"risk_level\": \"low\",\n"+
-			"    \"gaps\": [\"侦测到的工作时间线断层或空窗期（若时间线连贯无断层则填：时间线连贯，无显著断层）\"],\n"+
-			"    \"vague_claims\": [\"简历中假大空、缺乏具体量化数据指标的项目宣称（若成果详实则填：项目成果量化明确）\"],\n"+
-			"    \"outsourcing_warning\": \"外包驻场或人力派遣嫌疑说明（若无外包迹象则填：无外包驻场迹象）\",\n"+
-			"    \"frequent_hop_warning\": \"频繁跳槽或履历动荡提示（若稳定则填：跳槽频率合理，履历稳定）\",\n"+
-			"    \"advise_questions\": [\n"+
-			"      \"针对其声称但缺乏量化的关键成果进行深挖提问\",\n"+
-			"      \"针对时间线疑点或技术边界进行深挖提问\"\n"+
-			"    ]\n"+
-			"  },\n"+
-			"  \"summary\": \"2-3句话全面总结该候选人：包括核心亮点、主要短板、综合判断。需要具体且专业，避免空泛表述。\"\n"+
+			"  \"summary\": \"2-3句话精炼初筛总结：核心亮点、主要短板与初试核实建议。\"\n"+
 			"}\n"+
 			"```\n\n"+
 			"注意事项：\n"+
-			"1. 所有分析与参考回答必须基于简历中的客观内容，不得编造简历中不存在的信息\n"+
-			"2. interview_qa 必须严格生成恰好 5 个问题：前 3 道为适用于 HR 初试非技术层面的【个人能力】问题（依次考察：沟通协作与团队融合、自驱力与学习抗压、职业规划与求职动机），后 2 道为关于岗位必备核心硬技能与项目实战的【专业技术】问题；每个问题的 reference_answer 都要紧密结合候选人简历中的实际背景与客观事实\n"+
-			"3. strengths 至少3条，weaknesses 至少2条，每条都要具体且有事实依据\n"+
-			"4. summary 不能笼统，要结合候选人的具体情况给出有价值的判断\n"+
-			"5. 确保返回合法的JSON格式\n"+
-			"6. 必须生成 manager_pitch（极简推介卡），文字精炼利落，适合直接转发微信/钉钉给业务主管，突出3条核心亮点与1条把关建议\n"+
-			"7. 必须生成 water_check（防伪注水雷达）：细致核查工作经历起止时间是否有未填写的断层空窗期，识别假大空缺乏量化的表述，并提供一针见血的初试防伪反问话术\n"+
-			"8. 对用人部门红线只提出待核实的事实线索，不直接作淘汰决定：\n"+
+			"1. 所有分析必须基于简历中的客观内容，不得编造简历中不存在的信息\n"+
+			"2. strengths 至少2条，weaknesses 至少1条，每条都要具体且有事实依据\n"+
+			"3. summary 必须精炼（2-3句话），结合候选人的具体情况给出有价值的判断\n"+
+			"4. 确保返回合法的JSON格式\n"+
+			"5. 对用人部门红线只提出待核实的事实线索，不直接作淘汰决定：\n"+
 			"   - 对每条红线返回一条 red_line_checks：criterion 必须逐字复制，status 仅能是 met/violated/unknown；evidence 必须是简历中可核对的原文短句。简历未写明时填 unknown，不能猜测满足或违反。\n"+
 			"   - 逐项对照「优先加分项」，仅在有具体事实依据时填入 bonus_checks 和 bonus_matches；AI 不确认加分，也不改变能力分。",
 		jobCfg.Title,
@@ -3560,6 +3530,11 @@ func (a *App) truncateContent(content string, maxLen int) string {
 
 // callAI 调用AI接口
 func (a *App) callAI(cfg *AIConfig, prompt string) (string, error) {
+	content, _, err := a.callAIWithUsage(cfg, prompt)
+	return content, err
+}
+
+func (a *App) callAIWithUsage(cfg *AIConfig, prompt string) (string, *AIUsage, error) {
 	// 拆分 system prompt 和 user prompt
 	parts := strings.SplitN(prompt, "\n\n---\n\n", 2)
 	systemMsg := parts[0]
@@ -3579,7 +3554,7 @@ func (a *App) callAI(cfg *AIConfig, prompt string) (string, error) {
 		},
 	}
 
-	return a.callAIChatMessages(cfg, messages, 0.2)
+	return a.callAIChatMessagesDetailed(cfg, messages, 0.2)
 }
 
 // parseAnalysisResult 解析AI返回的分析结果

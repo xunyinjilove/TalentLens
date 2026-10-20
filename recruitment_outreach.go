@@ -147,7 +147,8 @@ func outreachFact(resume *Resume) string {
 	return ""
 }
 
-func (a *App) generateAIOutreachGreeting(resume *Resume, jobTitle string, projectName string) (greeting string, evidence string) {
+// buildTemplateOutreachMessage 零 AI 消耗的高性能企业标准邀请模板（提取客观经历事实组装）
+func buildTemplateOutreachMessage(resume *Resume, jobTitle string) (greeting string, evidence string) {
 	if resume == nil {
 		return "", ""
 	}
@@ -159,7 +160,7 @@ func (a *App) generateAIOutreachGreeting(resume *Resume, jobTitle string, projec
 		jobTitle = "相关专业岗位"
 	}
 
-	company, recentRole, keyProject, techSkills, excerpt := extractResumeHighlights(resume)
+	company, recentRole, keyProject, techSkills, _ := extractResumeHighlights(resume)
 
 	if keyProject != "" && company != "" {
 		evidence = fmt.Sprintf("过往履历：%s · 核心项目/专长：%s", company, keyProject)
@@ -170,6 +171,38 @@ func (a *App) generateAIOutreachGreeting(resume *Resume, jobTitle string, projec
 	} else {
 		evidence = outreachFact(resume)
 	}
+
+	if company != "" && keyProject != "" {
+		greeting = fmt.Sprintf("您好%s，看到您此前在%s担任%s期间，主导/参与了“%s”等核心方向的实战研发，技术落地经验非常扎实。透景生命目前正在招聘%s，您的业务沉淀与我们当前的研发方向非常契合，想与您交流一下岗位情况，方便了解一下吗？",
+			name, company, recentRole, keyProject, jobTitle)
+	} else if keyProject != "" {
+		greeting = fmt.Sprintf("您好%s，关注到您在简历中关于“%s”等项目的深度实战经历，与透景生命目前招聘的【%s】岗位核心要求高度契合。我们非常认可您的专业沉淀，想与您深入交流一下岗位情况，方便了解一下吗？",
+			name, keyProject, jobTitle)
+	} else if techSkills != "" {
+		greeting = fmt.Sprintf("您好%s，看到您在%s等领域具备深厚的技术功底与项目交付经验。透景生命目前正在招聘%s，想与您交流一下岗位情况，方便了解一下吗？",
+			name, techSkills, jobTitle)
+	} else {
+		greeting = fmt.Sprintf("您好%s，透景生命目前正在招聘%s，关注到您的专业经历与该岗位高度契合，想与您交流一下岗位情况，方便了解一下吗？",
+			name, jobTitle)
+	}
+
+	return greeting, evidence
+}
+
+func (a *App) generateAIOutreachGreeting(resume *Resume, jobTitle string, projectName string) (greeting string, evidence string) {
+	fallbackGreeting, evidence := buildTemplateOutreachMessage(resume, jobTitle)
+	if resume == nil {
+		return "", ""
+	}
+	name := conversationCandidateName(resume)
+	if resume.Analysis != nil && resume.Analysis.CandidateName != "" {
+		name = resume.Analysis.CandidateName
+	}
+	if jobTitle == "" {
+		jobTitle = "相关专业岗位"
+	}
+
+	_, recentRole, _, techSkills, excerpt := extractResumeHighlights(resume)
 
 	cfg := &a.config.AI
 	if cfg != nil && strings.TrimSpace(cfg.APIKey) != "" {
@@ -216,21 +249,7 @@ func (a *App) generateAIOutreachGreeting(resume *Resume, jobTitle string, projec
 		}
 	}
 
-	if company != "" && keyProject != "" {
-		greeting = fmt.Sprintf("您好%s，看到您此前在%s担任%s期间，主导/参与了“%s”等核心方向的实战研发，技术落地经验非常扎实。透景生命目前正在招聘%s，您的业务沉淀与我们当前的研发方向非常契合，想与您交流一下岗位情况，方便了解一下吗？",
-			name, company, recentRole, keyProject, jobTitle)
-	} else if keyProject != "" {
-		greeting = fmt.Sprintf("您好%s，关注到您在简历中关于“%s”等项目的深度实战经历，与透景生命目前招聘的【%s】岗位核心要求高度契合。我们非常认可您的专业沉淀，想与您深入交流一下岗位情况，方便了解一下吗？",
-			name, keyProject, jobTitle)
-	} else if techSkills != "" {
-		greeting = fmt.Sprintf("您好%s，看到您在%s等领域具备深厚的技术功底与项目交付经验。透景生命目前正在招聘%s，想与您交流一下岗位情况，方便了解一下吗？",
-			name, techSkills, jobTitle)
-	} else {
-		greeting = fmt.Sprintf("您好%s，透景生命目前正在招聘%s，关注到您的专业经历与该岗位高度契合，想与您交流一下岗位情况，方便了解一下吗？",
-			name, jobTitle)
-	}
-
-	return greeting, evidence
+	return fallbackGreeting, evidence
 }
 
 // GenerateCandidateAIOutreachMessage 单人调用接入的 AI 模型重新深度定制润色招呼文案
@@ -311,8 +330,15 @@ func (a *App) GenerateCandidateGreetingMessage(projectID string, resumeID string
 	return msg, nil
 }
 
-// The preview is a ranking snapshot. No platform message is sent here.
+// PreviewTopTenOutreach preserves backwards compatibility, generating an outreach preview for the top candidates.
 func (a *App) PreviewTopTenOutreach(projectID string) (OutreachBatch, error) {
+	return a.PreviewBatchOutreach(projectID, nil, "template")
+}
+
+// PreviewBatchOutreach generates a batch outreach preview for specified candidate IDs (or all project candidates if empty).
+// Candidates who are unanalyzed or have pending red lines can be included.
+// templateMode can be "template" (zero-AI instant template), "default", or "ai" (on-demand AI generation).
+func (a *App) PreviewBatchOutreach(projectID string, candidateIDs []string, templateMode string) (OutreachBatch, error) {
 	batch := OutreachBatch{ProjectID: projectID, Status: "draft", Items: make([]OutreachItem, 0)}
 	project := a.GetProject(projectID)
 	if project == nil {
@@ -326,7 +352,26 @@ func (a *App) PreviewTopTenOutreach(projectID string) (OutreachBatch, error) {
 	batch.ProjectTitle = project.JobConfig.Title
 	batch.ID = recruitmentID("outreach")
 	batch.CreatedAt = time.Now().UTC().Format(time.RFC3339Nano)
-	resumes := a.GetProjectRanking(projectID)
+
+	allowedIDs := make(map[string]bool)
+	for _, cid := range candidateIDs {
+		cid = strings.TrimSpace(cid)
+		if cid != "" {
+			allowedIDs[cid] = true
+		}
+	}
+
+	// 若未指定候选人，尝试按排名或项目全部有效简历顺序遍历
+	var resumes []*Resume
+	if len(allowedIDs) == 0 {
+		resumes = a.GetProjectRanking(projectID)
+		if len(resumes) == 0 {
+			resumes = a.GetProjectResumes(projectID)
+		}
+	} else {
+		resumes = a.GetProjectResumes(projectID)
+	}
+
 	seenLinks := make(map[string]bool)
 
 	type targetItem struct {
@@ -336,23 +381,39 @@ func (a *App) PreviewTopTenOutreach(projectID string) (OutreachBatch, error) {
 		sourceID       string
 		jobID          string
 		name           string
+		abilityScore   int
+		redLineStatus  string
 	}
 	var targets []targetItem
 
+	jobTitle := project.JobConfig.Title
+	if strings.TrimSpace(jobTitle) == "" {
+		jobTitle = project.Name
+	}
+
 	for _, resume := range resumes {
-		if len(targets) >= 10 {
-			break
+		if resume == nil {
+			continue
 		}
-		if resume.Status != "done" || resume.Analysis == nil || resume.Analysis.RedLineStatus == "failed" {
+		// 仅排除 HR 已经确认违反必备红线的候选人
+		if resume.Analysis != nil && resume.Analysis.RedLineStatus == "failed" {
 			continue
 		}
 		var linkID, sourcePlatform, sourceID string
-		err := db.QueryRow(`SELECT pc.id,cs.platform,cs.platform_candidate_id FROM project_candidates pc
+		_ = db.QueryRow(`SELECT pc.id,cs.platform,cs.platform_candidate_id FROM project_candidates pc
 			JOIN resume_versions rv ON rv.candidate_id=pc.candidate_id
 			LEFT JOIN candidate_sources cs ON cs.id=rv.source_id
 			WHERE pc.project_id=? AND pc.archived_at='' AND rv.legacy_resume_id=?`, projectID, resume.ID).Scan(&linkID, &sourcePlatform, &sourceID)
-		if err != nil {
-			continue
+		if linkID == "" {
+			linkID = resume.ID
+		}
+		if len(allowedIDs) > 0 {
+			if !allowedIDs[linkID] && !allowedIDs[resume.ID] && !allowedIDs[sourceID] {
+				continue
+			}
+		} else if len(candidateIDs) == 0 && len(targets) >= 10 {
+			// 未传入具体人选且为排名前十快捷范围时，默认取前 10
+			break
 		}
 		if seenLinks[linkID] {
 			continue
@@ -362,16 +423,34 @@ func (a *App) PreviewTopTenOutreach(projectID string) (OutreachBatch, error) {
 			sourcePlatform = ""
 			sourceID = ""
 		}
+		if sourceID == "" && resume.PlatformCandidateID != "" {
+			sourceID = resume.PlatformCandidateID
+		}
 		if is51JobCandidateDetailURL(resume.URL) {
 			if platform, id := resumeSourceIdentity(resume); platform == "51job" && id != "" {
 				sourcePlatform, sourceID = platform, id
 			}
 		}
+		if sourcePlatform == "" && (resume.SourcePlatform == "51job" || is51JobCandidateDetailURL(resume.URL)) {
+			sourcePlatform = "51job"
+		}
 		var jobID string
 		_ = db.QueryRow(`SELECT platform_job_id FROM platform_job_mappings WHERE platform=? AND project_id=? LIMIT 1`, sourcePlatform, projectID).Scan(&jobID)
+		if jobID == "" && sourcePlatform == "51job" {
+			_ = db.QueryRow(`SELECT platform_job_id FROM platform_job_mappings WHERE platform='51job' LIMIT 1`).Scan(&jobID)
+		}
 		name := conversationCandidateName(resume)
-		if resume.Analysis.CandidateName != "" {
-			name = resume.Analysis.CandidateName
+		abilityScore := 0
+		redLineStatus := "pending"
+		if resume.Analysis != nil {
+			if resume.Analysis.CandidateName != "" {
+				name = resume.Analysis.CandidateName
+			}
+			abilityScore = resume.Analysis.AbilityScore
+			redLineStatus = resume.Analysis.RedLineStatus
+			if redLineStatus == "" {
+				redLineStatus = "pending"
+			}
 		}
 		targets = append(targets, targetItem{
 			resume:         resume,
@@ -380,21 +459,46 @@ func (a *App) PreviewTopTenOutreach(projectID string) (OutreachBatch, error) {
 			sourceID:       sourceID,
 			jobID:          jobID,
 			name:           name,
+			abilityScore:   abilityScore,
+			redLineStatus:  redLineStatus,
 		})
 	}
 	if len(targets) == 0 {
-		return batch, fmt.Errorf("当前项目没有已完成分析且红线未确认不满足的候选人")
+		return batch, fmt.Errorf("当前未选择候选人或所选候选人红线已确认不满足")
 	}
 
-	// 并发为排名前十的候选人深度定制招呼文案（充分利用接入的 AI 大模型）
 	items := make([]OutreachItem, len(targets))
-	var wg sync.WaitGroup
-	for i, t := range targets {
-		wg.Add(1)
-		go func(idx int, target targetItem) {
-			defer wg.Done()
-			msg, evi := a.generateAIOutreachGreeting(target.resume, project.JobConfig.Title, project.Name)
-			items[idx] = OutreachItem{
+	if templateMode == "ai" {
+		var wg sync.WaitGroup
+		for i, t := range targets {
+			wg.Add(1)
+			go func(idx int, target targetItem) {
+				defer wg.Done()
+				msg, evi := a.generateAIOutreachGreeting(target.resume, jobTitle, project.Name)
+				items[idx] = OutreachItem{
+					ID:                  recruitmentID("outreach_item"),
+					ResumeID:            target.resume.ID,
+					ProjectCandidateID:  target.linkID,
+					CandidateName:       target.name,
+					Platform:            target.sourcePlatform,
+					PlatformCandidateID: target.sourceID,
+					PlatformJobID:       target.jobID,
+					ProfileURL:          target.resume.URL,
+					Message:             msg,
+					Evidence:            evi,
+					RedLineStatus:       target.redLineStatus,
+					AbilityScore:        target.abilityScore,
+					Rank:                idx + 1,
+					Status:              "draft",
+				}
+			}(i, t)
+		}
+		wg.Wait()
+	} else {
+		// 零 AI 消耗的高性能企业标准邀请模板
+		for i, target := range targets {
+			msg, evi := buildTemplateOutreachMessage(target.resume, jobTitle)
+			items[i] = OutreachItem{
 				ID:                  recruitmentID("outreach_item"),
 				ResumeID:            target.resume.ID,
 				ProjectCandidateID:  target.linkID,
@@ -405,14 +509,13 @@ func (a *App) PreviewTopTenOutreach(projectID string) (OutreachBatch, error) {
 				ProfileURL:          target.resume.URL,
 				Message:             msg,
 				Evidence:            evi,
-				RedLineStatus:       target.resume.Analysis.RedLineStatus,
-				AbilityScore:        target.resume.Analysis.AbilityScore,
-				Rank:                idx + 1,
+				RedLineStatus:       target.redLineStatus,
+				AbilityScore:        target.abilityScore,
+				Rank:                i + 1,
 				Status:              "draft",
 			}
-		}(i, t)
+		}
 	}
-	wg.Wait()
 	batch.Items = items
 
 	tx, err := db.Begin()

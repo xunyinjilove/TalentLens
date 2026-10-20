@@ -109,8 +109,14 @@ func (a *App) ChatWithAIAssistant(messages []ChatMessage, currentContext string,
 
 // callAIChatMessages 执行通用的多轮 Chat 请求
 func (a *App) callAIChatMessages(cfg *AIConfig, messages []ChatMessage, temperature float64) (string, error) {
+	content, _, err := a.callAIChatMessagesDetailed(cfg, messages, temperature)
+	return content, err
+}
+
+// callAIChatMessagesDetailed 执行通用的多轮 Chat 请求并返回结果与 Token 用量
+func (a *App) callAIChatMessagesDetailed(cfg *AIConfig, messages []ChatMessage, temperature float64) (string, *AIUsage, error) {
 	if cfg.APIKey == "" {
-		return "", fmt.Errorf("API Key 未配置")
+		return "", nil, fmt.Errorf("API Key 未配置")
 	}
 
 	model := strings.TrimSpace(cfg.Model)
@@ -152,7 +158,7 @@ func (a *App) callAIChatMessages(cfg *AIConfig, messages []ChatMessage, temperat
 		}
 		body, err := json.Marshal(reqBody)
 		if err != nil {
-			return "", fmt.Errorf("序列化请求失败: %w", err)
+			return "", nil, fmt.Errorf("序列化请求失败: %w", err)
 		}
 		if attempt > 0 {
 			time.Sleep(time.Duration(attempt) * 1500 * time.Millisecond)
@@ -190,17 +196,17 @@ func (a *App) callAIChatMessages(cfg *AIConfig, messages []ChatMessage, temperat
 		if resp.StatusCode >= 400 {
 			switch resp.StatusCode {
 			case http.StatusPaymentRequired:
-				return "", fmt.Errorf("AI 服务账户余额不足。请到模型服务商平台充值或更换可用模型，再重试")
+				return "", nil, fmt.Errorf("AI 服务账户余额不足。请到模型服务商平台充值或更换可用模型，再重试")
 			case http.StatusUnauthorized:
-				return "", fmt.Errorf("AI 服务认证失败。请检查系统设置中的 API Key 和模型配置")
+				return "", nil, fmt.Errorf("AI 服务认证失败。请检查系统设置中的 API Key 和模型配置")
 			case http.StatusForbidden:
-				return "", fmt.Errorf("AI 服务拒绝访问。请检查模型权限与账户状态")
+				return "", nil, fmt.Errorf("AI 服务拒绝访问。请检查模型权限与账户状态")
 			case http.StatusBadRequest:
-				return "", fmt.Errorf("AI 服务请求配置不正确。请检查模型名称和接口地址")
+				return "", nil, fmt.Errorf("AI 服务请求配置不正确。请检查模型名称和接口地址")
 			}
 			lastErr = fmt.Errorf("AI 服务暂时不可用 (HTTP %d)", resp.StatusCode)
 			if resp.StatusCode < 500 && resp.StatusCode != http.StatusRequestTimeout && resp.StatusCode != http.StatusTooManyRequests {
-				return "", lastErr
+				return "", nil, lastErr
 			}
 			continue
 		}
@@ -227,12 +233,26 @@ func (a *App) callAIChatMessages(cfg *AIConfig, messages []ChatMessage, temperat
 			if isGLM53Flash(model) && attempt+1 < maxRetries {
 				continue
 			}
-			return "", lastErr
+			return "", nil, lastErr
 		}
-		return answer, nil
+
+		var usage *AIUsage
+		if chatResp.Usage != nil {
+			usage = &AIUsage{
+				PromptTokens:     chatResp.Usage.PromptTokens,
+				CompletionTokens: chatResp.Usage.CompletionTokens,
+				TotalTokens:      chatResp.Usage.TotalTokens,
+			}
+			if chatResp.Usage.CompletionTokensDetails != nil {
+				usage.ReasoningTokens = chatResp.Usage.CompletionTokensDetails.ReasoningTokens
+			}
+			log.Printf("[callAIChatMessagesDetailed] Token消耗: prompt=%d, completion=%d, total=%d", usage.PromptTokens, usage.CompletionTokens, usage.TotalTokens)
+		}
+
+		return answer, usage, nil
 	}
 
-	return "", fmt.Errorf("重试 %d 次后失败: %v", maxRetries, lastErr)
+	return "", nil, fmt.Errorf("重试 %d 次后失败: %v", maxRetries, lastErr)
 }
 
 // handleOfflineKnowledgeQuery 本地离线智能知识库应答器
