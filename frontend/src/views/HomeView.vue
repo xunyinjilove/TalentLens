@@ -332,9 +332,9 @@
                   @click="detailSubTab = 'interview'"
                 >
                   <el-icon><ChatLineSquare /></el-icon>
-                  <span>初试提纲与建议</span>
-                  <span v-if="interviewQACount > 0" class="subtab-badge count">
-                    {{ interviewQACount }} 题
+                  <span>初试提纲与记录</span>
+                  <span class="subtab-badge count">
+                    {{ currentHROutline?.questions?.length || 10 }} 题
                   </span>
                 </button>
               </div>
@@ -544,41 +544,60 @@
                   </div>
                 </div>
 
-                <!-- ==================== SUB-TAB 3: 初试提纲与建议 ==================== -->
+                <!-- ==================== SUB-TAB 3: HR 初试提纲与记录 ==================== -->
                 <div v-show="detailSubTab === 'interview'" class="subtab-pane interview-pane">
-                  <!-- AI 初试提纲与参考回答 -->
-                  <div v-if="resumeStore.selectedResume.analysis.interviewQA && resumeStore.selectedResume.analysis.interviewQA.length > 0" class="qa-section-card">
+                  <!-- 本次初试优先关注点 Banner -->
+                  <div v-if="currentHROutline?.priority_focus && currentHROutline.priority_focus.length > 0" class="priority-focus-banner">
+                    <div class="banner-title">
+                      <el-icon><Aim /></el-icon>
+                      <span>🎯 本次初试关注点与把关优先级</span>
+                    </div>
+                    <ul class="focus-list">
+                      <li v-for="(f, fIdx) in currentHROutline.priority_focus" :key="fIdx">{{ f }}</li>
+                    </ul>
+                  </div>
+
+                  <!-- 提纲卡片容器 (始终展示，不被空 interviewQA 隐藏) -->
+                  <div class="qa-section-card">
                     <div class="qa-section-head">
                       <div class="qa-title-wrap">
                         <el-icon><QuestionFilled /></el-icon>
-                        <span class="qa-head-title">AI 预面试提纲与参考回答 ({{ resumeStore.selectedResume.analysis.interviewQA.length }}题)</span>
+                        <span class="qa-head-title">📋 HR 初试提纲与记录 ({{ currentHROutline?.questions?.length || 10 }}题)</span>
                       </div>
                       <div class="qa-actions-row">
-                        <button class="copy-qa-btn" @click="handleCopyAllQA" title="一键复制全套提纲">
+                        <button class="copy-qa-btn" @click="handleCopyAllOutline" title="一键复制全套提纲与观察要点">
                           <el-icon><DocumentCopy /></el-icon> 复制全套提纲
                         </button>
+                        <button class="export-qa-btn" @click="handleExportInterviewRecords" title="导出已记录的初试原话与判断">
+                          <el-icon><Download /></el-icon> 导出初试记录
+                        </button>
                         <el-button size="small" type="primary" @click="showInterviewDialog = true">
-                          <el-icon><ChatDotRound /></el-icon> 发起 AI 文字初面
+                          <el-icon><ChatDotRound /></el-icon> 发起初试记录
                         </el-button>
                       </div>
                     </div>
 
-                    <InterviewAccordionCard :qa-list="resumeStore.selectedResume.analysis.interviewQA" />
+                    <InterviewAccordionCard
+                      :outline="currentHROutline"
+                      :qa-list="resumeStore.selectedResume?.analysis?.interviewQA"
+                      :resume-id="resumeStore.selectedResume?.id"
+                      @refresh="loadHROutline"
+                    />
                   </div>
 
-                  <!-- 面试重点建议 -->
-                  <div v-if="resumeStore.selectedResume.analysis.interviewSuggestions && resumeStore.selectedResume.analysis.interviewSuggestions.length > 0" class="interview-section-card">
+                  <!-- 本次初试把关要点与专业交接建议 -->
+                  <div class="interview-section-card">
                     <div class="section-card-header">
                       <div class="header-title">
                         <el-icon><ChatLineSquare /></el-icon>
-                        <span>业务主管初面把关建议</span>
+                        <span>本次初试把关要点与专业交接建议</span>
                       </div>
                     </div>
                     <ul class="interview-sug-list">
-                      <li v-for="(item, idx) in resumeStore.selectedResume.analysis.interviewSuggestions" :key="idx">
-                        <el-icon><CircleCheck /></el-icon>
-                        <span>{{ item }}</span>
-                      </li>
+                      <li><el-icon><CircleCheck /></el-icon><span><strong>意向先行</strong>：优先沟通薪资待遇、工作地点与到岗时间，存在不可调和差异时及时向候选人坦诚说明，节省双方时间。</span></li>
+                      <li><el-icon><CircleCheck /></el-icon><span><strong>事例核查</strong>：询问过往工作职责时，要求候选人说明“本人独立负责的环节与交付结果”，区分个人贡献与团队成果。</span></li>
+                      <li><el-icon><CircleCheck /></el-icon><span><strong>专业交接</strong>：涉及深度技术原理、代码实现或算法细节的问题，记下线索并在本轮标记待确认，转交下一轮专业/业务面试官深度把关。</span></li>
+                      <li><el-icon><CircleCheck /></el-icon><span><strong>客观记录</strong>：尽量记录候选人回答原意与关键事实数据，避免仅凭语气或流畅度直接下断言。</span></li>
                     </ul>
                   </div>
                 </div>
@@ -1156,10 +1175,38 @@ const unverifiedRedLineCount = computed(() => {
   return checks.filter(c => c.status === 'unknown' || !c.status).length
 })
 
-// 面试题数量
-const interviewQACount = computed(() => {
-  return resumeStore.selectedResume?.analysis?.interviewQA?.length || 0
-})
+// HR 初试提纲与记录
+const currentHROutline = ref<any>(null)
+const hrOutlineLoading = ref(false)
+
+async function loadHROutline() {
+  const resumeId = resumeStore.selectedResume?.id
+  if (!resumeId) {
+    currentHROutline.value = null
+    return
+  }
+  hrOutlineLoading.value = true
+  try {
+    const api: any = await import('../../wailsjs/go/main/App')
+    currentHROutline.value = await api.GetHROutline(resumeId)
+  } catch (e) {
+    console.warn('获取初试提纲失败:', e)
+  } finally {
+    hrOutlineLoading.value = false
+  }
+}
+
+watch(
+  () => resumeStore.selectedResume?.id,
+  newId => {
+    if (newId) {
+      loadHROutline()
+    } else {
+      currentHROutline.value = null
+    }
+  },
+  { immediate: true }
+)
 
 const parsedContent = ref('')
 const contentLoading = ref(false)
@@ -1815,30 +1862,95 @@ function copyCandidateUrl() {
   }
 }
 
-async function handleCopyAllQA() {
+async function handleCopyAllOutline() {
   const resume = resumeStore.selectedResume
-  if (!resume || !resume.analysis?.interviewQA || resume.analysis.interviewQA.length === 0) return
+  const outline = currentHROutline.value
+  const candidateName = outline?.candidate_name || resume?.analysis?.candidateName || resume?.fileName || '候选人'
+  const jobTitle = outline?.job_title || '目标岗位'
+  const questions = outline?.questions || []
 
-  const candidateName = resume.analysis.candidateName || resume.fileName
+  if (questions.length === 0) {
+    ElMessage.warning('暂无可用提纲')
+    return
+  }
+
   const lines = [
-    `【AI 预面试提纲与参考回答】`,
+    `【HR 初试提纲与记录 · ${jobTitle}】`,
     `候选人：${candidateName}`,
-    `综合得分：${resume.score || 0}分`,
+    `推荐题量：共 ${questions.length} 题（工作意向 / 工作能力 / 双向确认）`,
     `========================================`
   ]
 
-  resume.analysis.interviewQA.forEach((item, idx) => {
-    lines.push(`\nQ${idx + 1}【${item.category || '技术问题'}】: ${item.question}`)
-    if (item.reference_answer) {
-      lines.push(`参考回答（基于简历事实）: ${item.reference_answer}`)
+  if (outline?.priority_focus && outline.priority_focus.length > 0) {
+    lines.push('\n🎯 本次初试优先关注点：')
+    outline.priority_focus.forEach((f: string, i: number) => {
+      lines.push(`  ${i + 1}. ${f}`)
+    })
+    lines.push('----------------------------------------')
+  }
+
+  questions.forEach((q: any, idx: number) => {
+    lines.push(`\nQ${idx + 1}【${q.category_label || q.category} · ${q.topic}】`)
+    lines.push(`主问题：${q.question}`)
+    lines.push(`为什么问：${q.reason_to_ask}`)
+    if (q.source_refs) {
+      lines.push(`简历线索：${q.source_refs}`)
+    }
+    if (q.follow_up_hints && q.follow_up_hints.length > 0) {
+      lines.push('条件追问：')
+      q.follow_up_hints.forEach((h: string) => lines.push(`  - ${h}`))
+    }
+    if (q.hr_observe_points && q.hr_observe_points.length > 0) {
+      lines.push('重点听什么（HR 观察点）：')
+      q.hr_observe_points.forEach((o: string) => lines.push(`  - ${o}`))
+    }
+    if (q.related_checks && q.related_checks.length > 0) {
+      lines.push(`关联岗位要求：${q.related_checks.join('；')}`)
     }
   })
 
   try {
     await navigator.clipboard.writeText(lines.join('\n'))
-    ElMessage.success('已复制 5 组面试问题与参考回答到剪贴板！')
+    ElMessage.success(`已复制全套 ${questions.length} 道初试题纲与观察要点到剪贴板！`)
   } catch (err) {
-    ElMessage.error('复制失败，请手动选择复制')
+    ElMessage.error('复制失败，请手动选取复制')
+  }
+}
+
+async function handleExportInterviewRecords() {
+  const outline = currentHROutline.value
+  const candidateName = outline?.candidate_name || '候选人'
+  const jobTitle = outline?.job_title || '目标岗位'
+  const questions = outline?.questions || []
+
+  const recorded = questions.filter((q: any) => (q.hr_notes && q.hr_notes.trim()) || (q.hr_verdict && q.hr_verdict !== 'unanswered'))
+  if (recorded.length === 0) {
+    ElMessage.info('当前尚未记录初试回答或判定，请先在下方题目中记录')
+    return
+  }
+
+  const lines = [
+    `【HR 初试现场记录 · ${jobTitle}】`,
+    `候选人：${candidateName}`,
+    `记录时间：${new Date().toLocaleString()}`,
+    `已记录题数：${recorded.length} / ${questions.length} 题`,
+    `========================================`
+  ]
+
+  recorded.forEach((q: any, i: number) => {
+    const verdictLabel = q.hr_verdict === 'pass' ? '✓ 基本一致/有事例' : q.hr_verdict === 'pending' ? '? 待确认/需了解' : q.hr_verdict === 'gap' ? '✕ 存在差异/欠缺' : '未评定'
+    lines.push(`\n【Q${q.question_id || i + 1} · ${q.category_label} · ${q.topic}】`)
+    lines.push(`考题：${q.question}`)
+    lines.push(`HR 判定：${verdictLabel}`)
+    lines.push(`现场记录/原话摘要：${q.hr_notes || '（无手写摘要）'}`)
+    if (q.saved_at) lines.push(`记录时间：${q.saved_at}`)
+  })
+
+  try {
+    await navigator.clipboard.writeText(lines.join('\n'))
+    ElMessage.success(`已导出 ${recorded.length} 项初试记录至剪贴板，可直接粘贴到初面评估报告中！`)
+  } catch (err) {
+    ElMessage.error('导出失败，请重试')
   }
 }
 
@@ -3508,6 +3620,44 @@ onUnmounted(() => {
       }
     }
 
+    .priority-focus-banner {
+      background: linear-gradient(135deg, rgba(238, 242, 255, 0.9) 0%, rgba(245, 243, 255, 0.9) 100%);
+      border: 1px solid #c7d2fe;
+      border-radius: $radius-lg;
+      padding: 12px 16px;
+      margin-bottom: 14px;
+
+      .banner-title {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        font-size: 13.5px;
+        font-weight: 700;
+        color: #4338ca;
+        margin-bottom: 6px;
+
+        .el-icon {
+          font-size: 15px;
+        }
+      }
+
+      .focus-list {
+        margin: 0;
+        padding-left: 20px;
+        list-style-type: disc;
+
+        li {
+          font-size: 12.5px;
+          color: #374151;
+          line-height: 1.6;
+          margin-bottom: 2px;
+          &:last-child {
+            margin-bottom: 0;
+          }
+        }
+      }
+    }
+
     .qa-section-card {
       padding: 16px;
       background: $bg-primary;
@@ -3548,6 +3698,24 @@ onUnmounted(() => {
             border-radius: 6px;
             cursor: pointer;
             &:hover { background: #dbeafe; }
+          }
+
+          .export-qa-btn {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            padding: 5px 10px;
+            font-size: 12px;
+            color: #4b5563;
+            background: #f9fafb;
+            border: 1px solid #e5e7eb;
+            border-radius: 6px;
+            cursor: pointer;
+            transition: all 0.2s;
+            &:hover {
+              background: #f3f4f6;
+              color: #111827;
+            }
           }
         }
       }

@@ -1,13 +1,19 @@
 <template>
   <div class="interview-accordion-container">
-    <div v-for="(item, idx) in qaList" :key="idx" class="qa-accordion-item" :class="{ 'is-open': openMap[idx] }">
+    <div
+      v-for="(item, idx) in questions"
+      :key="item.question_id || idx"
+      class="qa-accordion-item"
+      :class="{ 'is-open': openMap[idx] }"
+    >
       <!-- 考题头部 (点击展开/折叠) -->
       <div class="qa-item-head" @click="toggleItem(idx)">
         <div class="head-left">
           <span class="qa-order-pill">Q{{ idx + 1 }}</span>
           <span class="qa-category-tag" :class="getCategoryClass(item.category)">
-            {{ item.category || '技术提问' }}
+            {{ item.category_label || item.category || '初试提问' }}
           </span>
+          <span v-if="item.topic" class="qa-topic-pill">{{ item.topic }}</span>
           <span class="qa-question-title">{{ item.question }}</span>
         </div>
         <div class="head-right" @click.stop>
@@ -15,32 +21,32 @@
           <div class="eval-status-group">
             <button
               class="eval-btn pass"
-              :class="{ active: evalMap[idx] === 'pass' }"
-              @click="setEval(idx, 'pass')"
-              title="标记为合格"
+              :class="{ active: item.hr_verdict === 'pass' }"
+              @click="setVerdict(item, 'pass')"
+              title="基本一致 / 有明确事例"
             >
               ✓
             </button>
             <button
               class="eval-btn pending"
-              :class="{ active: evalMap[idx] === 'pending' }"
-              @click="setEval(idx, 'pending')"
-              title="标记为待定"
+              :class="{ active: item.hr_verdict === 'pending' }"
+              @click="setVerdict(item, 'pending')"
+              title="待确认 / 需进一步了解"
             >
               ?
             </button>
             <button
-              class="eval-btn fail"
-              :class="{ active: evalMap[idx] === 'fail' }"
-              @click="setEval(idx, 'fail')"
-              title="标记为不达标"
+              class="eval-btn gap"
+              :class="{ active: item.hr_verdict === 'gap' }"
+              @click="setVerdict(item, 'gap')"
+              title="存在差异 / 欠缺事例"
             >
               ✕
             </button>
           </div>
 
-          <!-- 一键复制单题 -->
-          <button class="action-icon-btn" @click="handleCopySingleQA(item, idx)" title="复制该道考题与参考回答">
+          <!-- 一键复制单题与考察要点 -->
+          <button class="action-icon-btn" @click="handleCopySingleQA(item, idx)" title="复制该道题目与 HR 观察要点">
             <el-icon><DocumentCopy /></el-icon>
           </button>
 
@@ -54,17 +60,87 @@
       <!-- 展开的考题详情内容 (手风琴主体) -->
       <Transition name="accordion-slide">
         <div v-if="openMap[idx]" class="qa-item-body">
-          <div v-if="item.reference_answer" class="reference-answer-block">
-            <div class="block-title">
-              <el-icon><InfoFilled /></el-icon>
-              <span>基于候选人履历事实的参考回答要点：</span>
+          <!-- 1. 为什么问 & 简历线索 -->
+          <div class="info-meta-row">
+            <div class="meta-item">
+              <span class="meta-label">🎯 为什么问：</span>
+              <span class="meta-value">{{ item.reason_to_ask || '核实实际工作经历与期望' }}</span>
             </div>
-            <div class="block-text">{{ item.reference_answer }}</div>
+            <div class="meta-item">
+              <span class="meta-label">📄 简历线索：</span>
+              <span class="meta-value clue">{{ item.source_refs || '本次沟通现场确认' }}</span>
+            </div>
           </div>
 
-          <div class="evaluation-guide-row">
-            <span class="guide-tag">🎯 面试评判建议：</span>
-            <span class="guide-desc">重点核查项目中是否独立负责关键设计，反问候选人在该方案下的瓶颈取舍。</span>
+          <!-- 2. 条件追问 -->
+          <div v-if="item.follow_up_hints && item.follow_up_hints.length > 0" class="hints-box">
+            <div class="box-title">
+              <el-icon><ChatLineSquare /></el-icon>
+              <span>💬 条件追问（视回答情况选用 1~2 条）：</span>
+            </div>
+            <ul class="box-list">
+              <li v-for="(hint, hIdx) in item.follow_up_hints" :key="hIdx">{{ hint }}</li>
+            </ul>
+          </div>
+
+          <!-- 3. 重点听什么（HR 观察点） -->
+          <div v-if="item.hr_observe_points && item.hr_observe_points.length > 0" class="observe-box">
+            <div class="box-title">
+              <el-icon><Aim /></el-icon>
+              <span>👂 重点听什么（HR 观察点与评判建议）：</span>
+            </div>
+            <ul class="box-list">
+              <li v-for="(pt, pIdx) in item.hr_observe_points" :key="pIdx">{{ pt }}</li>
+            </ul>
+          </div>
+
+          <!-- 4. 关联岗位重点关注项 -->
+          <div v-if="item.related_checks && item.related_checks.length > 0" class="related-checks-box">
+            <div class="box-title">
+              <el-icon><Briefcase /></el-icon>
+              <span>📌 关联岗位重点关注项（建议结合本题案例核验，专业深度交接下一轮）：</span>
+            </div>
+            <div class="tag-group">
+              <span v-for="(check, cIdx) in item.related_checks" :key="cIdx" class="check-pill">
+                {{ check }}
+              </span>
+            </div>
+          </div>
+
+          <!-- 5. 初试现场记录与候选人原话摘要 -->
+          <div class="record-section">
+            <div class="record-head">
+              <span class="record-title">📝 初试现场记录与候选人原话摘要</span>
+              <span v-if="item.saved_at" class="saved-time-badge">已保存于 {{ item.saved_at }}</span>
+            </div>
+            <el-input
+              v-model="item.hr_notes"
+              type="textarea"
+              :rows="3"
+              maxlength="3000"
+              show-word-limit
+              placeholder="请客观记录候选人作答要点或原话；不确定的内容可以明确标记“待确认”。"
+              class="notes-textarea"
+            />
+            <div class="record-actions">
+              <div class="verdict-radios">
+                <span class="radios-label">本次判断：</span>
+                <el-radio-group v-model="item.hr_verdict" size="small">
+                  <el-radio-button value="pass">基本一致 / 有事例</el-radio-button>
+                  <el-radio-button value="pending">待确认 / 需了解</el-radio-button>
+                  <el-radio-button value="gap">存在差异 / 欠缺</el-radio-button>
+                  <el-radio-button value="unanswered">未涉及</el-radio-button>
+                </el-radio-group>
+              </div>
+              <el-button
+                type="primary"
+                size="small"
+                :loading="savingMap[item.question_id || idx]"
+                @click="saveQuestion(item, idx)"
+              >
+                保存本题记录
+              </el-button>
+            </div>
           </div>
         </div>
       </Transition>
@@ -73,55 +149,144 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive } from 'vue'
-import { DocumentCopy, InfoFilled, ArrowDown } from '@element-plus/icons-vue'
+import { computed, reactive } from 'vue'
+import { DocumentCopy, ArrowDown, Aim, ChatLineSquare, Briefcase } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 
-interface QAItem {
+export interface HROutlineQuestion {
+  question_id: string
+  category: string
+  category_label: string
+  topic: string
   question: string
-  reference_answer?: string
-  category?: string
+  reason_to_ask: string
+  source_refs?: string
+  follow_up_hints?: string[]
+  hr_observe_points?: string[]
+  record_fields?: string
+  related_checks?: string[]
+  hr_verdict?: string
+  hr_notes?: string
+  saved_at?: string
+}
+
+export interface InterviewOutline {
+  resume_id: string
+  project_id: string
+  candidate_name: string
+  job_title: string
+  priority_focus: string[]
+  questions: HROutlineQuestion[]
+  version: number
 }
 
 const props = defineProps<{
-  qaList: QAItem[]
+  outline?: InterviewOutline | null
+  qaList?: any[]
+  resumeId?: string
 }>()
 
-// 默认第一题展开，其余题折叠
+const emit = defineEmits<{
+  (e: 'refresh'): void
+}>()
+
+// 展开状态映射（默认展开第 1 题）
 const openMap = reactive<Record<number, boolean>>({
   0: true
 })
 
-// 考官实时评价状态 ('pass' | 'pending' | 'fail')
-const evalMap = reactive<Record<number, 'pass' | 'pending' | 'fail'>>({})
+// 单题保存 loading 状态
+const savingMap = reactive<Record<string | number, boolean>>({})
+
+// 计算问题列表：优先使用 outline.questions，若无则平滑转换 legacy qaList
+const questions = computed<HROutlineQuestion[]>(() => {
+  if (props.outline?.questions && props.outline.questions.length > 0) {
+    return props.outline.questions
+  }
+  if (props.qaList && props.qaList.length > 0) {
+    return props.qaList.map((qa, i) => ({
+      question_id: `legacy_${i}`,
+      category: 'competence',
+      category_label: qa.category || '能力实战',
+      topic: qa.category || '核心经历',
+      question: qa.question,
+      reason_to_ask: '基于简历经历核查实战真实性与独立贡献',
+      source_refs: qa.reference_answer ? `参考线索：${qa.reference_answer}` : '本次沟通现场确认',
+      follow_up_hints: ['请举出具体工作事例说明本人承担的实际职责'],
+      hr_observe_points: ['重点关注职责范围、交付成果与复盘改进'],
+      hr_verdict: 'unanswered',
+      hr_notes: ''
+    }))
+  }
+  return []
+})
 
 function toggleItem(idx: number) {
   openMap[idx] = !openMap[idx]
 }
 
-function setEval(idx: number, status: 'pass' | 'pending' | 'fail') {
-  if (evalMap[idx] === status) {
-    delete evalMap[idx]
+function getCategoryClass(cat?: string): string {
+  if (!cat) return 'cat-competence'
+  if (cat === 'intention' || cat.includes('意向')) return 'cat-intention'
+  if (cat === 'confirmation' || cat.includes('确认')) return 'cat-confirmation'
+  return 'cat-competence'
+}
+
+async function setVerdict(item: HROutlineQuestion, verdict: string) {
+  if (item.hr_verdict === verdict) {
+    item.hr_verdict = 'unanswered'
   } else {
-    evalMap[idx] = status
+    item.hr_verdict = verdict
+  }
+  if (props.resumeId && item.question_id) {
+    try {
+      const api: any = await import('../../wailsjs/go/main/App')
+      await api.SaveHROutlineQuestion(props.resumeId, item.question_id, item.hr_verdict, item.hr_notes || '')
+    } catch {}
   }
 }
 
-function getCategoryClass(category?: string): string {
-  if (!category) return 'cat-tech'
-  if (category.includes('能力') || category.includes('综合') || category.includes('沟通') || category.includes('协作') || category.includes('自驱') || category.includes('动机') || category.includes('抗压') || category.includes('规划')) {
-    return 'cat-ability'
+async function saveQuestion(item: HROutlineQuestion, idx: number) {
+  if (!props.resumeId) {
+    ElMessage.warning('缺少简历 ID，无法保存')
+    return
   }
-  if (category.includes('技术') || category.includes('专业')) return 'cat-tech'
-  if (category.includes('项目') || category.includes('业务')) return 'cat-project'
-  if (category.includes('真实') || category.includes('防伪') || category.includes('疑点') || category.includes('短板')) return 'cat-gap'
-  return 'cat-tech'
+  const key = item.question_id || idx
+  savingMap[key] = true
+  try {
+    const api: any = await import('../../wailsjs/go/main/App')
+    const updated = await api.SaveHROutlineQuestion(
+      props.resumeId,
+      item.question_id,
+      item.hr_verdict || 'unanswered',
+      item.hr_notes || ''
+    )
+    if (updated) {
+      item.saved_at = new Date().toLocaleTimeString()
+      ElMessage.success(`第 ${idx + 1} 题记录已成功保存！`)
+      emit('refresh')
+    }
+  } catch (err: any) {
+    ElMessage.error(`保存失败：${err.message || err}`)
+  } finally {
+    savingMap[key] = false
+  }
 }
 
-function handleCopySingleQA(item: QAItem, idx: number) {
-  const text = `【面试题目 Q${idx + 1} (${item.category || '技术'})】\n${item.question}\n\n💡 参考回答要点：\n${item.reference_answer || '围绕核心实战经验展开'}`
+function handleCopySingleQA(item: HROutlineQuestion, idx: number) {
+  const followUps = (item.follow_up_hints || []).map(h => `  - ${h}`).join('\n')
+  const observes = (item.hr_observe_points || []).map(o => `  - ${o}`).join('\n')
+  const text = [
+    `【HR 初试题目 Q${idx + 1} · ${item.category_label || '初试提问'}】`,
+    `主题：${item.topic || '综合考察'}`,
+    `为什么问：${item.reason_to_ask || '了解实际经历与意向'}`,
+    `主问题：${item.question}`,
+    followUps ? `条件追问：\n${followUps}` : '',
+    observes ? `重点听什么（HR 观察点）：\n${observes}` : ''
+  ].filter(Boolean).join('\n')
+
   navigator.clipboard.writeText(text).then(() => {
-    ElMessage.success(`第 ${idx + 1} 题已复制到剪贴板`)
+    ElMessage.success(`第 ${idx + 1} 题与观察要点已复制到剪贴板`)
   }).catch(() => {
     ElMessage.error('复制失败，请手动选取')
   })
@@ -132,12 +297,12 @@ function handleCopySingleQA(item: QAItem, idx: number) {
 .interview-accordion-container {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 12px;
 
   .qa-accordion-item {
     background: var(--bg-card, #ffffff);
     border: 1px solid var(--border-color, #e2e8f0);
-    border-radius: 10px;
+    border-radius: 12px;
     overflow: hidden;
     transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
 
@@ -147,11 +312,11 @@ function handleCopySingleQA(item: QAItem, idx: number) {
     }
 
     &.is-open {
-      border-color: rgba(37, 99, 235, 0.3);
-      box-shadow: 0 3px 10px rgba(37, 99, 235, 0.05);
+      border-color: rgba(99, 102, 241, 0.4);
+      box-shadow: 0 4px 14px rgba(99, 102, 241, 0.06);
 
       .qa-item-head {
-        background: rgba(248, 250, 252, 0.85);
+        background: rgba(248, 250, 252, 0.95);
       }
     }
 
@@ -160,43 +325,65 @@ function handleCopySingleQA(item: QAItem, idx: number) {
       align-items: center;
       justify-content: space-between;
       gap: 12px;
-      padding: 12px 14px;
+      padding: 13px 16px;
       cursor: pointer;
       user-select: none;
       transition: background 0.15s ease;
 
       .head-left {
         display: flex;
-        align-items: flex-start;
+        align-items: center;
         gap: 8px;
         min-width: 0;
         flex: 1;
+        flex-wrap: wrap;
 
         .qa-order-pill {
           font-size: 11px;
           font-weight: 700;
-          color: #2563eb;
-          background: #eff6ff;
-          border: 1px solid #dbeafe;
-          padding: 1px 6px;
+          color: #4f46e5;
+          background: #eef2ff;
+          border: 1px solid #c7d2fe;
+          padding: 2px 7px;
           border-radius: 6px;
           flex-shrink: 0;
-          margin-top: 1px;
         }
 
         .qa-category-tag {
           font-size: 11px;
           font-weight: 600;
-          padding: 2px 7px;
+          padding: 2px 8px;
           border-radius: 6px;
           white-space: nowrap;
           flex-shrink: 0;
-          margin-top: 1px;
 
-          &.cat-ability { background: #fdf2f8; color: #be185d; border: 1px solid #fbcfe8; }
-          &.cat-tech { background: #eff6ff; color: #1d4ed8; border: 1px solid #dbeafe; }
-          &.cat-project { background: #f0fdf4; color: #15803d; border: 1px solid #bbf7d0; }
-          &.cat-gap { background: #fef2f2; color: #b91c1c; border: 1px solid #fecaca; }
+          &.cat-intention {
+            background: #eff6ff;
+            color: #1d4ed8;
+            border: 1px solid #bfdbfe;
+          }
+          &.cat-competence {
+            background: #f5f3ff;
+            color: #6d28d9;
+            border: 1px solid #ddd6fe;
+          }
+          &.cat-confirmation {
+            background: #ecfdf5;
+            color: #047857;
+            border: 1px solid #a7f3d0;
+          }
+        }
+
+        .qa-topic-pill {
+          font-size: 11px;
+          font-weight: 600;
+          color: #475569;
+          background: #f1f5f9;
+          border: 1px solid #e2e8f0;
+          padding: 2px 8px;
+          border-radius: 6px;
+          white-space: nowrap;
+          flex-shrink: 0;
         }
 
         .qa-question-title {
@@ -206,31 +393,30 @@ function handleCopySingleQA(item: QAItem, idx: number) {
           line-height: 1.5;
           word-break: break-word;
           overflow-wrap: anywhere;
-          white-space: normal;
         }
       }
 
       .head-right {
         display: flex;
         align-items: center;
-        gap: 8px;
+        gap: 10px;
         flex-shrink: 0;
 
         .eval-status-group {
           display: flex;
           align-items: center;
-          gap: 3px;
+          gap: 4px;
           background: #f1f5f9;
-          padding: 2px;
-          border-radius: 6px;
+          padding: 3px 5px;
+          border-radius: 7px;
 
           .eval-btn {
-            width: 20px;
-            height: 20px;
-            border-radius: 4px;
+            width: 22px;
+            height: 22px;
+            border-radius: 5px;
             border: none;
             background: transparent;
-            font-size: 11px;
+            font-size: 11.5px;
             font-weight: 700;
             color: #64748b;
             cursor: pointer;
@@ -243,7 +429,7 @@ function handleCopySingleQA(item: QAItem, idx: number) {
 
             &.pass.active { background: #10b981; color: #ffffff; }
             &.pending.active { background: #f59e0b; color: #ffffff; }
-            &.fail.active { background: #ef4444; color: #ffffff; }
+            &.gap.active { background: #ef4444; color: #ffffff; }
           }
         }
 
@@ -251,8 +437,8 @@ function handleCopySingleQA(item: QAItem, idx: number) {
           display: flex;
           align-items: center;
           justify-content: center;
-          width: 26px;
-          height: 26px;
+          width: 28px;
+          height: 28px;
           border-radius: 6px;
           border: 1px solid #e2e8f0;
           background: #ffffff;
@@ -261,9 +447,9 @@ function handleCopySingleQA(item: QAItem, idx: number) {
           transition: all 0.15s ease;
 
           &:hover {
-            color: #2563eb;
-            border-color: #2563eb;
-            background: #eff6ff;
+            color: #4f46e5;
+            border-color: #c7d2fe;
+            background: #eef2ff;
           }
         }
 
@@ -276,52 +462,159 @@ function handleCopySingleQA(item: QAItem, idx: number) {
 
           &.is-expanded {
             transform: rotate(180deg);
-            color: #2563eb;
+            color: #4f46e5;
           }
         }
       }
     }
 
     .qa-item-body {
-      padding: 12px 16px 14px;
+      padding: 14px 18px 16px;
       border-top: 1px solid #f1f5f9;
       background: #ffffff;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
 
-      .reference-answer-block {
+      .info-meta-row {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 16px;
         background: #f8fafc;
-        border: 1px solid #e2e8f0;
         border-radius: 8px;
-        padding: 10px 14px;
-        margin-bottom: 8px;
+        padding: 8px 12px;
+        font-size: 12.5px;
 
-        .block-title {
+        .meta-item {
           display: flex;
           align-items: center;
           gap: 6px;
-          font-size: 12px;
-          font-weight: 600;
-          color: #2563eb;
-          margin-bottom: 6px;
-        }
 
-        .block-text {
-          font-size: 13px;
-          line-height: 1.6;
-          color: #334155;
-          white-space: pre-wrap;
+          .meta-label {
+            font-weight: 600;
+            color: #475569;
+          }
+          .meta-value {
+            color: #334155;
+
+            &.clue {
+              color: #2563eb;
+              font-weight: 500;
+            }
+          }
         }
       }
 
-      .evaluation-guide-row {
-        display: flex;
-        align-items: center;
-        gap: 6px;
-        font-size: 11.5px;
-        color: #64748b;
+      .hints-box, .observe-box, .related-checks-box {
+        border-radius: 8px;
+        padding: 10px 14px;
+        font-size: 12.5px;
+        line-height: 1.6;
 
-        .guide-tag {
+        .box-title {
+          display: flex;
+          align-items: center;
+          gap: 6px;
           font-weight: 600;
-          color: #475569;
+          margin-bottom: 6px;
+        }
+
+        .box-list {
+          margin: 0;
+          padding-left: 18px;
+          color: #334155;
+          li {
+            margin-bottom: 3px;
+            &:last-child { margin-bottom: 0; }
+          }
+        }
+      }
+
+      .hints-box {
+        background: #f0fdf4;
+        border: 1px solid #dcfce7;
+        .box-title { color: #166534; }
+      }
+
+      .observe-box {
+        background: #eff6ff;
+        border: 1px solid #dbeafe;
+        .box-title { color: #1e40af; }
+      }
+
+      .related-checks-box {
+        background: #fffbeb;
+        border: 1px solid #fef3c7;
+        .box-title { color: #92400e; }
+
+        .tag-group {
+          display: flex;
+          flex-wrap: wrap;
+          gap: 6px;
+          margin-top: 6px;
+
+          .check-pill {
+            background: #ffffff;
+            border: 1px solid #fde68a;
+            color: #b45309;
+            padding: 3px 8px;
+            border-radius: 6px;
+            font-size: 12px;
+            font-weight: 500;
+          }
+        }
+      }
+
+      .record-section {
+        background: #f8fafc;
+        border: 1px solid #e2e8f0;
+        border-radius: 8px;
+        padding: 12px;
+        margin-top: 4px;
+
+        .record-head {
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+          margin-bottom: 8px;
+
+          .record-title {
+            font-size: 12.5px;
+            font-weight: 600;
+            color: #1e293b;
+          }
+
+          .saved-time-badge {
+            font-size: 11px;
+            color: #10b981;
+            background: #ecfdf5;
+            padding: 2px 6px;
+            border-radius: 4px;
+            border: 1px solid #a7f3d0;
+          }
+        }
+
+        .notes-textarea {
+          margin-bottom: 10px;
+        }
+
+        .record-actions {
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+          flex-wrap: wrap;
+          gap: 8px;
+
+          .verdict-radios {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+
+            .radios-label {
+              font-size: 12px;
+              color: #64748b;
+            }
+          }
         }
       }
     }
