@@ -36,7 +36,7 @@ import (
 )
 
 // 版本信息
-const AppVersion = "1.8.30"
+const AppVersion = "1.8.31"
 const analysisFormatRetryVersion = "model-json-repair-v1"
 const GitHubRepo = "xunyinjilove/TalentLens"
 
@@ -3791,6 +3791,18 @@ func scoreCandidate(result *AnalysisResult, criteria []string) {
 		}
 		result.AbilityScore = int(math.Round(result.CoreMatch))
 		result.OverallScore = float64(result.AbilityScore)
+		refreshCandidateRecommendation(result)
+		return
+	}
+
+	if len(result.CoreCriterionChecks) == 0 {
+		if result.CoreMatch == 0 {
+			result.CoreMatch = result.SkillMatch*0.55 + result.ExperienceMatch*0.45
+		}
+		result.AbilityScore = int(math.Round(result.CoreMatch))
+		result.OverallScore = float64(result.AbilityScore)
+		result.ScoreBasis = "provisional"
+		refreshCandidateRecommendation(result)
 		return
 	}
 
@@ -3803,12 +3815,15 @@ func scoreCandidate(result *AnalysisResult, criteria []string) {
 		byCrit[strings.TrimSpace(c.Criterion)] = c
 	}
 
+	coveredCount := 0
 	for _, metric := range criteria {
 		m := strings.TrimSpace(metric)
 		check, exists := byCrit[m]
 		if !exists {
 			continue
 		}
+		coveredCount++
+
 		// 契约：known 必须有明确可核对依据，包括明确的低等级或否定信息，整数 0-4
 		// unknown: 没有足够的原文信息或所给引用不能支持该维度
 		isKnown := check.EvidenceStatus == "known"
@@ -3846,14 +3861,23 @@ func scoreCandidate(result *AnalysisResult, criteria []string) {
 	result.ScoreLowerBound = lowerBound
 	result.ScoreUpperBound = upperBound
 
-	if rankEligible {
+	if coveredCount < len(criteria) && (result.SkillMatch > 0 || result.ExperienceMatch > 0) {
+		result.CoreMatch = clampFloat(result.SkillMatch*0.55+result.ExperienceMatch*0.45, 0, 100)
+		result.ScoreBasis = "provisional"
+	} else if rankEligible {
 		result.CoreMatch = math.Round(knownScore)
 		result.ScoreBasis = "rubric"
 	} else if wKnown > 0 {
-		result.CoreMatch = math.Round(knownScore)
+		if coveredCount < len(criteria) {
+			result.CoreMatch = math.Round(lowerBound)
+		} else {
+			result.CoreMatch = math.Round(knownScore)
+		}
 		result.ScoreBasis = "provisional"
 	} else if result.SkillMatch > 0 || result.ExperienceMatch > 0 {
 		result.CoreMatch = clampFloat(result.SkillMatch*0.55+result.ExperienceMatch*0.45, 0, 100)
+		result.ScoreBasis = "provisional"
+	} else if result.CoreMatch > 0 {
 		result.ScoreBasis = "provisional"
 	} else {
 		result.CoreMatch = 0
@@ -3879,8 +3903,6 @@ func holisticMatchScore(result *AnalysisResult) int {
 func refreshCandidateRecommendation(result *AnalysisResult) {
 	result.OverallScore = float64(result.AbilityScore)
 	switch {
-	case result.ScoreBasis == "provisional":
-		result.Recommendation = "consider"
 	case result.AbilityScore < 55:
 		result.Recommendation = "not_recommend"
 	case result.AbilityScore < 70:
@@ -3927,10 +3949,22 @@ func (a *App) applyJobDecision(result *AnalysisResult, job *JobConfig, resume *R
 		return
 	}
 	criteria := getUnifiedJobMetrics(job)
+	if len(job.CoreCriteria) > 0 && len(job.RequiredSkills) == 0 {
+		criteria = job.CoreCriteria
+	} else if len(job.RequiredSkills) > 0 && len(job.CoreCriteria) == 0 {
+		criteria = job.RequiredSkills
+	}
 	// 评分卡只接受简历材料中能逐字定位的依据；没有证据的高等级回落为“未体现”。
 	if resume != nil {
 		validateCompetencyEvidence(result.CoreCriterionChecks, resume)
 		validateCompetencyEvidence(result.ExperienceCompetencies, resume)
+		extra := make([]CoreCriterionCheck, 0, 6)
+		for _, check := range result.ExperienceCompetencies {
+			if check.Level > 0 && check.Evidence != "" && strings.TrimSpace(check.Criterion) != "" && len(extra) < 6 {
+				extra = append(extra, check)
+			}
+		}
+		result.ExperienceCompetencies = extra
 	}
 	scoreCandidate(result, criteria)
 	proposedBonus := result.BonusChecks

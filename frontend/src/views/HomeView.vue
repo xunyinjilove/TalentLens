@@ -227,16 +227,13 @@
                     </div>
                   </div>
 
-                  <!-- 右上角：证据分与参考匹配分别标示 -->
+                  <!-- 右上角：综合评分 -->
                   <div v-if="resumeStore.selectedResume.status === 'done' && resumeStore.selectedResume.analysis" class="hero-score-section">
                     <div class="hero-score-box" :class="getScoreClass(resumeStore.selectedResume.score)">
                       <strong class="hero-score-num">{{ animatedDetailScore || resumeStore.selectedResume.score }}</strong>
-                      <span class="hero-score-label">岗位证据分</span>
+                      <span class="hero-score-label">综合评分</span>
                     </div>
                     <div class="hero-decision-badge-wrap">
-                      <span v-if="holisticRadarScore > 0" class="hero-reference-match" title="技能 40%、经验 40%、学历 20% 的 AI 参考匹配；不替代岗位逐项证据分">
-                        参考匹配 {{ holisticRadarScore }}
-                      </span>
                       <span class="hero-rec-badge" :class="resumeStore.selectedResume.analysis.recommendation">
                         {{ $t(`analysis.recommendations.${resumeStore.selectedResume.analysis.recommendation || 'consider'}`) }}
                       </span>
@@ -1273,12 +1270,6 @@ function handleSelectRadarIndex(idx: number) {
 
 const radarIndicators = computed(() => {
   return radarDisplayChecks.value.map(c => ({ name: c.criterion, max: 4 }))
-})
-
-const holisticRadarScore = computed(() => {
-  const a = resumeStore.selectedResume?.analysis
-  if (!a || a.skillMatch <= 0 || a.experienceMatch <= 0 || a.educationMatch <= 0) return 0
-  return Math.round(a.skillMatch * 0.4 + a.experienceMatch * 0.4 + a.educationMatch * 0.2)
 })
 
 const radarCandidateValues = computed(() => {
@@ -3195,17 +3186,6 @@ onUnmounted(() => {
           display: flex;
           flex-direction: column;
           gap: 4px;
-
-          .hero-reference-match {
-            padding: 2px 7px;
-            border-radius: 6px;
-            background: #eef2ff;
-            color: #4338ca;
-            font-size: 11px;
-            font-weight: 700;
-            text-align: center;
-            white-space: nowrap;
-          }
 
           .hero-rec-badge {
             display: inline-block;

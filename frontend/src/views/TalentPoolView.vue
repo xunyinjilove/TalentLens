@@ -242,10 +242,8 @@
             </span>
 
             <el-select v-model="sortOrder" aria-label="按得分排序候选人" class="candidate-sort-select" size="small">
-              <el-option label="参考匹配度：高到低" value="match_desc" />
-              <el-option label="参考匹配度：低到高" value="match_asc" />
-              <el-option label="能力分：高到低" value="score_desc" />
-              <el-option label="能力分：低到高" value="score_asc" />
+              <el-option label="综合评分：高到低" value="score_desc" />
+              <el-option label="综合评分：低到高" value="score_asc" />
               <el-option label="入库时间：最新" value="newest" />
             </el-select>
 
@@ -327,14 +325,14 @@
                 <div class="candidate-target-role">目标：{{ item.jobTitle || item.projectName }}</div>
               </div>
               <div class="candidate-score-wrap">
-                <div v-if="item.analysisStatus === 'done' && item.matchScore > 0"
-                  class="candidate-match-ring" :style="{ '--match': `${item.matchScore}%` }"
-                  role="img" :aria-label="`AI 参考匹配度 ${item.matchScore} 分，岗位证据分 ${item.abilityScore} 分`"
-                  :title="`技能、经验、学历的 AI 参考匹配度 ${item.matchScore}；岗位证据分 ${item.abilityScore}`">
-                  <span>{{ item.matchScore }}</span>
+                <div v-if="item.analysisStatus === 'done' && (item.abilityScore > 0 || item.matchScore > 0)"
+                  class="candidate-match-ring" :style="{ '--match': `${item.abilityScore || item.matchScore}%` }"
+                  role="img" :aria-label="`综合评分 ${item.abilityScore || item.matchScore} 分`"
+                  :title="`综合评分：${item.abilityScore || item.matchScore} 分`">
+                  <span>{{ item.abilityScore || item.matchScore }}</span>
                 </div>
                 <div v-else class="candidate-match-pending">待评</div>
-                <small>参考匹配度</small>
+                <small>综合评分</small>
               </div>
             </div>
 
@@ -360,7 +358,7 @@
             </div>
 
             <div class="wb-candidate-foot">
-              <span class="candidate-created-time">入库 {{ formatDate(item.createdAt) }}<span v-if="item.analysisStatus === 'done'"> · 岗位证据分 {{ item.abilityScore }}</span></span>
+              <span class="candidate-created-time">入库 {{ formatDate(item.createdAt) }}<span v-if="item.analysisStatus === 'done' && (item.abilityScore > 0 || item.matchScore > 0)"> · 综合评分 {{ item.abilityScore || item.matchScore }}</span></span>
               <div class="candidate-actions">
                 <el-button class="candidate-primary-action" size="small" type="primary" plain @click="navigateToEvaluation(item)">查看测评</el-button>
                 <el-button class="candidate-secondary-action" size="small" type="primary" @click="openInterviewInvite(item)">
@@ -437,14 +435,14 @@
               </template>
             </el-table-column>
 
-            <el-table-column label="能力评分" width="110" align="center">
+            <el-table-column label="综合评分" width="110" align="center">
               <template #default="{ row }">
                 <span
-                  v-if="row.analysisStatus === 'done'"
+                  v-if="row.analysisStatus === 'done' && (row.abilityScore > 0 || row.matchScore > 0)"
                   class="score-badge"
-                  :class="scoreLevelClass(row.abilityScore)"
+                  :class="scoreLevelClass(row.abilityScore || row.matchScore)"
                 >
-                  {{ row.abilityScore }} 分
+                  {{ row.abilityScore || row.matchScore }} 分
                 </span>
                 <span v-else class="score-badge pending">待评</span>
               </template>
@@ -557,8 +555,7 @@
             </div>
             <div class="invite-sub-text">
               <span>应聘分库：<strong>{{ inviteCandidate.jobTitle || inviteCandidate.projectName }}</strong></span>
-              <span v-if="inviteCandidate.abilityScore > 0"> · 岗位证据分：<strong>{{ inviteCandidate.abilityScore }}分</strong></span>
-              <span v-if="inviteCandidate.matchScore > 0"> · 参考匹配度：<strong>{{ inviteCandidate.matchScore }}分</strong></span>
+              <span v-if="(inviteCandidate.abilityScore || inviteCandidate.matchScore) > 0"> · 综合评分：<strong>{{ inviteCandidate.abilityScore || inviteCandidate.matchScore }}分</strong></span>
             </div>
           </div>
           <el-button
@@ -826,7 +823,7 @@ const statusFilter = ref('')
 const sourceFilter = ref('')
 const stageFilter = ref('')
 const viewMode = ref<'grid' | 'table'>('grid')
-const sortOrder = ref<'match_desc' | 'match_asc' | 'score_desc' | 'score_asc' | 'newest'>('match_desc')
+const sortOrder = ref<'score_desc' | 'score_asc' | 'newest'>('score_desc')
 const manageMode = ref(false)
 const selectedCandidateIds = ref<string[]>([])
 
@@ -1077,13 +1074,11 @@ const filtered = computed(() => recruitment.candidates.filter(item =>
   const recent = (b.createdAt || '').localeCompare(a.createdAt || '')
   if (sortOrder.value === 'newest') return recent || a.projectCandidateId.localeCompare(b.projectCandidateId)
   if (a.analysisStatus !== b.analysisStatus) return a.analysisStatus === 'done' ? -1 : b.analysisStatus === 'done' ? 1 : 0
-  if (sortOrder.value === 'match_desc' || sortOrder.value === 'match_asc') {
-    const match = sortOrder.value === 'match_desc' ? b.matchScore - a.matchScore : a.matchScore - b.matchScore
-    return match || b.abilityScore - a.abilityScore || recent || a.projectCandidateId.localeCompare(b.projectCandidateId)
-  }
+  const scoreA = a.abilityScore || a.matchScore || 0
+  const scoreB = b.abilityScore || b.matchScore || 0
   const score = sortOrder.value === 'score_desc'
-    ? b.abilityScore - a.abilityScore
-    : a.abilityScore - b.abilityScore
+    ? scoreB - scoreA
+    : scoreA - scoreB
   return score || b.confirmedBonus - a.confirmedBonus || recent || a.projectCandidateId.localeCompare(b.projectCandidateId)
 }))
 
