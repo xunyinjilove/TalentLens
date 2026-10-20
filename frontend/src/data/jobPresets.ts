@@ -9,6 +9,7 @@ export interface JobPreset {
   experienceYears: number
   educationLevel: string
   description?: string
+  interviewQuestions?: string[]
   redLines?: string[]
   bonusPoints?: string[]
   coreCriteria?: string[]
@@ -32,8 +33,7 @@ const techJobs: JobPreset[] = [
     experienceYears: 5,
     educationLevel: '本科',
     description: '负责公司核心产品的前端架构设计与开发',
-    redLines: ['能提供可核实的前端产品开发、上线与维护经历'],
-    bonusPoints: ['主导过前端工程化重构并可说明效果', '熟悉 Node.js 服务端开发与前后端协作', '有可核实的开源项目贡献']
+    interviewQuestions: ['请结合近期核心项目说明前端架构设计、开发与上线维护经历', '主导过前端工程化重构的背景、措施与量化效果说明', '请举例说明在 Node.js 服务端开发或前后端协作中的实战经验']
   },
   {
     id: 'frontend-junior',
@@ -55,8 +55,7 @@ const techJobs: JobPreset[] = [
     experienceYears: 5,
     educationLevel: '本科',
     description: '负责后端服务架构设计与核心功能开发',
-    redLines: ['能提供可核实的 Go 生产服务开发与维护经历'],
-    bonusPoints: ['主导过微服务架构重构或网关建设并可复盘', '具备可核实的大型系统高可用实践经验']
+    interviewQuestions: ['请结合实际项目说明 Go 生产服务的开发、部署与高可用维护经历', '介绍一次微服务架构重构或网关建设的落地实践与复盘', '请说明在高并发、分布式场景下的性能瓶颈定位与调优案例']
   },
   {
     id: 'backend-java',
@@ -377,8 +376,7 @@ const medicalJobs: JobPreset[] = [
     educationLevel: '本科',
     description: '负责体外诊断试剂临床试验全流程方案设计、质量管理与药监申报',
     jobDescription: '岗位职责：\n1. 制定项目管理计划，按计划完成所负责的项目启动、开展及结束工作，确保通过药监部门核查；\n2. 根据项目研发资料、指导原则、行业标准等要求，设计临床试验方案；\n3. 对所负责的临床试验项目进行全面的质量控制与管理，确保所有试验严格按照临床试验方案、标准操作程序和相关法规进行；\n4. 根据临床试验相关规范要求，完成临床研究的各阶段报批文件包括但不限于临床报告；\n5. 作为公司对外代表，建立并保持与机构的良好关系；\n6. 领导交办的其他工作。\n\n任职要求：\n1. 生物学、检验学、医学或药学等相关专业背景，本科及以上学历；\n2. 高度责任心和抗压能力，可适应出差；\n3. 优秀的沟通表达能力、发现和解决问题的能力。',
-    redLines: ['拒绝频繁跳槽（近3年换工作>3次）', '学历硬卡统招全日制本科及以上', '严禁无临床试验项目落地经验'],
-    bonusPoints: ['有知名三甲医院或上市药企背书', '主导过国家级I/II/III期临床试验', '具备PMP项目管理认证']
+    interviewQuestions: ['核实临床试验项目全流程落地与方案设计经验', '主导国家级I/II/III期临床试验的实战细节与合规把控', 'PMP项目管理方法在临床项目进度与质量把控中的具体应用']
   },
   {
     id: 'ivd-intl-sales',
@@ -391,8 +389,7 @@ const medicalJobs: JobPreset[] = [
     educationLevel: '本科',
     description: '负责公司体外诊断(IVD)产品在海外市场的销售与客户开拓',
     jobDescription: '岗位职责：\n1. 负责公司体外诊断产品在海外市场的销售；\n2. 开拓海外客户；\n3. 负责产品推广、信息收集、工作汇报。\n\n任职资格：\n1. 本科及以上学历，检验、生物等相关专业；\n2. 二年以上相关工作经验；\n3. 英语沟通能力好；\n4. 好学、勤奋、踏实、稳重；\n5. 可以驻点在上海或者深圳。\n\n薪酬福利：基本工资+销售提成+各类福利+各类补贴+年终奖',
-    redLines: ['英语听说读写不流利者硬卡', '无IVD或医疗器械外贸经历者不考虑'],
-    bonusPoints: ['具备独立开发海外经销商及医院终端实绩', '常驻海外或拥有多国本地化客户资源']
+    interviewQuestions: ['英语听说读写与跨文化商务谈判能力实际考察', '独立开发海外经销商及医院终端的渠道搭建实绩说明', '海外本地化客户资源维护与订单交付经验']
   },
   {
     id: 'ivd-rd-pm-autoimmunity',
@@ -405,8 +402,7 @@ const medicalJobs: JobPreset[] = [
     educationLevel: '本科',
     description: '负责自身免疫诊断试剂的研发、优化与上市前后技术支持',
     jobDescription: '工作内容：\n1. 负责自身免疫诊断试剂的研发工作，包括产品上市前后的开发、优化、改进；\n2. 根据市场反馈与要求，不断调整优化产品质量与性能；\n3. 密切关注市场需求与技术动态，设计产品优化改进方案，完成对现有产品的技术改进。\n\n任职要求：\n1. 生物学、医学、检验学专业毕业，本科以上学历，有3年自身免疫诊断试剂研发相关经验、具备项目管理经验；\n2. 热爱实验室工作，动手能力强，工作有条理；\n3. 有良好的科学文献阅读能力和较强的文字表达能力。',
-    redLines: ['非医学/检验/生物相关专业硬卡', '无体外诊断试剂研发实验室经验者淘汰'],
-    bonusPoints: ['拥有自身免疫类化学发光产品完整拿证经验', '具备发明专利或国家级课题主持经历']
+    interviewQuestions: ['体外诊断试剂研发实验室操作与体系规范掌握情况', '自身免疫类化学发光产品完整拿证与注册申报经验', '发明专利或课题研发中的独立攻关与创新点']
   },
   {
     id: 'ivd-scra',
@@ -419,8 +415,7 @@ const medicalJobs: JobPreset[] = [
     educationLevel: '本科',
     description: '负责体外诊断试剂临床验证全流程监查、质量跟进与机构协调',
     jobDescription: '岗位职责：\n1. 协调解决临床试验过程中出现的问题，协助处理临床数据；\n2. 制定监查计划，制作监查报告，确保临床研究按进度完成；\n3. 根据临床试验要求，及时回收、录入数据；\n4. 负责临床研究质量、研究进度的监查及临床试验工作的协调等；\n5. 领导交办的其他工作。\n\n任职要求：\n1. 生物、药学、医学等相关专业，本科以上学历；有体外诊断试剂临床验证监查实习经验者优先；\n2. 有较强的沟通表达能力，能经常出差；\n3. 诚恳踏实、敬业进取。',
-    redLines: ['统招专科及以下学历硬卡', '不能适应经常性出差者淘汰'],
-    bonusPoints: ['具备GCP培训证书且有知名药企/CRO背景', '有完整化学发光试剂临床验证跟进经验']
+    interviewQuestions: ['临床监查与GCP规范执行经历核验', '化学发光试剂临床验证跟进、中心沟通与质控细节', '多中心临床试验出差与突发事件应对复盘']
   },
   {
     id: 'ivd-app-specialist',
@@ -605,17 +600,32 @@ export function savePresetCustomization(presetIdOrName: string, customConfig: Pa
   } catch (e) {}
 }
 
-// 合并用户针对该模板已保存的个性化配置（红线、加分项等）
+// 合并用户针对该模板已保存的个性化配置（包含初试问题等）
 export function getMergedPreset(preset: JobPreset): JobPreset {
   if (!preset) return preset
   const custom = getPresetCustomization(preset.id) || getPresetCustomization(preset.name)
   if (!custom) return preset
+  const questions: string[] = custom.interviewQuestions
+    ? [...custom.interviewQuestions]
+    : (preset.interviewQuestions ? [...preset.interviewQuestions] : [])
+  // 兼容迁移：旧版自定义中的红线与加分项自动并入初试问题
+  if (custom.redLines) {
+    for (const r of custom.redLines) {
+      if (r && !questions.includes(r)) questions.push(r)
+    }
+  }
+  if (custom.bonusPoints) {
+    for (const b of custom.bonusPoints) {
+      if (b && !questions.includes(b)) questions.push(b)
+    }
+  }
   return {
     ...preset,
     ...custom,
     requiredSkills: custom.requiredSkills ? [...custom.requiredSkills] : [...preset.requiredSkills],
-    redLines: custom.redLines ? [...custom.redLines] : (preset.redLines ? [...preset.redLines] : []),
-    bonusPoints: custom.bonusPoints ? [...custom.bonusPoints] : (preset.bonusPoints ? [...preset.bonusPoints] : [])
+    interviewQuestions: questions,
+    redLines: [],
+    bonusPoints: []
   }
 }
 

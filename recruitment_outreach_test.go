@@ -34,12 +34,6 @@ func TestOutreachPreviewRequiresPendingRedlineSelectionAndRecordsManualOutcome(t
 	for _, item := range batch.Items {
 		choices = append(choices, OutreachApproval{ItemID: item.ID, Message: item.Message, Include: true})
 	}
-	if _, err = app.ConfirmOutreachBatch(batch.ID, choices); err == nil {
-		t.Fatal("pending redline must require explicit selection")
-	}
-	for i := range choices {
-		choices[i].ConfirmPending = true
-	}
 	confirmed, err := app.ConfirmOutreachBatch(batch.ID, choices)
 	if err != nil {
 		t.Fatal(err)

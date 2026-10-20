@@ -17,20 +17,8 @@
       </template>
       <template v-else>
         <el-alert title="AI 初面已完成，最终决定由 HR 做出" type="info" :closable="false" />
-        <p><strong>能力题分：</strong>{{ session.overall_score }}（有统一题时统一题 60%、针对性题 40%；红线题不计分）　<strong>AI 建议：</strong>{{ session.ai_recommendation }}</p>
+        <p><strong>初试综合得分：</strong>{{ session.overall_score }}分（岗位统一题与针对性核查题综合评定）　<strong>AI 建议：</strong>{{ session.ai_recommendation }}</p>
         <p>{{ session.ai_summary }}</p>
-        <div v-if="redLineTurns.length" class="redline-review">
-          <strong>逐条核实岗位红线</strong>
-          <p class="hint">AI 只提供问答线索。请依据候选人原话确认；未核实前不能选择“进入下一轮”。</p>
-          <div v-for="turn in redLineTurns" :key="turn.rule_id" class="redline-item">
-            <strong>{{ turn.criterion }}</strong>
-            <p>回答：{{ turn.answer }}{{ turn.follow_up_answer ? `；追问：${turn.follow_up_answer}` : '' }}</p>
-            <p v-if="reviewedRules[turn.rule_id]">HR 已记录：{{ reviewedRules[turn.rule_id] === 'met' ? '满足' : reviewedRules[turn.rule_id] === 'violated' ? '不满足' : '待核实' }}</p>
-            <el-button size="small" type="success" plain :loading="loading" @click="reviewRedLine(turn, 'met')">确认满足</el-button>
-            <el-button size="small" type="danger" plain :loading="loading" @click="reviewRedLine(turn, 'violated')">确认不满足</el-button>
-            <el-button size="small" :loading="loading" @click="reviewRedLine(turn, 'unknown')">仍待核实</el-button>
-          </div>
-        </div>
         <el-input v-model="hrNote" type="textarea" :rows="2" placeholder="HR 复核备注" />
         <div class="review-actions">
           <el-button :loading="loading" @click="review('advance')">进入下一轮</el-button>
@@ -43,7 +31,7 @@
       <details>
         <summary>查看已提交的问答与单题评价</summary>
         <div v-for="(turn, i) in session.turns" :key="i" class="history">
-          <strong>{{ i + 1 }}. {{ turn.standard ? '【岗位统一题】' : turn.rule_id ? '【红线核实题】' : '【针对性题】' }}{{ turn.question }}</strong>
+          <strong>{{ i + 1 }}. {{ turn.standard ? '【岗位统一题】' : turn.criterion ? '【初试重点核查】' : '【针对性题】' }}{{ turn.question }}</strong>
           <p>候选人：{{ turn.answer || '未回答' }}</p>
           <p v-if="turn.follow_up">追问：{{ turn.follow_up }}<br />候选人：{{ turn.follow_up_answer || '未回答' }}</p>
           <p v-if="turn.evaluated">AI 评价（{{ turn.score }}）：{{ turn.assessment }}</p>

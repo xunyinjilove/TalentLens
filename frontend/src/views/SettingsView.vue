@@ -172,37 +172,21 @@
               />
             </div>
 
-            <!-- 🚫 一票否决红线 -->
+            <!-- 🎯 初试重点核查题纲 -->
             <div class="form-item" style="margin-top: 14px;">
-              <label class="text-danger" style="font-weight: 600; margin-bottom: 8px; display: block;">
-                🚫 岗位必备条件（HR 核实后确认准入）
+              <label class="text-primary" style="font-weight: 600; margin-bottom: 8px; display: block;">
+                🎯 初试重点核查问题（进入初试时自动组装核验题目，重点验证关键经历与实战亮点）
               </label>
               <TagInput
-                v-model="jobForm.redLines"
-                tag-type="danger"
-                placeholder="输入与岗位职责直接相关、可核验的必备条件"
+                v-model="jobForm.interviewQuestions"
+                tag-type="primary"
+                placeholder="输入初试重点核查问题，按回车添加..."
                 quick-title="快捷填入:"
-                :preset-list="commonRedLines"
-                storage-key="talentlens_custom_redlines"
-                add-prompt-title="新增一票否决红线快捷项"
+                :preset-list="commonInterviewQuestions"
+                storage-key="talentlens_custom_interview_questions"
+                add-prompt-title="新增初试重点核查快捷项"
               />
-              <p>建议仅保留 1–3 条，并与用人经理确认业务理由和等价经历；AI 只给核实线索，不自动淘汰。</p>
-            </div>
-
-            <!-- ⭐ 核心优先加分项 -->
-            <div class="form-item" style="margin-top: 14px;">
-              <label class="text-warning" style="font-weight: 600; margin-bottom: 8px; display: block;">
-                ⭐ 优先加分项（待 HR 确认，仅用于同档排序）
-              </label>
-              <TagInput
-                v-model="jobForm.bonusPoints"
-                tag-type="warning"
-                placeholder="输入有事实依据的额外项目经验、成果或认证"
-                quick-title="快捷填入:"
-                :preset-list="commonBonusPoints"
-                storage-key="talentlens_custom_bonuses"
-                add-prompt-title="新增优先加分项快捷项"
-              />
+              <p>进入初面环节时，系统将自动结合此题纲向候选人针对性提问与溯源取证。</p>
             </div>
             <div class="form-item" style="margin-top: 14px;"><label>核心能力评分卡（逐项 0–4 级，等权汇总）</label><TagInput v-model="jobForm.coreCriteria" placeholder="输入岗位核心能力；为空时沿用核心技能" /></div>
 
@@ -370,6 +354,7 @@ const jobForm = reactive({
   experienceYears: 3,
   educationLevel: '本科',
   jobDescription: '岗位职责：\n1. 制定项目管理计划，按计划完成所负责的项目启动、开展及结束工作，确保通过药监部门核查；\n2. 根据项目研发资料、指导原则、行业标准等要求，设计临床试验方案；\n3. 对所负责的临床试验项目进行全面的质量控制与管理，确保所有试验严格按照临床试验方案、标准操作程序和相关法规进行；\n4. 根据临床试验相关规范要求，完成临床研究的各阶段报批文件包括但不限于临床报告；\n5. 作为公司对外代表，建立并保持与机构的良好关系。\n\n任职要求：\n1. 生物学、检验学、医学或药学等相关专业背景，本科及以上学历；\n2. 高度责任心和抗压能力，可适应出差；\n3. 优秀的沟通表达能力、发现和解决问题的能力。',
+  interviewQuestions: [] as string[],
   redLines: [] as string[],
   bonusPoints: [] as string[],
   coreCriteria: [] as string[]
@@ -392,32 +377,12 @@ const commonSkills = [
   '需求分析', 'PRD撰写', '数据分析', '用户研究'
 ]
 
-const commonRedLines = [
-  '能说明岗位核心项目中本人负责的具体工作',
-  '具备岗位要求的有效执业或上岗资格（如适用）',
-  '能提供核心必备技能的实际应用案例'
+const commonInterviewQuestions = [
+  '请详细介绍候选人在核心项目中的具体职责与独立产出',
+  '核实面对复杂业务难题时的排查定位与解决复盘',
+  '请举例说明在核心技能或架构重构中的实际应用成果',
+  '针对关键任职要求与实战经历进行证据溯源'
 ]
-
-const commonBonusPoints = [
-  '有与岗位相关、可量化的项目改善成果',
-  '具备跨团队协作与带教的具体案例',
-  '持有与岗位直接相关的专业认证',
-  '有可核验的开源贡献或技术成果'
-]
-
-function addQuickRedLine(tag: string) {
-  if (!jobForm.redLines) jobForm.redLines = []
-  if (!jobForm.redLines.includes(tag)) {
-    jobForm.redLines.push(tag)
-  }
-}
-
-function addQuickBonus(tag: string) {
-  if (!jobForm.bonusPoints) jobForm.bonusPoints = []
-  if (!jobForm.bonusPoints.includes(tag)) {
-    jobForm.bonusPoints.push(tag)
-  }
-}
 
 const currentProvider = computed<Provider | null>(() => {
   return getProviderById(aiForm.provider) || null
@@ -440,8 +405,19 @@ function handlePresetSelect(preset: JobPreset | null) {
     jobForm.experienceYears = merged.experienceYears
     jobForm.educationLevel = merged.educationLevel
     jobForm.jobDescription = merged.jobDescription || merged.description || ''
-    jobForm.redLines = merged.redLines ? [...merged.redLines] : []
-    jobForm.bonusPoints = merged.bonusPoints ? [...merged.bonusPoints] : []
+    jobForm.interviewQuestions = merged.interviewQuestions ? [...merged.interviewQuestions] : []
+    if (merged.redLines?.length) {
+      for (const r of merged.redLines) {
+        if (!jobForm.interviewQuestions.includes(r)) jobForm.interviewQuestions.push(r)
+      }
+    }
+    if (merged.bonusPoints?.length) {
+      for (const b of merged.bonusPoints) {
+        if (!jobForm.interviewQuestions.includes(b)) jobForm.interviewQuestions.push(b)
+      }
+    }
+    jobForm.redLines = []
+    jobForm.bonusPoints = []
     jobForm.coreCriteria = merged.coreCriteria ? [...merged.coreCriteria] : [...merged.requiredSkills]
   } else {
     selectedPresetId.value = 'custom'
@@ -463,8 +439,7 @@ function saveAsCustomPreset() {
     educationLevel: jobForm.educationLevel,
     jobDescription: jobForm.jobDescription,
     description: jobForm.jobDescription ? jobForm.jobDescription.slice(0, 60) + '...' : '',
-    redLines: [...(jobForm.redLines || [])],
-    bonusPoints: [...(jobForm.bonusPoints || [])],
+    interviewQuestions: [...(jobForm.interviewQuestions || [])],
     coreCriteria: [...jobForm.coreCriteria],
     isCustom: true
   }
@@ -510,8 +485,8 @@ async function saveSettings() {
       experienceYears: jobForm.experienceYears,
       educationLevel: jobForm.educationLevel,
       jobDescription: jobForm.jobDescription,
-      redLines: [...(jobForm.redLines || [])],
-      bonusPoints: [...(jobForm.bonusPoints || [])],
+      interviewQuestions: [...(jobForm.interviewQuestions || [])],
+      interview_questions: [...(jobForm.interviewQuestions || [])],
       coreCriteria: [...jobForm.coreCriteria]
     },
     analysis: { maxConcurrent: analysisForm.maxConcurrent, autoStart: analysisForm.autoStart }
@@ -528,14 +503,14 @@ async function saveSettings() {
         experienceYears: jobForm.experienceYears,
         educationLevel: jobForm.educationLevel,
         jobDescription: jobForm.jobDescription,
-        redLines: [...(jobForm.redLines || [])],
-        bonusPoints: [...(jobForm.bonusPoints || [])],
+        interviewQuestions: [...(jobForm.interviewQuestions || [])],
+        interview_questions: [...(jobForm.interviewQuestions || [])],
         coreCriteria: [...jobForm.coreCriteria]
       })
       if (jobForm.title && jobForm.title !== currentKey) {
         savePresetCustomization(jobForm.title, {
-          redLines: [...(jobForm.redLines || [])],
-          bonusPoints: [...(jobForm.bonusPoints || [])]
+          interviewQuestions: [...(jobForm.interviewQuestions || [])],
+          interview_questions: [...(jobForm.interviewQuestions || [])]
         })
       }
     }
@@ -582,6 +557,7 @@ function resetSettings() {
   jobForm.experienceYears = 5
   jobForm.educationLevel = '本科'
   jobForm.jobDescription = ''
+  jobForm.interviewQuestions = []
   jobForm.redLines = []
   jobForm.bonusPoints = []
   jobForm.coreCriteria = []
@@ -676,8 +652,19 @@ onMounted(async () => {
         jobForm.experienceYears = s.job.experienceYears ?? jobForm.experienceYears
         jobForm.educationLevel = s.job.educationLevel || jobForm.educationLevel
         jobForm.jobDescription = s.job.jobDescription || jobForm.jobDescription
-        jobForm.redLines = s.job.redLines || []
-        jobForm.bonusPoints = s.job.bonusPoints || []
+        jobForm.interviewQuestions = s.job.interviewQuestions || s.job.interview_questions || []
+        if (s.job.redLines?.length) {
+          for (const r of s.job.redLines) {
+            if (!jobForm.interviewQuestions.includes(r)) jobForm.interviewQuestions.push(r)
+          }
+        }
+        if (s.job.bonusPoints?.length) {
+          for (const b of s.job.bonusPoints) {
+            if (!jobForm.interviewQuestions.includes(b)) jobForm.interviewQuestions.push(b)
+          }
+        }
+        jobForm.redLines = []
+        jobForm.bonusPoints = []
         jobForm.coreCriteria = s.job.coreCriteria || []
       }
       if (s.analysis) {

@@ -20,6 +20,7 @@ export interface Project {
     city?: string
     employment_type?: string
     salary_range?: string
+    interview_questions?: string[]
     red_lines?: string[]
     bonus_points?: string[]
     core_criteria?: string[]

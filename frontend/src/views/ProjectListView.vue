@@ -38,15 +38,11 @@
               </el-tooltip>
             </div>
 
-            <!-- 红线与加分微徽章（若有） -->
-            <div class="criteria-badges" v-if="(currentJobConfig.redLines || []).length || (currentJobConfig.bonusPoints || []).length">
-              <span v-if="(currentJobConfig.redLines || []).length" class="badge-item danger" :title="(currentJobConfig.redLines || []).join('\n')">
+            <!-- 初试重点微徽章（若有） -->
+            <div class="criteria-badges" v-if="(currentJobConfig.interviewQuestions || []).length">
+              <span class="badge-item primary" :title="(currentJobConfig.interviewQuestions || []).join('\n')">
                 <span class="badge-dot"></span>
-                {{ (currentJobConfig.redLines || []).length }}条红线
-              </span>
-              <span v-if="(currentJobConfig.bonusPoints || []).length" class="badge-item warning" :title="(currentJobConfig.bonusPoints || []).join('\n')">
-                <span class="badge-dot"></span>
-                {{ (currentJobConfig.bonusPoints || []).length }}项加分
+                {{ (currentJobConfig.interviewQuestions || []).length }}项初试重点
               </span>
             </div>
           </div>
@@ -174,40 +170,22 @@
               />
             </div>
 
-            <!-- 🚫 一票否决红线 -->
+            <!-- 🎯 初试重点核查题纲 -->
             <div class="expand-full" style="margin-top: 14px;">
-              <label class="expand-label text-danger" style="margin-bottom: 8px; display: block;">
-                🚫 岗位必备条件（HR 核实后确认准入）
+              <label class="expand-label text-primary" style="margin-bottom: 8px; display: block; font-weight: 600;">
+                🎯 初试重点核查问题（进入初试环节时自动组装提问，重点核查关键经历与实战亮点）
               </label>
               <TagInput
-                v-model="currentJobConfig.redLines"
-                tag-type="danger"
-                placeholder="输入与岗位职责直接相关、可核验的必备条件"
+                v-model="currentJobConfig.interviewQuestions"
+                tag-type="primary"
+                placeholder="输入初试重点核查问题，按回车添加..."
                 quick-title="快捷填入:"
-                :preset-list="commonRedLines"
-                storage-key="talentlens_custom_redlines"
-                add-prompt-title="新增一票否决红线快捷项"
+                :preset-list="commonInterviewQuestions"
+                storage-key="talentlens_custom_interview_questions"
+                add-prompt-title="新增初试重点核查快捷项"
                 @change="saveJobConfigToStorage"
               />
-              <p class="save-hint">建议仅保留 1–3 条，并与用人经理确认业务理由和等价经历；AI 只给核实线索，不自动淘汰。</p>
-            </div>
-
-            <!-- ⭐ 核心优先加分项 -->
-            <div class="expand-full" style="margin-top: 14px;">
-              <label class="expand-label text-warning" style="margin-bottom: 8px; display: block;">
-                ⭐ 优先加分项（HR 确认后仅用于同档排序）
-              </label>
-              <TagInput
-                v-model="currentJobConfig.bonusPoints"
-                tag-type="warning"
-                placeholder="输入有事实依据的额外项目经验、成果或认证"
-                quick-title="快捷填入:"
-                :preset-list="commonBonusPoints"
-                storage-key="talentlens_custom_bonuses"
-                add-prompt-title="新增优先加分项快捷项"
-                @change="saveJobConfigToStorage"
-              />
-              <p class="save-hint">AI 线索标为待确认；未填写人工核实依据前，不计入已确认优势。</p>
+              <p class="save-hint">进入初试环节时，系统将结合此题纲自动向候选人提问并溯源取证。</p>
             </div>
 
             <div class="expand-full" style="margin-top: 14px;">
@@ -488,8 +466,9 @@ const currentJobConfig = reactive({
   experienceYears: 3,
   educationLevel: '本科',
   jobDescription: '岗位职责：\n1. 制定项目管理计划，按计划完成所负责的项目启动、开展及结束工作，确保通过药监部门核查；\n2. 根据项目研发资料、指导原则、行业标准等要求，设计临床试验方案；\n3. 对所负责的临床试验项目进行全面的质量控制与管理，确保所有试验严格按照临床试验方案、标准操作程序和相关法规进行；\n4. 根据临床试验相关规范要求，完成临床研究的各阶段报批文件包括但不限于临床报告；\n5. 作为公司对外代表，建立并保持与机构的良好关系。\n\n任职要求：\n1. 生物学、检验学、医学或药学等相关专业背景，本科及以上学历；\n2. 高度责任心和抗压能力，可适应出差；\n3. 优秀的沟通表达能力、发现和解决问题的能力。',
-  redLines: ['具备临床试验项目落地经验，并能说明本人负责的关键环节'] as string[],
-  bonusPoints: ['有可核验的多中心临床试验统筹成果', '具备与岗位相关的项目管理认证'] as string[],
+  interviewQuestions: ['具备临床试验项目落地经验，并能说明本人负责的关键环节', '有可核验的多中心临床试验统筹成果', '具备与岗位相关的项目管理认证'] as string[],
+  redLines: [] as string[],
+  bonusPoints: [] as string[],
   coreCriteria: [] as string[]
 })
 
@@ -511,36 +490,12 @@ const commonSkillsList = [
   'Go', 'Python', 'Java', 'JavaScript', 'TypeScript', 'React', 'Vue', 'MySQL', 'Redis'
 ]
 
-const commonRedLines = [
-  '能说明岗位核心项目中本人负责的具体工作',
-  '具备岗位要求的有效执业或上岗资格（如适用）',
-  '能提供核心必备技能的实际应用案例'
+const commonInterviewQuestions = [
+  '请详细介绍候选人在核心项目中的具体职责与独立产出',
+  '核实面对复杂业务难题时的排查定位与解决复盘',
+  '请举例说明在核心技能或架构重构中的实际应用成果',
+  '针对关键任职要求与实战经历进行证据溯源'
 ]
-
-const commonBonusPoints = [
-  '有与岗位相关、可量化的项目改善成果',
-  '具备跨团队协作与带教的具体案例',
-  '持有与岗位直接相关的专业认证',
-  '有可核验的开源贡献或技术成果'
-]
-
-function addQuickRedLine(line: string) {
-  if (!currentJobConfig.redLines) currentJobConfig.redLines = []
-  if (!currentJobConfig.redLines.includes(line)) {
-    currentJobConfig.redLines.push(line)
-    saveJobConfigToStorage(false)
-    ElMessage.success(`已添加红线：${line}`)
-  }
-}
-
-function addQuickBonus(bonus: string) {
-  if (!currentJobConfig.bonusPoints) currentJobConfig.bonusPoints = []
-  if (!currentJobConfig.bonusPoints.includes(bonus)) {
-    currentJobConfig.bonusPoints.push(bonus)
-    saveJobConfigToStorage(false)
-    ElMessage.success(`已添加加分项：${bonus}`)
-  }
-}
 
 // 新建项目表单（包含业务描述字段）
 const newProject = reactive({
@@ -563,8 +518,19 @@ function loadJobConfigFromStorage() {
         currentJobConfig.experienceYears = s.job.experienceYears ?? currentJobConfig.experienceYears
         currentJobConfig.educationLevel = s.job.educationLevel || currentJobConfig.educationLevel
         currentJobConfig.jobDescription = s.job.jobDescription || currentJobConfig.jobDescription
-        currentJobConfig.redLines = s.job.redLines || currentJobConfig.redLines || []
-        currentJobConfig.bonusPoints = s.job.bonusPoints || currentJobConfig.bonusPoints || []
+        currentJobConfig.interviewQuestions = s.job.interviewQuestions || s.job.interview_questions || currentJobConfig.interviewQuestions || []
+        if (s.job.redLines?.length) {
+          for (const r of s.job.redLines) {
+            if (!currentJobConfig.interviewQuestions.includes(r)) currentJobConfig.interviewQuestions.push(r)
+          }
+        }
+        if (s.job.bonusPoints?.length) {
+          for (const b of s.job.bonusPoints) {
+            if (!currentJobConfig.interviewQuestions.includes(b)) currentJobConfig.interviewQuestions.push(b)
+          }
+        }
+        currentJobConfig.redLines = []
+        currentJobConfig.bonusPoints = []
         currentJobConfig.coreCriteria = s.job.coreCriteria || []
       }
     } catch {}
@@ -585,8 +551,8 @@ function saveJobConfigToStorage(showMessage = false) {
       experienceYears: currentJobConfig.experienceYears,
       educationLevel: currentJobConfig.educationLevel,
       jobDescription: currentJobConfig.jobDescription,
-      redLines: [...(currentJobConfig.redLines || [])],
-      bonusPoints: [...(currentJobConfig.bonusPoints || [])],
+      interviewQuestions: [...(currentJobConfig.interviewQuestions || [])],
+      interview_questions: [...(currentJobConfig.interviewQuestions || [])],
       coreCriteria: [...currentJobConfig.coreCriteria]
     }
     localStorage.setItem('goresume_settings', JSON.stringify(s))
@@ -600,20 +566,20 @@ function saveJobConfigToStorage(showMessage = false) {
         experienceYears: currentJobConfig.experienceYears,
         educationLevel: currentJobConfig.educationLevel,
         jobDescription: currentJobConfig.jobDescription,
-        redLines: [...(currentJobConfig.redLines || [])],
-        bonusPoints: [...(currentJobConfig.bonusPoints || [])],
+        interviewQuestions: [...(currentJobConfig.interviewQuestions || [])],
+        interview_questions: [...(currentJobConfig.interviewQuestions || [])],
         coreCriteria: [...currentJobConfig.coreCriteria]
       })
       if (currentJobConfig.title && currentJobConfig.title !== currentKey) {
         savePresetCustomization(currentJobConfig.title, {
-          redLines: [...(currentJobConfig.redLines || [])],
-          bonusPoints: [...(currentJobConfig.bonusPoints || [])]
+          interviewQuestions: [...(currentJobConfig.interviewQuestions || [])],
+          interview_questions: [...(currentJobConfig.interviewQuestions || [])]
         })
       }
     }
 
     if (showMessage) {
-      ElMessage.success('岗位配置与红线机制已保存并在新建项目中生效')
+      ElMessage.success('岗位配置与初试题纲已保存并在新建项目中生效')
     }
   } catch (e) {
     if (showMessage) {
@@ -626,15 +592,26 @@ function saveJobConfigToStorage(showMessage = false) {
 function handlePresetSelect(preset: JobPreset | null) {
   if (preset) {
     selectedPresetId.value = preset.id
-    // 自动融入用户已为该模板保存的个性化配置（包含红线与加分项！）
+    // 自动融入用户已为该模板保存的个性化配置（包含初试问题等）
     const merged = getMergedPreset(preset)
     currentJobConfig.title = merged.name
     currentJobConfig.requiredSkills = [...merged.requiredSkills]
     currentJobConfig.experienceYears = merged.experienceYears
     currentJobConfig.educationLevel = merged.educationLevel
     currentJobConfig.jobDescription = merged.jobDescription || merged.description || ''
-    currentJobConfig.redLines = merged.redLines ? [...merged.redLines] : []
-    currentJobConfig.bonusPoints = merged.bonusPoints ? [...merged.bonusPoints] : []
+    currentJobConfig.interviewQuestions = merged.interviewQuestions ? [...merged.interviewQuestions] : []
+    if (merged.redLines?.length) {
+      for (const r of merged.redLines) {
+        if (!currentJobConfig.interviewQuestions.includes(r)) currentJobConfig.interviewQuestions.push(r)
+      }
+    }
+    if (merged.bonusPoints?.length) {
+      for (const b of merged.bonusPoints) {
+        if (!currentJobConfig.interviewQuestions.includes(b)) currentJobConfig.interviewQuestions.push(b)
+      }
+    }
+    currentJobConfig.redLines = []
+    currentJobConfig.bonusPoints = []
     currentJobConfig.coreCriteria = merged.coreCriteria ? [...merged.coreCriteria] : [...merged.requiredSkills]
 
     // 同步到当前的全局设置，但保留各模板已存储的定制数据
@@ -661,8 +638,7 @@ function saveCurrentAsNewTemplate() {
     educationLevel: currentJobConfig.educationLevel,
     jobDescription: currentJobConfig.jobDescription,
     description: currentJobConfig.jobDescription ? currentJobConfig.jobDescription.slice(0, 60) + '...' : '',
-    redLines: [...(currentJobConfig.redLines || [])],
-    bonusPoints: [...(currentJobConfig.bonusPoints || [])],
+    interviewQuestions: [...(currentJobConfig.interviewQuestions || [])],
     coreCriteria: [...currentJobConfig.coreCriteria],
     isCustom: true
   }
@@ -722,8 +698,7 @@ async function handleCreate() {
     experience_text: currentJobConfig.experienceYears === 0 ? '经验不限' : `${currentJobConfig.experienceYears} 年以上`,
     education_level: currentJobConfig.educationLevel,
     job_description: currentJobConfig.jobDescription,
-    red_lines: [...(currentJobConfig.redLines || [])],
-    bonus_points: [...(currentJobConfig.bonusPoints || [])],
+    interview_questions: [...(currentJobConfig.interviewQuestions || [])],
     core_criteria: [...currentJobConfig.coreCriteria]
   }
   const result = await projectStore.createProject(
@@ -756,8 +731,10 @@ function applyAiJobConfig(jobData: JobApplyData) {
   if (jobData.education_level) currentJobConfig.educationLevel = jobData.education_level
   if (jobData.job_description) currentJobConfig.jobDescription = jobData.job_description
   if (jobData.required_skills?.length) currentJobConfig.requiredSkills = [...jobData.required_skills]
-  if (jobData.red_lines?.length) currentJobConfig.redLines = [...jobData.red_lines]
-  if (jobData.bonus_points?.length) currentJobConfig.bonusPoints = [...jobData.bonus_points]
+  if (jobData.interview_questions?.length) currentJobConfig.interviewQuestions = [...jobData.interview_questions]
+  else if (jobData.red_lines?.length || jobData.bonus_points?.length) {
+    currentJobConfig.interviewQuestions = [...(jobData.red_lines || []), ...(jobData.bonus_points || [])]
+  }
 
   newProject.name = `${currentJobConfig.title} - ${new Date().toLocaleDateString('zh-CN')}招聘`
   if (jobData.department) newProject.department = jobData.department

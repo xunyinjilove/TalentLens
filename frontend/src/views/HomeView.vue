@@ -237,9 +237,6 @@
                       <span class="hero-rec-badge" :class="resumeStore.selectedResume.analysis.recommendation">
                         {{ $t(`analysis.recommendations.${resumeStore.selectedResume.analysis.recommendation || 'consider'}`) }}
                       </span>
-                      <span class="hero-redline-status" :class="resumeStore.selectedResume.analysis.redLineStatus || 'none'">
-                        红线: {{ !resumeStore.selectedResume.analysis.redLineChecks?.length ? '尚未配置' : resumeStore.selectedResume.analysis.redLineStatus === 'failed' ? '不满足' : resumeStore.selectedResume.analysis.redLineStatus === 'pending' ? '待 HR 核实' : '已满足' }}
-                      </span>
                     </div>
                   </div>
                 </div>
@@ -314,10 +311,7 @@
                   @click="detailSubTab = 'summary'"
                 >
                   <el-icon><Finished /></el-icon>
-                  <span>综合结论与红线</span>
-                  <span v-if="unverifiedRedLineCount > 0" class="subtab-badge alert" title="有待HR核实的红线项">
-                    {{ unverifiedRedLineCount }} 项待核
-                  </span>
+                  <span>综合评估结论</span>
                 </button>
 
                 <button
@@ -390,62 +384,6 @@
                       title="学历背景对口"
                       subtitle="院校与专业资质"
                     />
-                  </div>
-
-                  <!-- 岗位红线逐项核验卡 -->
-                  <div class="redline-alert-card">
-                    <div class="redline-alert-header">
-                      <div class="redline-title-group">
-                        <div class="redline-badge-icon">
-                          <el-icon><CircleClose /></el-icon>
-                        </div>
-                        <div class="redline-title-text">
-                           <span class="redline-title">岗位红线逐项核验：{{ !resumeStore.selectedResume.analysis.redLineChecks?.length ? '尚未配置' : resumeStore.selectedResume.analysis.redLineStatus === 'failed' ? '不满足' : resumeStore.selectedResume.analysis.redLineStatus === 'pending' ? '待核实' : '满足' }}</span>
-                           <span class="redline-sub">AI 线索不能直接淘汰；HR 确认不满足时不推荐，能力原始分仍保留。</span>
-                        </div>
-                      </div>
-                      <el-button size="small" @click="handleAddProjectReviewCriterion('redline')">添加项目红线</el-button>
-                    </div>
-                    <p v-if="!resumeStore.selectedResume.analysis.redLineChecks?.length" class="empty-review-help">本项目尚未设置红线。添加后，该项目的候选人会先标记为待 HR 核实。</p>
-                    <ul class="redline-violations-list">
-                       <li v-for="(check, vIdx) in resumeStore.selectedResume.analysis.redLineChecks" :key="vIdx" class="redline-violation-item">
-                        <span class="redline-stamp-badge" :class="check.status || 'unknown'">
-                          {{ check.status === 'met' ? '✓ 合规满足' : check.status === 'violated' ? '✕ 触碰红线' : '？ 待HR核验' }}
-                        </span>
-                        <span class="redline-item-desc">{{ check.criterion }}{{ check.suggested_status && check.status === 'unknown' ? `（AI提示：${check.suggested_status === 'met' ? '可能满足' : '可能不满足'}）` : '' }}{{ check.evidence ? `（原文线索：${check.evidence}）` : '（暂无可核对原文）' }}</span>
-                        <div class="redline-btn-actions">
-                          <el-button size="small" text type="success" @click="handleReviewRedLine(check.criterion, 'met')">确认满足</el-button>
-                          <el-button size="small" text type="danger" @click="handleReviewRedLine(check.criterion, 'violated')">确认不满足</el-button>
-                          <el-button size="small" text @click="handleReviewRedLine(check.criterion, 'unknown')">待核实</el-button>
-                        </div>
-                      </li>
-                    </ul>
-                  </div>
-
-                  <!-- ⭐ 优先加分项卡 -->
-                  <div class="bonus-match-card">
-                    <div class="bonus-header">
-                      <div class="bonus-title-group">
-                        <div class="bonus-badge-icon">
-                          <el-icon><Check /></el-icon>
-                        </div>
-                        <div class="bonus-title-text">
-                          <span class="bonus-title">⭐ 优先加分项：{{ !resumeStore.selectedResume.analysis.bonusChecks?.length ? '尚未配置' : `${resumeStore.selectedResume.analysis.confirmedBonusCount || 0} 项已确认` }}</span>
-                          <span class="bonus-sub">待确认项不计入排序；已确认项只在同一能力档内比较，不改变能力分。</span>
-                        </div>
-                      </div>
-                      <el-button size="small" @click="handleAddProjectReviewCriterion('bonus')">添加项目加分项</el-button>
-                    </div>
-                    <p v-if="!resumeStore.selectedResume.analysis.bonusChecks?.length" class="empty-review-help">本项目尚未设置加分项。添加后，由 HR 逐人选择待确认、确认满足或确认不满足。</p>
-                    <ul class="bonus-matches-list">
-                      <li v-for="(bonus, bIdx) in resumeStore.selectedResume.analysis.bonusChecks" :key="bIdx" class="bonus-match-item">
-                        <el-icon><Check /></el-icon>
-                        <span>{{ bonus.status === 'met' ? 'HR 已确认' : bonus.status === 'violated' ? 'HR 确认不满足' : '待 HR 确认' }} · {{ bonus.criterion }}{{ bonus.suggested_status && bonus.status === 'unknown' ? `（AI 线索：${bonus.suggested_status === 'met' ? '可能满足' : '可能不满足'}）` : '' }}{{ bonus.evidence ? `（依据：${bonus.evidence}）` : '' }}</span>
-                        <el-button size="small" text type="success" @click="handleReviewBonus(bonus.criterion, 'met')">确认满足</el-button>
-                        <el-button size="small" text type="danger" @click="handleReviewBonus(bonus.criterion, 'violated')">确认不满足</el-button>
-                        <el-button size="small" text @click="handleReviewBonus(bonus.criterion, 'unknown')">待确认</el-button>
-                      </li>
-                    </ul>
                   </div>
 
                   <!-- 核心优势与不足并列卡片 -->

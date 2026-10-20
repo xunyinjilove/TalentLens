@@ -2,25 +2,15 @@ package main
 
 import "testing"
 
-func TestBonusRequiresHRConfirmationAndNeverRaisesAbilityScore(t *testing.T) {
+func TestJobDecisionDoesNotDependOnBonusOrRedLine(t *testing.T) {
 	a := NewApp()
 	a.dataDirOverride = t.TempDir()
-	job := &JobConfig{RequiredSkills: []string{"测试用例设计"}, BonusPoints: []string{"性能测试项目"}}
-	result := &AnalysisResult{CoreMatch: 80, BonusMatch: 100, BonusMatches: []string{"性能测试项目"}}
-	resume := &Resume{ID: "bonus_review", Content: "负责性能测试项目"}
+	job := &JobConfig{RequiredSkills: []string{"测试用例设计"}}
+	result := &AnalysisResult{CoreMatch: 80}
+	resume := &Resume{ID: "bonus_review", Content: "负责测试用例设计"}
 	a.applyJobDecision(result, job, resume)
-	if result.OverallScore != 80 || len(result.BonusChecks) != 1 || result.BonusChecks[0].Status != "unknown" {
-		t.Fatalf("bonus must remain pending without raising ability score: %+v", result)
-	}
-	resume.Analysis = result
-	resume.Score = 80
-	a.saveResume(resume)
-	if _, err := a.SetReviewedBonus(resume.ID, "性能测试项目", "met", ""); err == nil {
-		t.Fatal("confirmed bonus needs HR evidence")
-	}
-	confirmed, err := a.SetReviewedBonus(resume.ID, "性能测试项目", "met", "候选人在初面中说明性能测试职责")
-	if err != nil || confirmed.Analysis.ConfirmedBonusCount != 1 || confirmed.Score != 80 {
-		t.Fatalf("bonus review must be saved without changing ability score: %+v %v", confirmed, err)
+	if result.OverallScore != 80 {
+		t.Fatalf("ability score must be 80: %+v", result)
 	}
 }
 
@@ -68,41 +58,14 @@ func TestMissingRubricRowsUseDisclosedProvisionalEstimate(t *testing.T) {
 	}
 }
 
-func TestLegacyAIVerdictsBecomePendingUntilHRReviews(t *testing.T) {
-	a := NewApp()
-	a.dataDirOverride = t.TempDir()
-	project := a.CreateProject("测试工程师", "研发", 1, "HR", "", &JobConfig{
-		RedLines: []string{"有自动化测试经验"}, BonusPoints: []string{"性能测试经验"},
-	})
-	resume := &Resume{ID: "legacy_review", ProjectID: project.ID, Content: "参与自动化测试", Analysis: &AnalysisResult{
-		CoreMatch: 80, RedLineStatus: "passed", RedLineChecks: []RedLineCheck{{Criterion: "有自动化测试经验", Status: "met", Evidence: "参与自动化测试"}},
-		BonusChecks: []BonusCheck{{Criterion: "性能测试经验", Status: "met", Evidence: "参与自动化测试"}}, ConfirmedBonusCount: 1,
-	}}
-	a.saveResume(resume)
-	project.ResumeIDs = append(project.ResumeIDs, resume.ID)
-	a.saveProject(project)
-	loaded := a.GetProjectResumes(project.ID)
-	if len(loaded) != 1 || loaded[0].Analysis.RedLineStatus != "pending" || loaded[0].Analysis.BonusChecks[0].Status != "unknown" || loaded[0].Analysis.ConfirmedBonusCount != 0 {
-		t.Fatalf("old AI-only verdicts must be pending: %+v", loaded)
-	}
-	confirmed, err := a.SetReviewedRedLine(resume.ID, "有自动化测试经验", "met", "参与自动化测试")
-	if err != nil || confirmed.Analysis.RedLineStatus != "passed" {
-		t.Fatalf("HR should be able to review migrated redline: %+v %v", confirmed, err)
-	}
-	again := a.GetProjectResumes(project.ID)
-	if again[0].Analysis.BonusChecks[0].Status != "unknown" || again[0].Analysis.BonusChecks[0].SuggestedStatus != "met" {
-		t.Fatalf("unreviewed AI bonus hint should remain visible but pending: %+v", again[0].Analysis.BonusChecks)
-	}
-}
-
-func TestRankingUsesAbilityBandThenConfirmedBonus(t *testing.T) {
-	passed := &Resume{ID: "passed", Score: 83, Analysis: &AnalysisResult{AbilityScore: 83, RedLineStatus: "passed", ConfirmedBonusCount: 1}}
-	pending := &Resume{ID: "pending", Score: 95, Analysis: &AnalysisResult{AbilityScore: 95, RedLineStatus: "pending"}}
-	failed := &Resume{ID: "failed", Score: 99, Analysis: &AnalysisResult{AbilityScore: 99, RedLineStatus: "failed"}}
-	moreBonus := &Resume{ID: "more", Score: 81, Analysis: &AnalysisResult{AbilityScore: 81, RedLineStatus: "passed", ConfirmedBonusCount: 2}}
-	resumes := []*Resume{failed, pending, passed, moreBonus}
+func TestRankingUsesAbilityScore(t *testing.T) {
+	r1 := &Resume{ID: "r1", Score: 83, Analysis: &AnalysisResult{AbilityScore: 83}}
+	r2 := &Resume{ID: "r2", Score: 95, Analysis: &AnalysisResult{AbilityScore: 95}}
+	r3 := &Resume{ID: "r3", Score: 99, Analysis: &AnalysisResult{AbilityScore: 99}}
+	r4 := &Resume{ID: "r4", Score: 81, Analysis: &AnalysisResult{AbilityScore: 81}}
+	resumes := []*Resume{r1, r2, r3, r4}
 	sortResumesByDecision(resumes)
-	want := []string{"failed", "pending", "more", "passed"}
+	want := []string{"r3", "r2", "r1", "r4"}
 	for i, item := range resumes {
 		if item.ID != want[i] {
 			t.Fatalf("rank %d = %s, want %s", i, item.ID, want[i])
@@ -110,20 +73,13 @@ func TestRankingUsesAbilityBandThenConfirmedBonus(t *testing.T) {
 	}
 }
 
-func TestInterviewScoreExcludesRedLineQuestions(t *testing.T) {
+func TestInterviewScoreWeightsStandardAndFocusQuestions(t *testing.T) {
 	session := &InterviewSession{Turns: []InterviewTurn{
-		{Score: 90, Evaluated: true}, {Score: 10, Evaluated: true, RuleID: "redline"},
-	}}
-	if scoreInterviewAbility(session) != 90 {
-		t.Fatalf("redline question affected competency score: %+v", session)
-	}
-	session = &InterviewSession{Turns: []InterviewTurn{
 		{Score: 100, Evaluated: true, Standard: true},
-		{Score: 50, Evaluated: true},
-		{Score: 0, Evaluated: true, RuleID: "redline"},
+		{Score: 60, Evaluated: true},
 	}}
 	if scoreInterviewAbility(session) != 80 {
-		t.Fatalf("standard and adaptive questions should use 60/40 weighting: %+v", session)
+		t.Fatalf("standard and focus questions should average to 80: %+v", session)
 	}
 }
 

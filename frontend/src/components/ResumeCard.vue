@@ -24,15 +24,6 @@
         <span v-if="(resume as any).is_merged_analysis || (resume as any).has_attachment" class="merged-badge" title="已完成微简历与完整附件结合终审">
           已合并终审
         </span>
-        <span v-if="resume.analysis?.redLineViolations && resume.analysis.redLineViolations.length > 0" class="redline-pill" title="AI 发现红线线索，请由 HR 核实">
-          红线线索待核实
-        </span>
-        <span v-else-if="resume.analysis?.redLineStatus === 'pending'" class="redline-pill" title="红线材料不足，需人工核实">
-          红线待核实
-        </span>
-        <span v-else-if="resume.analysis?.bonusMatches && resume.analysis.bonusMatches.length > 0" class="bonus-pill" title="命中用人部门优先加分项">
-          加分达成
-        </span>
         <span v-if="(resume as any).source_keyword" class="source-kw-badge" :title="'派生检索词: ' + (resume as any).source_keyword">
           {{ (resume as any).source_keyword }}
         </span>
@@ -209,9 +200,6 @@ const sourceText = computed(() => {
 
 const showTags = computed(() => Boolean(
   props.resume.is_merged_analysis || props.resume.has_attachment ||
-  props.resume.analysis?.redLineViolations?.length ||
-  props.resume.analysis?.redLineStatus === 'pending' ||
-  props.resume.analysis?.bonusMatches?.length ||
   props.resume.source_keyword
 ))
 

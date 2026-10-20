@@ -18,6 +18,7 @@ export interface JobApplyData {
   education_level?: string
   job_description?: string
   required_skills?: string[]
+  interview_questions?: string[]
   red_lines?: string[]
   bonus_points?: string[]
 }

@@ -344,14 +344,6 @@
               <span class="wb-pill" :class="statusClass(item.analysisStatus)">
                 {{ statusLabel(item.analysisStatus) }}
               </span>
-              <span class="wb-pill" :class="redLineClass(item.redLineStatus)">
-                <el-icon style="margin-right: 2px;">
-                  <CircleCheck v-if="item.redLineStatus === 'passed'" />
-                  <CircleClose v-else-if="item.redLineStatus === 'failed'" />
-                  <Warning v-else />
-                </el-icon>
-                红线：{{ redLineLabel(item.redLineStatus) }}
-              </span>
               <span class="wb-pill stage-pill">{{ stageLabels[item.stage] || item.stage }}</span>
             </div>
 
@@ -448,14 +440,6 @@
                   {{ row.abilityScore || row.matchScore }} 分
                 </span>
                 <span v-else class="score-badge pending">待评</span>
-              </template>
-            </el-table-column>
-
-            <el-table-column label="红线状态" width="110" align="center">
-              <template #default="{ row }">
-                <span class="wb-pill" :class="redLineClass(row.redLineStatus)" style="font-size: 11px;">
-                  {{ redLineLabel(row.redLineStatus) }}
-                </span>
               </template>
             </el-table-column>
 
@@ -1099,7 +1083,7 @@ const filtered = computed(() => recruitment.candidates.filter(item =>
   const score = sortOrder.value === 'score_desc'
     ? scoreB - scoreA
     : scoreA - scoreB
-  return score || b.confirmedBonus - a.confirmedBonus || recent || a.projectCandidateId.localeCompare(b.projectCandidateId)
+  return score || recent || a.projectCandidateId.localeCompare(b.projectCandidateId)
 }))
 
 watch(() => route.query.project, value => {

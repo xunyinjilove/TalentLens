@@ -626,9 +626,6 @@ func (a *App) ConfirmOutreachBatch(batchID string, approvals []OutreachApproval)
 			if active == 0 {
 				return batch, fmt.Errorf("候选人 %s 已从人才库删除，请重新生成预览", item.CandidateName)
 			}
-			if item.RedLineStatus == "pending" && !approval.ConfirmPending {
-				return batch, fmt.Errorf("候选人 %s 的红线待核实，发送前须单独勾选", item.CandidateName)
-			}
 			if strings.TrimSpace(approval.Message) == "" {
 				return batch, fmt.Errorf("候选人 %s 的招呼语为空", item.CandidateName)
 			}

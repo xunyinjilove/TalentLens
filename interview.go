@@ -114,7 +114,7 @@ func (a *App) StartInterview(resumeID string) (*InterviewSession, error) {
 	if resume.Analysis == nil {
 		return nil, fmt.Errorf("请先完成简历初筛，以生成初面题目")
 	}
-	turns := make([]InterviewTurn, 0, len(resume.Analysis.InterviewQA)+len(resume.Analysis.RedLineChecks)+len(resume.Analysis.BonusChecks)+4)
+	turns := make([]InterviewTurn, 0, len(resume.Analysis.InterviewQA)+8)
 	project := a.GetProject(resume.ProjectID)
 	if project != nil {
 		turns = append(turns,
@@ -127,31 +127,61 @@ func (a *App) StartInterview(resumeID string) (*InterviewSession, error) {
 			turns = append(turns, InterviewTurn{Category: question.Category, Question: question.Question})
 		}
 	}
-	if len(resume.Analysis.InterviewQA) == 0 && project != nil {
-		metrics := getUnifiedJobMetrics(&project.JobConfig)
-		for i, m := range metrics {
-			if i >= 3 {
-				break
+	// 1. 将有关岗位重点要求（包括原红线与加分项内容）直接纳入初试核查问题
+	seenCriterion := make(map[string]bool)
+	if project != nil {
+		for _, q := range project.JobConfig.GetInterviewQuestions() {
+			q = strings.TrimSpace(q)
+			if q != "" && !seenCriterion[q] {
+				seenCriterion[q] = true
+				turns = append(turns, InterviewTurn{
+					Category:  "初试重点核查",
+					Criterion: q,
+					Question:  fmt.Sprintf("针对岗位重点关注项【%s】，请详细说明您的实际经历、掌握程度与交付成果：", q),
+				})
 			}
-			turns = append(turns, InterviewTurn{Category: "核心能力核实", Question: fmt.Sprintf("请结合您最近的实战项目，说明您在【%s】方面的实际交付成果与独立承担范围？", m)})
 		}
 	}
 	for _, check := range resume.Analysis.RedLineChecks {
-		if check.Status == "unknown" {
+		criterion := strings.TrimSpace(check.Criterion)
+		if criterion != "" && !seenCriterion[criterion] {
+			seenCriterion[criterion] = true
 			ruleID := check.RuleID
 			if ruleID == "" {
-				ruleID = redLineRuleID(check.Criterion)
+				ruleID = redLineRuleID(criterion)
 			}
-			turns = append(turns, InterviewTurn{Category: "红线核实", RuleID: ruleID, Criterion: check.Criterion, Question: "请说明并举例证明您是否满足岗位必备要求：" + check.Criterion})
+			turns = append(turns, InterviewTurn{
+				Category:  "初试重点核查",
+				RuleID:    ruleID,
+				Criterion: criterion,
+				Question:  fmt.Sprintf("针对岗位重点要求【%s】，请说明并举例证明您的实际经历：", criterion),
+			})
 		}
 	}
 	for _, check := range resume.Analysis.BonusChecks {
-		if check.Status == "unknown" {
+		criterion := strings.TrimSpace(check.Criterion)
+		if criterion != "" && !seenCriterion[criterion] {
+			seenCriterion[criterion] = true
 			ruleID := check.RuleID
 			if ruleID == "" {
-				ruleID = redLineRuleID(check.Criterion)
+				ruleID = redLineRuleID(criterion)
 			}
-			turns = append(turns, InterviewTurn{Category: "加分核实", RuleID: ruleID, Criterion: check.Criterion, Question: "针对岗位优先加分项【" + check.Criterion + "】，请介绍您相关的实战经验或项目成果？"})
+			turns = append(turns, InterviewTurn{
+				Category:  "初试重点核查",
+				RuleID:    ruleID,
+				Criterion: criterion,
+				Question:  fmt.Sprintf("针对岗位关注的业务亮点【%s】，请介绍您相关的实战经验或成果：", criterion),
+			})
+		}
+	}
+	// 2. 核心能力实战核查（围绕岗位统一雷达指标）
+	if len(resume.Analysis.InterviewQA) == 0 && project != nil {
+		metrics := getUnifiedJobMetrics(&project.JobConfig)
+		for i, m := range metrics {
+			if i >= 3 || len(turns) >= 10 {
+				break
+			}
+			turns = append(turns, InterviewTurn{Category: "核心能力实战", Question: fmt.Sprintf("请结合您最近的实战项目，说明您在【%s】方面的实际交付成果与独立承担范围？", m)})
 		}
 	}
 	name := resume.FileName
@@ -347,14 +377,14 @@ func (a *App) CompleteInterview(resumeID string) (*InterviewSession, error) {
 	return session, a.saveInterview(session)
 }
 
-// scoreInterviewAbility 仅汇总能力题。红线题是资格核实，不属于能力评分。
+// scoreInterviewAbility 汇总初试题目得分
 func scoreInterviewAbility(session *InterviewSession) int {
 	if session == nil {
 		return 0
 	}
 	standardSum, standardCount, dynamicSum, dynamicCount := 0, 0, 0, 0
 	for _, turn := range session.Turns {
-		if turn.RuleID != "" || !turn.Evaluated {
+		if !turn.Evaluated {
 			continue
 		}
 		if turn.Standard {
@@ -374,10 +404,10 @@ func scoreInterviewAbility(session *InterviewSession) int {
 	if dynamicCount == 0 {
 		return int(math.Round(float64(standardSum) / float64(standardCount)))
 	}
-	return int(math.Round(float64(standardSum)/float64(standardCount)*0.6 + float64(dynamicSum)/float64(dynamicCount)*0.4))
+	return int(math.Round(float64(standardSum)/float64(standardCount)*0.5 + float64(dynamicSum)/float64(dynamicCount)*0.5))
 }
 
-// ReviewInterviewRedLine 将 HR 确认的初面原话关联到具体红线；AI 单题分不参与裁决。
+// ReviewInterviewRedLine 将 HR 确认的初面原话关联到具体红线（兼容历史核验）；AI 单题分不参与裁决。
 func (a *App) ReviewInterviewRedLine(resumeID string, ruleID string, status string, evidence string) (*Resume, error) {
 	session, err := a.GetInterview(resumeID)
 	if err != nil {

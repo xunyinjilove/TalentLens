@@ -36,7 +36,7 @@ import (
 )
 
 // 版本信息
-const AppVersion = "1.8.32"
+const AppVersion = "1.8.33"
 const analysisFormatRetryVersion = "model-json-repair-v1"
 const GitHubRepo = "xunyinjilove/TalentLens"
 
@@ -79,11 +79,44 @@ type JobConfig struct {
 	EmploymentType       string   `json:"employment_type,omitempty"`
 	SalaryRange          string   `json:"salary_range,omitempty"`
 	ExperienceText       string   `json:"experience_text,omitempty"`       // 原始自定义经验要求，输入什么就是什么
-	RedLines             []string `json:"red_lines,omitempty"`             // 一票否决红线 (Deal Breakers / 准入底线)
-	BonusPoints          []string `json:"bonus_points,omitempty"`          // 优先加分项 (Bonus Points / 优质优选)
+	InterviewQuestions   []string `json:"interview_questions,omitempty"`   // 初试重点核查题纲与重点问题
+	RedLines             []string `json:"red_lines,omitempty"`             // 兼容旧项目；已并入初试问题
+	BonusPoints          []string `json:"bonus_points,omitempty"`          // 兼容旧项目；已并入初试问题
 	EquivalentExperience []string `json:"equivalent_experience,omitempty"` // 旧项目兼容读取；不再参与配置或评估
 	TrainableSkills      []string `json:"trainable_skills,omitempty"`      // 旧项目兼容读取；不再参与配置或评估
 	CoreCriteria         []string `json:"core_criteria,omitempty"`         // 岗位能力评分卡；为空时使用 RequiredSkills
+}
+
+// GetInterviewQuestions 获取初试重点核查题纲（自动兼容平滑继承历史保存的红线与加分项内容）
+func (j *JobConfig) GetInterviewQuestions() []string {
+	if j == nil {
+		return nil
+	}
+	var questions []string
+	seen := make(map[string]bool)
+	for _, q := range j.InterviewQuestions {
+		q = strings.TrimSpace(q)
+		if q != "" && !seen[q] {
+			seen[q] = true
+			questions = append(questions, q)
+		}
+	}
+	// 兼容迁移：旧项目中保存的红线与加分项自动作为初试重点核查问题
+	for _, rl := range j.RedLines {
+		rl = strings.TrimSpace(rl)
+		if rl != "" && !seen[rl] {
+			seen[rl] = true
+			questions = append(questions, rl)
+		}
+	}
+	for _, bp := range j.BonusPoints {
+		bp = strings.TrimSpace(bp)
+		if bp != "" && !seen[bp] {
+			seen[bp] = true
+			questions = append(questions, bp)
+		}
+	}
+	return questions
 }
 
 // GetExperienceRequirement 返回精准且原汁原味的经验要求文本
@@ -1542,19 +1575,6 @@ func sortResumesByDecision(resumes []*Resume) {
 	sort.SliceStable(resumes, func(i, j int) bool {
 		left, right := resumes[i], resumes[j]
 		leftScore, rightScore := ability(left), ability(right)
-		if leftScore/5 != rightScore/5 {
-			return leftScore/5 > rightScore/5
-		}
-		leftBonus, rightBonus := 0, 0
-		if left.Analysis != nil {
-			leftBonus = left.Analysis.ConfirmedBonusCount
-		}
-		if right.Analysis != nil {
-			rightBonus = right.Analysis.ConfirmedBonusCount
-		}
-		if leftBonus != rightBonus {
-			return leftBonus > rightBonus
-		}
 		if leftScore != rightScore {
 			return leftScore > rightScore
 		}
@@ -3345,13 +3365,10 @@ func (a *App) buildAnalysisPrompt(resume *Resume, jobCfg *JobConfig) string {
 	if strings.TrimSpace(jobCfg.JobDescription) != "" {
 		jobDescBlock = fmt.Sprintf("- 岗位职责与技能要求:\n```\n%s\n```\n", jobCfg.JobDescription)
 	}
-	redLinesBlock := ""
-	if len(jobCfg.RedLines) > 0 {
-		redLinesBlock = fmt.Sprintf("- 🚫 岗位必备条件（仅提供证据线索，由 HR 核实准入结论）:\n  * %s\n", strings.Join(jobCfg.RedLines, "\n  * "))
-	}
-	bonusBlock := ""
-	if len(jobCfg.BonusPoints) > 0 {
-		bonusBlock = fmt.Sprintf("- ⭐ 优先加分项（仅提供证据线索，HR 确认后只用于同档排序）:\n  * %s\n", strings.Join(jobCfg.BonusPoints, "\n  * "))
+	interviewQBlock := ""
+	interviewQuestions := jobCfg.GetInterviewQuestions()
+	if len(interviewQuestions) > 0 {
+		interviewQBlock = fmt.Sprintf("- 🎯 初试重点关注要求（作为初试核查与经验溯源重点）:\n  * %s\n", strings.Join(interviewQuestions, "\n  * "))
 	}
 	unifiedMetrics := getUnifiedJobMetrics(jobCfg)
 	tierBlock := fmt.Sprintf("- 岗位统一能力评分卡与雷达指标（共 %d 项，每项按 0 未体现、1 了解/线索、2 熟练参与、3 精通独立、4 专家主导评分）：%s\n", len(unifiedMetrics), strings.Join(unifiedMetrics, "、"))
@@ -3382,7 +3399,6 @@ func (a *App) buildAnalysisPrompt(resume *Resume, jobCfg *JobConfig) string {
    - 重点进行「真实度与一致性核验 (consistency_check)」：核查微简历中宣称的岗位、年限、核心项目与附件简历中的具体时间线、职责和业绩是否吻合，是否存在虚报、断层或冲突。
    - consistency_check 包含：status ("consistent" | "warning" | "conflict")，summary (一两句话核验总结)，details (具体核验条目列表)。
 2. 结合两份材料输出最终精确评分 (overall_score, skill_match, experience_match, education_match)，并在 score_change_reason 中简述终审分相比初筛分的变化原因。
-3. interview_qa 生成 5 道深度复试题（针对附件简历中披露的具体详尽项目背景提问）。
 `
 	} else {
 		resumeBlock = fmt.Sprintf("文件名: %s\n```\n%s\n```", resume.FileName, a.truncateContent(resume.Content, 10000))
@@ -3397,7 +3413,7 @@ func (a *App) buildAnalysisPrompt(resume *Resume, jobCfg *JobConfig) string {
 		reAnalyzeAnchorBlock = fmt.Sprintf(
 			"### 重新分析基准锚定规定（防打分大起大落）：\n"+
 				"- 该候选人历史初筛评估基准分为 **%d 分**。\n"+
-				"- 在岗位要求与候选人简历材料未发生重大变动的前提下，本次重新分析的各项匹配度及 overall_score 必须严格围绕该基准进行客观细化微调，**严禁分差超过 ±5 分**，保证评分严密一致与可信度。\n\n",
+				"- 在岗位要求与候选人简历材料未发生重大变动的前提下，本次重新分析的各项匹配度及 overall_score 必须严格围绕该基准进行客观细化微调，保证评分严密一致与可信度。\n\n",
 			baseAnchor,
 		)
 	}
@@ -3408,7 +3424,6 @@ func (a *App) buildAnalysisPrompt(resume *Resume, jobCfg *JobConfig) string {
 			"- 经验要求: %s\n"+
 			"- 最低学历: %s\n"+
 			"- 核心必备技能: %s\n"+
-			"%s"+
 			"%s"+
 			"%s"+
 			"%s"+
@@ -3442,9 +3457,7 @@ func (a *App) buildAnalysisPrompt(resume *Resume, jobCfg *JobConfig) string {
 			"overall_score 必须在逻辑上严密契合各分项得分，基准公式为：skill_match * 0.55 + experience_match * 0.35 + education_match * 0.10（四舍五入取整）。不得脱离单项评分凭主观臆断给出突变分数。\n\n"+
 			"**核心能力与岗位统一技能雷达指标 (experience_competencies 与 core_criterion_checks)**：\n"+
 			"必须严格围绕上述【岗位统一能力评分卡与雷达指标】逐项评估！每一项的 criterion 必须与指标名称完全一致（逐字对应，不得自创其他名称）；\n"+
-			"level 为 0-4 分整数（0 未体现、1 了解/线索、2 熟练参与、3 精通独立完成、4 专家主导复盘）；evidence 必须是简历中连续且真实的原文引用（无证据时填空字符串且 level 必须为 0）；assessment 给出专业评估与核实要点。最终岗位能力分由系统按各项等级等权计算；加分项经 HR 核实后只用于同档排序。\n\n"+
-			"### 推荐等级\n"+
-			"模型只提供参考建议；岗位红线必须由 HR 核实后才可判定通过或不满足。\n\n"+
+			"level 为 0-4 分整数（0 未体现、1 了解/线索、2 熟练参与、3 精通独立完成、4 专家主导复盘）；evidence 必须是简历中连续且真实的原文引用（无证据时填空字符串且 level 必须为 0）；assessment 给出专业评估与核实要点。最终岗位能力分由系统按各项等级等权计算。\n\n"+
 			"### 输出要求\n\n"+
 			"请严格按以下JSON格式输出，不要输出任何其他内容：\n\n"+
 			"```json\n"+
@@ -3454,8 +3467,6 @@ func (a *App) buildAnalysisPrompt(resume *Resume, jobCfg *JobConfig) string {
 			"  \"education\": \"从简历中提取的最高学历和学校，如 本科-武汉大学-计算机科学\",\n"+
 			"  \"current_role\": \"从简历中提取的当前/最近职位，如 高级Go开发工程师@字节跳动\",\n"+
 			"  \"overall_score\": 78,\n"+
-			"  \"core_match\": 82,\n"+
-			"  \"bonus_match\": 72,\n"+
 			"  \"skill_match\": 82,\n"+
 			"  \"experience_match\": 75,\n"+
 			"  \"education_match\": 80,\n"+
@@ -3469,14 +3480,8 @@ func (a *App) buildAnalysisPrompt(resume *Resume, jobCfg *JobConfig) string {
 			"  \"experience_detail\": \"详细分析工作经历与岗位的匹配程度，包括行业相关度、项目复杂度、职责范围等\",\n"+
 			"  \"education_detail\": \"分析学历背景、专业对口程度、是否有相关认证或培训\",\n"+
 			"  \"recommendation\": \"recommend\",\n"+
-			"  \"red_line_violations\": [],\n"+
-			"  \"red_line_checks\": [{\"criterion\": \"逐字复制岗位红线\", \"status\": \"met/violated/unknown\", \"evidence\": \"简历中的原文短句；无证据时留空\"}],\n"+
 			"  \"core_criterion_checks\": " + expCompJsonBlock + ",\n" +
 			"  \"experience_competencies\": " + expCompJsonBlock + ",\n" +
-			"  \"bonus_checks\": [{\"criterion\": \"逐字复制优先加分项\", \"status\": \"met/violated/unknown\", \"evidence\": \"简历原文短句；无证据时留空\"}],\n"+
-			"  \"bonus_matches\": [\n"+
-			"    \"符合的优先加分项及具体成果依据（例如：具备日活千万高并发经验，主导过大型系统重构；若未匹配则必须返回空数组 []）\"\n"+
-			"  ],\n"+
 			"  \"strengths\": [\n"+
 			"    \"具体的优势1（必须引用简历中的事实依据）\",\n"+
 			"    \"具体的优势2\"\n"+
@@ -3498,17 +3503,13 @@ func (a *App) buildAnalysisPrompt(resume *Resume, jobCfg *JobConfig) string {
 			"1. 所有分析必须基于简历中的客观内容，不得编造简历中不存在的信息\n"+
 			"2. strengths 至少2条，weaknesses 至少1条，每条都要具体且有事实依据\n"+
 			"3. summary 必须精炼（2-3句话），结合候选人的具体情况给出有价值的判断\n"+
-			"4. 确保返回合法的JSON格式\n"+
-			"5. 对用人部门红线只提出待核实的事实线索，不直接作淘汰决定：\n"+
-			"   - 对每条红线返回一条 red_line_checks：criterion 必须逐字复制，status 仅能是 met/violated/unknown；evidence 必须是简历中可核对的原文短句。简历未写明时填 unknown，不能猜测满足或违反。\n"+
-			"   - 逐项对照「优先加分项」，仅在有具体事实依据时填入 bonus_checks 和 bonus_matches；AI 不确认加分，也不改变能力分。",
+			"4. 确保返回合法的JSON格式",
 		jobCfg.Title,
 		jobCfg.GetExperienceRequirement(),
 		jobCfg.EducationLevel,
 		skills,
 		jobDescBlock,
-		redLinesBlock,
-		bonusBlock,
+		interviewQBlock,
 		tierBlock,
 		requirements,
 		resumeBlock,
@@ -3942,63 +3943,29 @@ func (a *App) applyJobDecision(result *AnalysisResult, job *JobConfig, resume *R
 		result.ExperienceCompetencies = extra
 	}
 	scoreCandidate(result, criteria)
-	proposedBonus := result.BonusChecks
-
-	checks := make([]RedLineCheck, 0, len(job.RedLines))
-	for _, criterion := range job.RedLines {
-		criterion = strings.TrimSpace(criterion)
-		if criterion == "" {
-			continue
-		}
-		check := RedLineCheck{RuleID: redLineRuleID(criterion), Criterion: criterion, Status: "unknown"}
-		if resume != nil && resume.Analysis != nil {
-			for _, previous := range resume.Analysis.RedLineChecks {
-				if previous.Criterion == criterion && previous.ReviewedAt != "" {
-					check = previous
-					check.RuleID = redLineRuleID(criterion)
-					break
-				}
-			}
-		}
-		if check.ReviewedAt != "" {
-			checks = append(checks, check)
-			continue
-		}
-		for _, proposed := range result.RedLineChecks {
-			if strings.TrimSpace(proposed.Criterion) != criterion {
+	if len(job.RedLines) > 0 || len(job.BonusPoints) > 0 {
+		proposedBonus := result.BonusChecks
+		checks := make([]RedLineCheck, 0, len(job.RedLines))
+		for _, criterion := range job.RedLines {
+			criterion = strings.TrimSpace(criterion)
+			if criterion == "" {
 				continue
 			}
-			evidence := strings.Trim(proposed.Evidence, " \t\r\n\"“”")
-			suggestion := proposed.Status
-			if suggestion == "unknown" {
-				suggestion = proposed.SuggestedStatus
-			}
-			if resume != nil && (suggestion == "met" || suggestion == "violated") && evidence != "" &&
-				(strings.Contains(resume.Content, evidence) || strings.Contains(resume.AttachmentContent, evidence)) {
-				check.SuggestedStatus, check.Evidence = suggestion, evidence
-			}
-			break
-		}
-		checks = append(checks, check)
-	}
-	result.RedLineChecks = checks
-	bonusChecks := make([]BonusCheck, 0, len(job.BonusPoints))
-	for _, criterion := range job.BonusPoints {
-		criterion = strings.TrimSpace(criterion)
-		if criterion == "" {
-			continue
-		}
-		check := BonusCheck{RuleID: redLineRuleID(criterion), Criterion: criterion, Status: "unknown"}
-		if resume != nil && resume.Analysis != nil {
-			for _, previous := range resume.Analysis.BonusChecks {
-				if previous.Criterion == criterion && previous.ReviewedAt != "" {
-					check = previous
-					break
+			check := RedLineCheck{RuleID: redLineRuleID(criterion), Criterion: criterion, Status: "unknown"}
+			if resume != nil && resume.Analysis != nil {
+				for _, previous := range resume.Analysis.RedLineChecks {
+					if previous.Criterion == criterion && previous.ReviewedAt != "" {
+						check = previous
+						check.RuleID = redLineRuleID(criterion)
+						break
+					}
 				}
 			}
-		}
-		if check.ReviewedAt == "" {
-			for _, proposed := range proposedBonus {
+			if check.ReviewedAt != "" {
+				checks = append(checks, check)
+				continue
+			}
+			for _, proposed := range result.RedLineChecks {
 				if strings.TrimSpace(proposed.Criterion) != criterion {
 					continue
 				}
@@ -4013,12 +3980,53 @@ func (a *App) applyJobDecision(result *AnalysisResult, job *JobConfig, resume *R
 				}
 				break
 			}
+			checks = append(checks, check)
 		}
-		bonusChecks = append(bonusChecks, check)
+		result.RedLineChecks = checks
+		bonusChecks := make([]BonusCheck, 0, len(job.BonusPoints))
+		for _, criterion := range job.BonusPoints {
+			criterion = strings.TrimSpace(criterion)
+			if criterion == "" {
+				continue
+			}
+			check := BonusCheck{RuleID: redLineRuleID(criterion), Criterion: criterion, Status: "unknown"}
+			if resume != nil && resume.Analysis != nil {
+				for _, previous := range resume.Analysis.BonusChecks {
+					if previous.Criterion == criterion && previous.ReviewedAt != "" {
+						check = previous
+						break
+					}
+				}
+			}
+			if check.ReviewedAt == "" {
+				for _, proposed := range proposedBonus {
+					if strings.TrimSpace(proposed.Criterion) != criterion {
+						continue
+					}
+					evidence := strings.Trim(proposed.Evidence, " \t\r\n\"“”")
+					suggestion := proposed.Status
+					if suggestion == "unknown" {
+						suggestion = proposed.SuggestedStatus
+					}
+					if resume != nil && (suggestion == "met" || suggestion == "violated") && evidence != "" &&
+						(strings.Contains(resume.Content, evidence) || strings.Contains(resume.AttachmentContent, evidence)) {
+						check.SuggestedStatus, check.Evidence = suggestion, evidence
+					}
+					break
+				}
+			}
+			bonusChecks = append(bonusChecks, check)
+		}
+		result.BonusChecks = bonusChecks
+		refreshBonusVerdict(result)
+		applyRedLineVerdict(result)
+	} else {
+		result.RedLineStatus = "not_configured"
+		result.RedLineViolations = nil
+		result.RedLineChecks = nil
+		result.BonusChecks = nil
+		result.ConfirmedBonusCount = 0
 	}
-	result.BonusChecks = bonusChecks
-	refreshBonusVerdict(result)
-	applyRedLineVerdict(result)
 }
 
 func refreshBonusVerdict(result *AnalysisResult) {
