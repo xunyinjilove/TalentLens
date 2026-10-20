@@ -112,9 +112,6 @@ func TestPreviewBatchOutreachSupportsUnanalyzedCandidatesAndZeroAITemplate(t *te
 	if !strings.Contains(pendingItem.Message, "前端架构师") {
 		t.Fatalf("模板招呼语未正确插值岗位名称: %s", pendingItem.Message)
 	}
-	if pendingItem.RedLineStatus != "pending" {
-		t.Fatalf("待分析人选红线状态应为 pending，实际: %s", pendingItem.RedLineStatus)
-	}
 }
 
 func TestInterviewQuestionAssemblyFromJobCriteria(t *testing.T) {
@@ -122,10 +119,9 @@ func TestInterviewQuestionAssemblyFromJobCriteria(t *testing.T) {
 	app.dataDirOverride = t.TempDir()
 
 	project := app.CreateProject("质量总监", "质量部", 1, "HR", "", &JobConfig{
-		Title:          "质量总监",
-		CoreCriteria:   []string{"GMP认证合规", "CAPA持续改进"},
-		RedLines:       []string{"10年以上质量管理经验"},
-		BonusPoints:    []string{"FDA海外审计经验"},
+		Title:              "质量总监",
+		CoreCriteria:       []string{"GMP认证合规", "CAPA持续改进"},
+		InterviewQuestions: []string{"10年以上质量管理经验", "FDA海外审计经验"},
 	})
 
 	// 轻量初筛结果：没有生成长文本 InterviewQA
@@ -138,12 +134,6 @@ func TestInterviewQuestionAssemblyFromJobCriteria(t *testing.T) {
 			CandidateName: "赵六",
 			OverallScore:  80,
 			InterviewQA:   nil, // 空 InterviewQA！
-			RedLineChecks: []RedLineCheck{
-				{Criterion: "10年以上质量管理经验", Status: "unknown"},
-			},
-			BonusChecks: []BonusCheck{
-				{Criterion: "FDA海外审计经验", Status: "unknown"},
-			},
 		},
 	}
 	app.saveResume(resume)
@@ -157,26 +147,26 @@ func TestInterviewQuestionAssemblyFromJobCriteria(t *testing.T) {
 		t.Fatalf("初试题目不应为空")
 	}
 
-	// 验证问题中包含岗位统一题、核心能力题、红线题与加分项题
-	hasRedLine := false
-	hasBonus := false
+	// 验证问题中包含岗位统一题、重点要求核查题与核心能力实战题
+	hasKeyRequirement := false
+	hasAuditExperience := false
 	hasStandard := false
 	for _, turn := range session.Turns {
-		if turn.Category == "红线核实" {
-			hasRedLine = true
+		if strings.Contains(turn.Question, "10年以上质量管理经验") {
+			hasKeyRequirement = true
 		}
-		if turn.Category == "加分核实" {
-			hasBonus = true
+		if strings.Contains(turn.Question, "FDA海外审计经验") {
+			hasAuditExperience = true
 		}
 		if turn.Standard {
 			hasStandard = true
 		}
 	}
-	if !hasRedLine {
-		t.Errorf("初面题目未成功融入红线核实题")
+	if !hasKeyRequirement {
+		t.Errorf("初面题目未成功融入岗位重点核查题（10年以上质量管理经验）")
 	}
-	if !hasBonus {
-		t.Errorf("初面题目未成功融入加分核实题")
+	if !hasAuditExperience {
+		t.Errorf("初面题目未成功融入岗位重点核查题（FDA海外审计经验）")
 	}
 	if !hasStandard {
 		t.Errorf("初面题目未成功融入岗位统一标准题")

@@ -1,6 +1,6 @@
 <template>
   <el-dialog v-model="visible" :title="dialogTitle" width="min(940px, 94vw)" :close-on-click-modal="!sendingBatch" :close-on-press-escape="!sendingBatch" :show-close="!sendingBatch">
-    <el-alert title="核对名单和文案后，确认本批沟通职位与点数预算。软件在预算内逐人实时核点发送；超预算、职位变化或回执不明时暂停。未初筛或红线待核实者须主动勾选。" type="info" :closable="false" style="margin-bottom:16px" />
+    <el-alert title="核对名单和文案后，确认本批沟通职位与点数预算。软件在预算内逐人实时核点发送；超预算、职位变化或回执不明时暂停。" type="info" :closable="false" style="margin-bottom:16px" />
     <div v-if="loading" class="wb-empty">正在生成沟通名单快照与招呼文案…</div>
     <div v-else-if="error" class="wb-empty">{{ error }}</div>
     <div v-else-if="batch">
@@ -58,7 +58,6 @@
           <strong>#{{ item.rank }} {{ item.candidateName }}</strong>
           <span class="wb-pill" v-if="item.abilityScore > 0">能力 {{ item.abilityScore }}</span>
           <span class="wb-pill wb-muted" v-else>待初筛</span>
-          <span class="wb-pill" :class="item.redLineStatus === 'pending' ? 'warn' : ''">红线：{{ item.redLineStatus === 'pending' ? '待核实' : '已核实／未配置' }}</span>
           <span class="wb-muted">{{ item.platform || '平台未确认' }} · {{ item.platformCandidateId || '缺少稳定 ID' }}</span>
           <el-button v-if="item.profileUrl" size="small" link @click="openProfile(item.profileUrl)">打开候选人网页</el-button>
           <div class="head-actions" v-if="batch.status === 'draft'">
@@ -81,7 +80,6 @@
         <template v-if="batch.status === 'draft'">
           <div class="wb-actions" style="margin-bottom:8px">
             <el-checkbox v-model="selected[item.id]">纳入本批</el-checkbox>
-            <el-checkbox v-if="item.redLineStatus === 'pending'" v-model="pendingConfirmed[item.id]">我已确认纳入红线待核实人选</el-checkbox>
           </div>
           <el-input v-model="messages[item.id]" type="textarea" :rows="3" :maxlength="500" show-word-limit :disabled="!selected[item.id]" />
         </template>
@@ -219,9 +217,6 @@ function handleSelectAll(val: any) {
   const isChecked = Boolean(val)
   for (const item of batch.value.items) {
     selected.value[item.id] = isChecked
-    if (item.redLineStatus === 'pending') {
-      pendingConfirmed.value[item.id] = isChecked
-    }
   }
 }
 
@@ -251,8 +246,8 @@ async function preview(forceNew=false){
     }
     if(batch.value?.id && ids.length === 0)localStorage.setItem(storageKey,batch.value.id)
     for(const item of batch.value?.items||[]){
-      selected.value[item.id]=item.redLineStatus!=='pending'
-      pendingConfirmed.value[item.id]=false
+      selected.value[item.id]=true
+      pendingConfirmed.value[item.id]=true
       messages.value[item.id]=item.message
       regenerating.value[item.id]=false
     }

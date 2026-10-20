@@ -368,19 +368,11 @@
           />
         </el-form-item>
 
-        <el-form-item label="岗位必需红线（仅填写可核实的必要技能，AI 建议需由 HR 审批）">
+        <el-form-item label="初试重点核查题纲（进入初试环节时自动生成重点核验题目，以逗号或分号分隔）">
           <el-input
-            v-model="redLinesInput"
-            placeholder="如：能独立完成接口测试用例设计；以逗号或分号分隔"
-            @blur="syncRedLines"
-          />
-        </el-form-item>
-
-        <el-form-item label="技能相关加分项（非必需优势）">
-          <el-input
-            v-model="bonusPointsInput"
-            placeholder="如：具备自动化测试框架维护经验；以逗号或分号分隔"
-            @blur="syncBonusPoints"
+            v-model="interviewQuestionsInput"
+            placeholder="如：能独立完成核心架构设计；具备大型复杂系统性能调优经验"
+            @blur="syncInterviewQuestions"
           />
         </el-form-item>
         <div class="rule-suggestion-entry">
@@ -523,8 +515,7 @@ function parseExperienceYears(val: any): number {
 }
 
 const skillsInput = ref('')
-const redLinesInput = ref('')
-const bonusPointsInput = ref('')
+const interviewQuestionsInput = ref('')
 
 function splitTags(input: string): string[] {
   return input
@@ -536,8 +527,7 @@ function splitTags(input: string): string[] {
 function syncSkills() {
   // synced when saving
 }
-function syncRedLines() {}
-function syncBonusPoints() {}
+function syncInterviewQuestions() {}
 
 function openRuleSuggestionsFromEditor() {
   const project = projectStore.projects.find(item => item.id === currentEditProjectId.value)
@@ -546,8 +536,7 @@ function openRuleSuggestionsFromEditor() {
   if (jobForm.title.trim() !== (config.title || project.name) ||
       jobForm.job_description.trim() !== (config.job_description || '') ||
       splitTags(skillsInput.value).join('\x00') !== (config.required_skills || []).join('\x00') ||
-      splitTags(redLinesInput.value).join('\x00') !== (config.red_lines || []).join('\x00') ||
-      splitTags(bonusPointsInput.value).join('\x00') !== (config.bonus_points || []).join('\x00')) {
+      splitTags(interviewQuestionsInput.value).join('\x00') !== (config.interview_questions || []).join('\x00')) {
     ElMessage.warning('请先保存本次职位配置，AI 才能依据最新的岗位职责与技能生成建议')
     return
   }
@@ -589,7 +578,7 @@ function getStats(projectId: string): JobStats {
   const total = candidates.length
   const suitable = candidates.filter(c => {
     if (c.stage === 'rejected') return false
-    if (c.abilityScore >= 60 && c.redLineStatus !== 'failed') return true
+    if (c.abilityScore >= 60) return true
     return ['first_interview', 'second_interview', 'offer', 'hired', 'communicating'].includes(c.stage)
   }).length
   return { totalApplications: total, suitableCount: suitable }
@@ -655,8 +644,7 @@ function openCreateModal() {
   jobForm.education_level = '本科'
   jobForm.job_description = ''
   skillsInput.value = 'Vue3, TypeScript, 性能优化'
-  redLinesInput.value = ''
-  bonusPointsInput.value = ''
+  interviewQuestionsInput.value = ''
   editModalVisible.value = true
 }
 
@@ -676,8 +664,12 @@ function openEditModal(project: Project) {
   jobForm.education_level = project.job_config?.education_level || '本科'
   jobForm.job_description = project.job_config?.job_description || ''
   skillsInput.value = (project.job_config?.core_criteria || project.job_config?.required_skills || []).join(', ')
-  redLinesInput.value = (project.job_config?.red_lines || []).join(', ')
-  bonusPointsInput.value = (project.job_config?.bonus_points || []).join(', ')
+  const qList = (project.job_config?.interview_questions || []).slice()
+  if (!qList.length) {
+    if (project.job_config?.red_lines) qList.push(...project.job_config.red_lines)
+    if (project.job_config?.bonus_points) qList.push(...project.job_config.bonus_points)
+  }
+  interviewQuestionsInput.value = qList.join(', ')
   editModalVisible.value = true
 }
 
@@ -721,8 +713,7 @@ async function saveJob() {
   saving.value = true
   try {
     const skills = splitTags(skillsInput.value)
-    const redLines = splitTags(redLinesInput.value)
-    const bonusPoints = splitTags(bonusPointsInput.value)
+    const interviewQuestions = splitTags(interviewQuestionsInput.value)
     const expText = String(jobForm.experience_years ?? '').trim()
     const expYears = parseExperienceYears(expText)
 
@@ -737,8 +728,7 @@ async function saveJob() {
       city: jobForm.city,
       employment_type: jobForm.employment_type,
       salary_range: jobForm.salary_range,
-      red_lines: redLines,
-      bonus_points: bonusPoints,
+      interview_questions: interviewQuestions,
       core_criteria: skills
     }
 

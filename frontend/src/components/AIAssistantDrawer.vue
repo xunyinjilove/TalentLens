@@ -70,7 +70,7 @@
               </div>
               <h4>您好！我是透景 AI 招聘助理</h4>
               <p class="hero-desc">
-                我可以帮您梳理职位需求并起草标准化 JD、提炼红线过滤标准，也能为您解答软件各模块的使用方法。
+                我可以帮您梳理职位需求并起草标准化 JD、提炼初试重点核查题纲，也能为您解答软件各模块的使用方法。
               </p>
             </div>
 
@@ -166,28 +166,15 @@
                       </div>
                     </div>
 
-                    <!-- 淘汰红线 -->
+                    <!-- 初试重点核查题纲 -->
                     <div
-                      v-if="extractJobData(msg.content)?.red_lines?.length"
+                      v-if="extractJobData(msg.content)?.interview_questions?.length || extractJobData(msg.content)?.red_lines?.length"
                       class="blueprint-redlines"
                     >
-                      <span class="redline-title">❌ 淘汰红线标准:</span>
+                      <span class="redline-title">🎯 初试重点核查题纲:</span>
                       <ul class="redline-list">
-                        <li v-for="(rl, rIdx) in extractJobData(msg.content)!.red_lines" :key="rIdx">
-                          {{ rl }}
-                        </li>
-                      </ul>
-                    </div>
-
-                    <!-- 加分项 -->
-                    <div
-                      v-if="extractJobData(msg.content)?.bonus_points?.length"
-                      class="blueprint-bonus"
-                    >
-                      <span class="bonus-title">⭐ 加分项:</span>
-                      <ul class="bonus-list">
-                        <li v-for="(bp, bIdx) in extractJobData(msg.content)!.bonus_points" :key="bIdx">
-                          {{ bp }}
+                        <li v-for="(iq, qIdx) in (extractJobData(msg.content)!.interview_questions || extractJobData(msg.content)!.red_lines)" :key="qIdx">
+                          {{ iq }}
                         </li>
                       </ul>
                     </div>
@@ -315,10 +302,10 @@ const chatViewportRef = ref<HTMLElement | null>(null)
 
 // 快捷提示卡片
 const quickPrompts = [
-  { icon: '📝', text: '帮我起草一个临床试验项目经理(CPM)的岗位JD与淘汰红线' },
+  { icon: '📝', text: '帮我起草一个临床试验项目经理(CPM)的岗位JD与初试重点核查题纲' },
   { icon: '💻', text: '生成一份高级全栈工程师的招聘要求与必备技能' },
   { icon: '🌐', text: '怎么在软件里把职位发布到 51job 并向候选人打招呼？' },
-  { icon: '📄', text: '如何在候选人档案中设置自动淘汰红线规则？' },
+  { icon: '📄', text: '如何在职位中配置初试重点核查问题？' },
   { icon: '⚙️', text: '如何配置大模型 API Key (DeepSeek / OpenAI / Ollama)？' },
   { icon: '✉️', text: '怎么向通过终审的候选人发送正式 Offer 通知？' }
 ]
@@ -507,13 +494,13 @@ function handleApplyJob(jobData: JobApplyData) {
 
 // 复制岗位 JD
 async function handleCopyJD(jobData: JobApplyData) {
+  const questions = jobData.interview_questions?.length ? jobData.interview_questions : (jobData.red_lines || [])
   const fullJD = `${jobData.title} 招聘要求\n\n` +
     `所属部门: ${jobData.department || '未定'}\n` +
     `工作经验: ${jobData.experience_years || 1}年 | 学历要求: ${jobData.education_level || '本科'}\n\n` +
     `【岗位描述】:\n${jobData.job_description || ''}\n\n` +
     `【必备技能】:\n${(jobData.required_skills || []).join('、')}\n\n` +
-    `【淘汰红线】:\n${(jobData.red_lines || []).join('\n')}\n\n` +
-    `【加分项】:\n${(jobData.bonus_points || []).join('\n')}`
+    (questions.length ? `【初试重点核查题纲】:\n${questions.join('\n')}` : '')
 
   try {
     await navigator.clipboard.writeText(fullJD)

@@ -188,8 +188,8 @@ func TestChatWithAIAssistantOfflineKnowledge(t *testing.T) {
 	if !strings.Contains(jdResp, "json:talentlens-job") {
 		t.Errorf("回答中未包含 talentlens-job 结构化代码块，实际返回: %s", jdResp)
 	}
-	if !strings.Contains(jdResp, "red_lines") {
-		t.Errorf("回答中未包含 red_lines 红线字段，实际返回: %s", jdResp)
+	if !strings.Contains(jdResp, "interview_questions") {
+		t.Errorf("回答中未包含 interview_questions 初试问题字段，实际返回: %s", jdResp)
 	}
 }
 

@@ -486,8 +486,7 @@ export const useResumeStore = defineStore('resume', () => {
         experience_years: settings.job?.experienceYears || 3,
         education_level: settings.job?.educationLevel || '本科',
         job_description: settings.job?.jobDescription || '',
-        red_lines: settings.job?.redLines || [],
-        bonus_points: settings.job?.bonusPoints || [],
+        interview_questions: settings.job?.interviewQuestions || settings.job?.interview_questions || [],
         core_criteria: settings.job?.coreCriteria || []
       }
     } catch {
