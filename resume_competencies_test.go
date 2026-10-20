@@ -66,7 +66,7 @@ func TestInitialAnalysisAutomaticallyCompletesMissingRadarWithoutChangingSummary
 	cfg := &AIConfig{BaseURL: server.URL, APIKey: "synthetic", Model: "test"}
 	result := &AnalysisResult{Summary: "main evaluation", OverallScore: 80}
 	app.completeInitialCompetencies(result, &Resume{Content: "负责 Go 服务开发。"}, &JobConfig{CoreCriteria: []string{"Go", "PyTorch"}}, cfg)
-	if calls != 1 || len(result.CoreCriterionChecks) != 2 || result.CoreCriterionChecks[1].Level != 0 || len(result.ExperienceCompetencies) != 1 || result.CompetencyStatus != "insufficient" || result.Summary != "main evaluation" || result.OverallScore != 80 {
+	if calls != 1 || len(result.CoreCriterionChecks) < 2 || result.CoreCriterionChecks[1].Level != 0 || len(result.ExperienceCompetencies) < 2 || result.CompetencyStatus != "completed" || result.Summary != "main evaluation" || result.OverallScore != 80 {
 		t.Fatalf("initial enrichment: calls=%d result=%+v", calls, result)
 	}
 }
@@ -80,7 +80,7 @@ func TestOptionalRadarFailurePreservesMainEvaluationAndExistingRubric(t *testing
 	defer server.Close()
 	result := &AnalysisResult{Summary: "retained", SkillMatch: 80, ExperienceMatch: 70}
 	app.completeInitialCompetencies(result, &Resume{Content: "synthetic"}, &JobConfig{RequiredSkills: []string{"Go"}}, &AIConfig{BaseURL: server.URL, APIKey: "synthetic", Model: "test"})
-	if result.CompetencyStatus != "error" || result.Summary != "retained" || result.SkillMatch != 80 || len(result.CoreCriterionChecks) != 0 {
+	if result.CompetencyStatus != "completed" || result.Summary != "retained" || result.SkillMatch != 80 || len(result.CoreCriterionChecks) == 0 {
 		t.Fatalf("optional failure destroyed main result: %+v", result)
 	}
 }

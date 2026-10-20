@@ -36,7 +36,7 @@ import (
 )
 
 // 版本信息
-const AppVersion = "1.8.29"
+const AppVersion = "1.8.30"
 const analysisFormatRetryVersion = "model-json-repair-v1"
 const GitHubRepo = "xunyinjilove/TalentLens"
 
@@ -227,6 +227,12 @@ type AnalysisResult struct {
 	CompetencyStatus       string               `json:"competency_status,omitempty"` // completed | insufficient | error
 	CompetencyMessage      string               `json:"competency_message,omitempty"`
 
+	// 契约化雷达覆盖率与全维度评分区间
+	RadarCoverage   float64 `json:"radar_coverage,omitempty"`    // 已知维度权重覆盖率 (0.0~1.0)
+	RankEligible    bool    `json:"rank_eligible,omitempty"`     // 是否达到 80% 覆盖率排名资格
+	ScoreLowerBound float64 `json:"score_lower_bound,omitempty"` // 全维度下界 (未知项按0分估算)
+	ScoreUpperBound float64 `json:"score_upper_bound,omitempty"` // 全维度上界 (未知项按4分满分估算)
+
 	// 面试建议
 	InterviewSuggestions []string `json:"interview_suggestions"`
 
@@ -264,10 +270,11 @@ type BonusCheck struct {
 }
 
 type CoreCriterionCheck struct {
-	Criterion  string `json:"criterion"`
-	Level      int    `json:"level"` // 0 未体现，1 了解，2 参与，3 独立完成，4 主导并可复盘
-	Evidence   string `json:"evidence,omitempty"`
-	Assessment string `json:"assessment,omitempty"`
+	Criterion      string `json:"criterion"`
+	Level          int    `json:"level"` // 0 未体现，1 了解，2 参与，3 独立完成，4 主导并可复盘
+	Evidence       string `json:"evidence,omitempty"`
+	Assessment     string `json:"assessment,omitempty"`
+	EvidenceStatus string `json:"evidence_status,omitempty"` // known | unknown | conflict
 }
 
 // InterviewQuestion 结构化面试问题及基于简历的参考回答
@@ -834,6 +841,29 @@ func (a *App) persistSearchCandidate(r *Resume) error {
 			return nil
 		}
 	}
+	// 入库前去重检测：若项目中已存在相同候选人，更新已有档案的最新元数据，防止 ResumeIDs 膨胀与重复分析
+	existingResumes := a.GetProjectResumes(p.ID)
+	candKey := extractCandidateDeduplicationKey(r)
+	if candKey != "" {
+		for _, ext := range existingResumes {
+			if extractCandidateDeduplicationKey(ext) == candKey {
+				updated := false
+				if r.PlatformCandidateID != "" && ext.PlatformCandidateID != r.PlatformCandidateID {
+					ext.PlatformCandidateID = r.PlatformCandidateID
+					updated = true
+				}
+				if r.URL != "" && ext.URL != r.URL {
+					ext.URL = r.URL
+					updated = true
+				}
+				if updated {
+					a.saveResume(ext)
+					a.syncRecruitmentResume(ext)
+				}
+				return nil
+			}
+		}
+	}
 	p.ResumeIDs = append(p.ResumeIDs, r.ID)
 	p.UpdatedAt = time.Now()
 	projectData, err := json.MarshalIndent(p, "", "  ")
@@ -1250,6 +1280,194 @@ func (a *App) DeleteProject(id string) error {
 	return os.Remove(filepath.Join(a.getProjectsDir(), id+".json"))
 }
 
+// cleanCandidateNameKey 提取干净规范的候选人姓名
+func cleanCandidateNameKey(r *Resume) string {
+	if r == nil {
+		return ""
+	}
+	name := ""
+	if r.Analysis != nil && strings.TrimSpace(r.Analysis.CandidateName) != "" {
+		name = strings.TrimSpace(r.Analysis.CandidateName)
+	}
+	if name == "" {
+		name = conversationCandidateName(r)
+	}
+	name = regexp.MustCompile(`^【.*?】\s*`).ReplaceAllString(name, "")
+	name = regexp.MustCompile(`^BOSS牛人_\s*`).ReplaceAllString(name, "")
+	name = regexp.MustCompile(`\s*\(\d+\)$`).ReplaceAllString(name, "")
+	if strings.Contains(name, "_") {
+		name = strings.Split(name, "_")[0]
+	}
+	return strings.TrimSpace(name)
+}
+
+// extractCandidateDeduplicationKey 提取候选人全局排重键，将同名+同经历/公司或同平台ID的副本归一
+func extractCandidateDeduplicationKey(r *Resume) string {
+	if r == nil {
+		return ""
+	}
+	name := cleanCandidateNameKey(r)
+	content := r.Content
+
+	company := ""
+	profile := ""
+
+	lines := strings.Split(content, "\n")
+	for _, l := range lines {
+		l = strings.TrimSpace(l)
+		if strings.HasPrefix(l, "基本画像：") {
+			p := strings.TrimPrefix(l, "基本画像：")
+			p = regexp.MustCompile(`\d+[日天周月]内活跃\s*·?\s*`).ReplaceAllString(p, "")
+			p = regexp.MustCompile(`电话沟通\s*·?\s*`).ReplaceAllString(p, "")
+			profile = strings.TrimSpace(p)
+		} else if company == "" && (strings.HasPrefix(l, "任职履历快照：") || strings.Contains(l, "工作经历")) {
+			compReg := regexp.MustCompile(`([\p{Han}]{3,25}(?:科技|网络|集团|公司|信息|咨询|药房|软件|制药|服务))`)
+			if m := compReg.FindStringSubmatch(l); len(m) > 1 {
+				c := m[1]
+				c = strings.TrimSuffix(c, "有限公司")
+				c = strings.TrimSuffix(c, "股份有限公司")
+				c = strings.TrimSuffix(c, "上海分公司")
+				company = c
+			}
+		}
+	}
+
+	if name != "" && name != "候选人" {
+		if company != "" {
+			return fmt.Sprintf("cand:%s:%s", name, company)
+		}
+		if profile != "" {
+			return fmt.Sprintf("cand:%s:%s", name, profile)
+		}
+	}
+
+	platID := strings.TrimSpace(r.PlatformCandidateID)
+	if platID == "" && strings.Contains(r.URL, "resumeId=") {
+		if parsed, err := url.Parse(r.URL); err == nil {
+			platID = parsed.Query().Get("resumeId")
+		}
+	}
+	if platID != "" {
+		plat := strings.TrimSpace(r.SourcePlatform)
+		if plat == "" {
+			plat = "51job"
+		}
+		return fmt.Sprintf("plat:%s:%s", plat, platID)
+	}
+
+	if name != "" && name != "候选人" {
+		return fmt.Sprintf("name:%s", name)
+	}
+	return fmt.Sprintf("rec:%s", r.ID)
+}
+
+// pruneDuplicateProjectResumes 对项目下简历列表进行去重合并，优先保留已有详细分析结论的档案，
+// 将多余副本ID移入 SnapshotCopyIDs，并持久化更新 project.ResumeIDs，恢复干净唯一候选人列表。
+func (a *App) pruneDuplicateProjectResumes(p *Project, resumes []*Resume) []*Resume {
+	if p == nil || len(resumes) <= 1 {
+		return resumes
+	}
+
+	type candGroup struct {
+		primary *Resume
+		copies  []string
+	}
+
+	groups := make([]*candGroup, 0, len(resumes))
+	indexMap := make(map[string]int)
+
+	for _, r := range resumes {
+		key := extractCandidateDeduplicationKey(r)
+		idx, exists := indexMap[key]
+		if !exists {
+			indexMap[key] = len(groups)
+			groups = append(groups, &candGroup{primary: r, copies: []string{}})
+			continue
+		}
+
+		curr := groups[idx]
+		prev := curr.primary
+
+		// 判定是否用 r 替换 prev 作为主档案
+		replace := false
+		if r.Status == "done" && prev.Status != "done" {
+			replace = true
+		} else if r.Status == prev.Status {
+			if r.PlatformCandidateID != "" && prev.PlatformCandidateID == "" {
+				replace = true
+			} else if (r.PlatformCandidateID != "") == (prev.PlatformCandidateID != "") {
+				rTime := r.CreatedAt
+				prevTime := prev.CreatedAt
+				if r.Analysis != nil && r.Analysis.AnalyzedAt != "" {
+					if t, err := time.Parse(time.RFC3339, r.Analysis.AnalyzedAt); err == nil {
+						rTime = t
+					}
+				}
+				if prev.Analysis != nil && prev.Analysis.AnalyzedAt != "" {
+					if t, err := time.Parse(time.RFC3339, prev.Analysis.AnalyzedAt); err == nil {
+						prevTime = t
+					}
+				}
+				if rTime.After(prevTime) {
+					replace = true
+				}
+			}
+		}
+
+		if replace {
+			if r.PlatformCandidateID == "" && prev.PlatformCandidateID != "" {
+				r.PlatformCandidateID = prev.PlatformCandidateID
+			}
+			if r.URL == "" && prev.URL != "" {
+				r.URL = prev.URL
+			}
+			curr.copies = append(curr.copies, prev.ID)
+			curr.copies = append(curr.copies, prev.SnapshotCopyIDs...)
+			curr.primary = r
+		} else {
+			if prev.PlatformCandidateID == "" && r.PlatformCandidateID != "" {
+				prev.PlatformCandidateID = r.PlatformCandidateID
+			}
+			if prev.URL == "" && r.URL != "" {
+				prev.URL = r.URL
+			}
+			curr.copies = append(curr.copies, r.ID)
+			curr.copies = append(curr.copies, r.SnapshotCopyIDs...)
+		}
+	}
+
+	result := make([]*Resume, 0, len(groups))
+	var newResumeIDs []string
+	for _, g := range groups {
+		copySet := make(map[string]bool)
+		for _, cid := range g.primary.SnapshotCopyIDs {
+			copySet[cid] = true
+		}
+		for _, cid := range g.copies {
+			if cid != g.primary.ID {
+				copySet[cid] = true
+			}
+		}
+		var cleanCopies []string
+		for cid := range copySet {
+			cleanCopies = append(cleanCopies, cid)
+		}
+		g.primary.SnapshotCopyIDs = cleanCopies
+		result = append(result, g.primary)
+		newResumeIDs = append(newResumeIDs, g.primary.ID)
+	}
+
+	// 若检测到重复被合并，自动同步写盘自愈
+	if len(newResumeIDs) != len(p.ResumeIDs) {
+		log.Printf("[pruneDuplicateProjectResumes] 项目 %s 简历排重自愈: %d -> %d", p.ID, len(p.ResumeIDs), len(newResumeIDs))
+		p.ResumeIDs = newResumeIDs
+		p.UpdatedAt = time.Now()
+		a.saveProject(p)
+	}
+
+	return result
+}
+
 // GetProjectResumes 获取项目下的所有简历
 func (a *App) GetProjectResumes(projectID string) []*Resume {
 	p := a.GetProject(projectID)
@@ -1272,7 +1490,8 @@ func (a *App) GetProjectResumes(projectID string) []*Resume {
 			resumes = append(resumes, &r)
 		}
 	}
-	return foldIdenticalResumeSnapshots(resumes)
+	folded := foldIdenticalResumeSnapshots(resumes)
+	return a.pruneDuplicateProjectResumes(p, folded)
 }
 
 // prepareResumeDecision 在读取旧数据时将“AI 已满足/不满足”还原为待核验，
@@ -3068,21 +3287,10 @@ func (a *App) StartBatchAnalysis(resumeIDs []string, cfg *AIConfig, jobCfg *JobC
 	}()
 }
 
-// buildAnalysisPrompt 构建分析提示词
-func (a *App) buildAnalysisPrompt(resume *Resume, jobCfg *JobConfig) string {
-	skills := strings.Join(jobCfg.RequiredSkills, "、")
-	requirements := strings.Join(jobCfg.Requirements, "\n- ")
-	jobDescBlock := ""
-	if strings.TrimSpace(jobCfg.JobDescription) != "" {
-		jobDescBlock = fmt.Sprintf("- 岗位职责与技能要求:\n```\n%s\n```\n", jobCfg.JobDescription)
-	}
-	redLinesBlock := ""
-	if len(jobCfg.RedLines) > 0 {
-		redLinesBlock = fmt.Sprintf("- 🚫 岗位必备条件（仅提供证据线索，由 HR 核实准入结论）:\n  * %s\n", strings.Join(jobCfg.RedLines, "\n  * "))
-	}
-	bonusBlock := ""
-	if len(jobCfg.BonusPoints) > 0 {
-		bonusBlock = fmt.Sprintf("- ⭐ 优先加分项（仅提供证据线索，HR 确认后只用于同档排序）:\n  * %s\n", strings.Join(jobCfg.BonusPoints, "\n  * "))
+// getUnifiedJobMetrics 获取当前岗位的统一技能指标列表（技能要求 + 核心能力），与前端展示完全一致
+func getUnifiedJobMetrics(jobCfg *JobConfig) []string {
+	if jobCfg == nil {
+		return []string{"专业技能掌握度", "核心业务交付", "综合解决问题能力"}
 	}
 	var unifiedMetrics []string
 	seenMetrics := make(map[string]bool)
@@ -3101,18 +3309,44 @@ func (a *App) buildAnalysisPrompt(resume *Resume, jobCfg *JobConfig) string {
 		}
 	}
 	if len(unifiedMetrics) < 3 {
-		fallbacks := []string{"专业技能基础", "核心业务实操", "综合解决问题能力"}
+		fallbacks := []string{"专业技能掌握度", "核心业务交付", "复杂问题分析与排查", "工程化规范与落地", "团队沟通与自驱协同"}
 		for _, fb := range fallbacks {
-			if len(unifiedMetrics) >= 3 {
-				break
-			}
 			if !seenMetrics[fb] {
 				seenMetrics[fb] = true
 				unifiedMetrics = append(unifiedMetrics, fb)
+				if len(unifiedMetrics) >= 5 {
+					break
+				}
 			}
 		}
 	}
-	tierBlock := fmt.Sprintf("- 岗位统一能力评分卡与雷达指标（每项按 0 未体现、1 了解/线索、2 熟练参与、3 精通独立、4 专家主导评分）：%s\n", strings.Join(unifiedMetrics, "、"))
+	return unifiedMetrics
+}
+
+// buildAnalysisPrompt 构建分析提示词
+func (a *App) buildAnalysisPrompt(resume *Resume, jobCfg *JobConfig) string {
+	skills := strings.Join(jobCfg.RequiredSkills, "、")
+	requirements := strings.Join(jobCfg.Requirements, "\n- ")
+	jobDescBlock := ""
+	if strings.TrimSpace(jobCfg.JobDescription) != "" {
+		jobDescBlock = fmt.Sprintf("- 岗位职责与技能要求:\n```\n%s\n```\n", jobCfg.JobDescription)
+	}
+	redLinesBlock := ""
+	if len(jobCfg.RedLines) > 0 {
+		redLinesBlock = fmt.Sprintf("- 🚫 岗位必备条件（仅提供证据线索，由 HR 核实准入结论）:\n  * %s\n", strings.Join(jobCfg.RedLines, "\n  * "))
+	}
+	bonusBlock := ""
+	if len(jobCfg.BonusPoints) > 0 {
+		bonusBlock = fmt.Sprintf("- ⭐ 优先加分项（仅提供证据线索，HR 确认后只用于同档排序）:\n  * %s\n", strings.Join(jobCfg.BonusPoints, "\n  * "))
+	}
+	unifiedMetrics := getUnifiedJobMetrics(jobCfg)
+	tierBlock := fmt.Sprintf("- 岗位统一能力评分卡与雷达指标（共 %d 项，每项按 0 未体现、1 了解/线索、2 熟练参与、3 精通独立、4 专家主导评分）：%s\n", len(unifiedMetrics), strings.Join(unifiedMetrics, "、"))
+
+	var expCompExamples []string
+	for _, m := range unifiedMetrics {
+		expCompExamples = append(expCompExamples, fmt.Sprintf(`    {"criterion": %q, "level": 0, "evidence": "若简历有匹配的实战经历，请引用连续原文；若无证据则填空字符串", "assessment": "结合事实评估该能力等级(0-4)及掌握依据"}`, m))
+	}
+	expCompJsonBlock := "[\n" + strings.Join(expCompExamples, ",\n") + "\n  ]"
 
 	systemPrompt := "你是一位拥有15年经验的资深人力资源专家和猎头顾问。你的专长是精准评估候选人与岗位的匹配度。\n" +
 		"你必须基于简历中的客观事实进行分析，不得凭空臆造简历中没有的信息。\n" +
@@ -3223,8 +3457,8 @@ func (a *App) buildAnalysisPrompt(resume *Resume, jobCfg *JobConfig) string {
 			"  \"recommendation\": \"recommend\",\n"+
 			"  \"red_line_violations\": [],\n"+
 			"  \"red_line_checks\": [{\"criterion\": \"逐字复制岗位红线\", \"status\": \"met/violated/unknown\", \"evidence\": \"简历中的原文短句；无证据时留空\"}],\n"+
-			"  \"core_criterion_checks\": [{\"criterion\": \"逐字复制上述岗位统一指标\", \"level\": 3, \"evidence\": \"简历原文；无证据时留空并给 0 分\"}],\n"+
-			"  \"experience_competencies\": [{\"criterion\": \"逐字复制上述岗位统一指标\", \"level\": 3, \"evidence\": \"逐字引用连续原文；无证据留空\", \"assessment\": \"对该项技能的掌握判断依据与待核实项\"}],\n"+
+			"  \"core_criterion_checks\": " + expCompJsonBlock + ",\n" +
+			"  \"experience_competencies\": " + expCompJsonBlock + ",\n" +
 			"  \"bonus_checks\": [{\"criterion\": \"逐字复制优先加分项\", \"status\": \"met/violated/unknown\", \"evidence\": \"简历原文短句；无证据时留空\"}],\n"+
 			"  \"bonus_matches\": [\n"+
 			"    \"符合的优先加分项及具体成果依据（例如：具备日活千万高并发经验，主导过大型系统重构；若未匹配则必须返回空数组 []）\"\n"+
@@ -3548,49 +3782,84 @@ func redLineRuleID(criterion string) string {
 }
 
 func scoreCandidate(result *AnalysisResult, criteria []string) {
-	if result.CoreMatch == 0 {
-		result.CoreMatch = result.SkillMatch*0.55 + result.ExperienceMatch*0.45
+	if result == nil {
+		return
 	}
-	result.CoreMatch = clampFloat(result.CoreMatch, 0, 100)
-	result.BonusMatch = clampFloat(result.BonusMatch, 0, 100)
-	result.ScoreBasis = "legacy"
-	if len(criteria) > 0 && len(result.CoreCriterionChecks) > 0 {
-		levels := make(map[string]int, len(result.CoreCriterionChecks))
-		evidencePresent := make(map[string]bool, len(result.CoreCriterionChecks))
-		verifiedCount := 0
-		coveredCount := 0
-		for _, check := range result.CoreCriterionChecks {
-			if check.Level >= 0 && check.Level <= 4 {
-				key := strings.TrimSpace(check.Criterion)
-				levels[key] = check.Level
-				evidencePresent[key] = strings.TrimSpace(check.Evidence) != ""
+	if len(criteria) == 0 {
+		if result.CoreMatch == 0 {
+			result.CoreMatch = result.SkillMatch*0.55 + result.ExperienceMatch*0.45
+		}
+		result.AbilityScore = int(math.Round(result.CoreMatch))
+		result.OverallScore = float64(result.AbilityScore)
+		return
+	}
+
+	wAll := len(criteria)
+	wKnown := 0
+	pKnown := 0
+
+	byCrit := make(map[string]CoreCriterionCheck)
+	for _, c := range result.CoreCriterionChecks {
+		byCrit[strings.TrimSpace(c.Criterion)] = c
+	}
+
+	for _, metric := range criteria {
+		m := strings.TrimSpace(metric)
+		check, exists := byCrit[m]
+		if !exists {
+			continue
+		}
+		// 契约：known 必须有明确可核对依据，包括明确的低等级或否定信息，整数 0-4
+		// unknown: 没有足够的原文信息或所给引用不能支持该维度
+		isKnown := check.EvidenceStatus == "known"
+		if check.EvidenceStatus == "" {
+			if strings.TrimSpace(check.Evidence) != "" {
+				isKnown = true
+			} else if check.Level == 0 && strings.TrimSpace(check.Assessment) != "" && !strings.Contains(check.Assessment, "未提供") && !strings.Contains(check.Assessment, "未提及") && !strings.Contains(check.Assessment, "材料不足") {
+				isKnown = true
 			}
 		}
-		total := 0
-		for _, criterion := range criteria {
-			key := strings.TrimSpace(criterion)
-			level, covered := levels[key]
-			if covered {
-				coveredCount++
-			}
-			if level > 0 && evidencePresent[key] {
-				verifiedCount++
-			}
-			total += level * 25
+
+		if isKnown && check.Level >= 0 && check.Level <= 4 {
+			wKnown++
+			pKnown += check.Level
 		}
-		if coveredCount < len(criteria) && result.SkillMatch > 0 && result.ExperienceMatch > 0 {
-			result.CoreMatch = clampFloat(result.SkillMatch*0.55+result.ExperienceMatch*0.45, 0, 100)
-			result.ScoreBasis = "provisional"
-		} else if verifiedCount*2 >= len(criteria) {
-			result.CoreMatch = math.Round(float64(total) / float64(len(criteria)))
-			result.ScoreBasis = "rubric"
-		} else {
-			// AI 未给出足够可定位的逐项依据时，保留能力估计，避免把“无法核实”误判为 0 分。
-			result.ScoreBasis = "provisional"
+	}
+
+	coverage := 0.0
+	knownScore := 0.0
+	lowerBound := 0.0
+	upperBound := 100.0
+
+	if wAll > 0 {
+		coverage = float64(wKnown) / float64(wAll)
+		if wKnown > 0 {
+			knownScore = float64(100*pKnown) / float64(4*wKnown)
 		}
-	} else if len(criteria) > 0 {
+		lowerBound = float64(100*pKnown) / float64(4*wAll)
+		upperBound = lowerBound + float64(100*(wAll-wKnown))/float64(wAll)
+	}
+
+	rankEligible := (wKnown*100 >= wAll*80)
+	result.RadarCoverage = coverage
+	result.RankEligible = rankEligible
+	result.ScoreLowerBound = lowerBound
+	result.ScoreUpperBound = upperBound
+
+	if rankEligible {
+		result.CoreMatch = math.Round(knownScore)
+		result.ScoreBasis = "rubric"
+	} else if wKnown > 0 {
+		result.CoreMatch = math.Round(knownScore)
+		result.ScoreBasis = "provisional"
+	} else if result.SkillMatch > 0 || result.ExperienceMatch > 0 {
+		result.CoreMatch = clampFloat(result.SkillMatch*0.55+result.ExperienceMatch*0.45, 0, 100)
+		result.ScoreBasis = "provisional"
+	} else {
+		result.CoreMatch = 0
 		result.ScoreBasis = "provisional"
 	}
+
 	result.AbilityScore = int(math.Round(result.CoreMatch))
 	result.BonusScore = 0
 	refreshCandidateRecommendation(result)
@@ -3657,21 +3926,11 @@ func (a *App) applyJobDecision(result *AnalysisResult, job *JobConfig, resume *R
 	if result == nil || job == nil {
 		return
 	}
-	criteria := job.CoreCriteria
-	if len(criteria) == 0 {
-		criteria = job.RequiredSkills
-	}
+	criteria := getUnifiedJobMetrics(job)
 	// 评分卡只接受简历材料中能逐字定位的依据；没有证据的高等级回落为“未体现”。
 	if resume != nil {
 		validateCompetencyEvidence(result.CoreCriterionChecks, resume)
 		validateCompetencyEvidence(result.ExperienceCompetencies, resume)
-		extra := make([]CoreCriterionCheck, 0, 6)
-		for _, check := range result.ExperienceCompetencies {
-			if check.Level > 0 && check.Evidence != "" && strings.TrimSpace(check.Criterion) != "" && len(extra) < 6 {
-				extra = append(extra, check)
-			}
-		}
-		result.ExperienceCompetencies = extra
 	}
 	scoreCandidate(result, criteria)
 	proposedBonus := result.BonusChecks
@@ -4103,8 +4362,9 @@ func (a *App) EnsureProjectJobMetrics(projectID string) *Project {
 	// 1. 若配置了 AI APIKey，优先请求大模型生成定制化画像
 	if a.config.AI.APIKey != "" {
 		descSnippet := jobDesc
-		if len(descSnippet) > 600 {
-			descSnippet = descSnippet[:600] + "..."
+		runes := []rune(descSnippet)
+		if len(runes) > 600 {
+			descSnippet = string(runes[:600]) + "..."
 		}
 
 		prompt := fmt.Sprintf(`你是一位拥有15年招聘与人才测评经验的资深人力资源架构专家。
@@ -4181,6 +4441,14 @@ func (a *App) EnsureProjectJobMetrics(projectID string) *Project {
 func (a *App) getFallbackJobMetrics(jobTitle string) JobMetricsDraft {
 	t := strings.ToLower(jobTitle)
 
+	// 测试 / QA / 质量工程 / 测试开发（优先于通用开发匹配，避免测试开发工程师被误判）
+	if strings.Contains(t, "测试") || strings.Contains(t, "qa") || strings.Contains(t, "质检") || strings.Contains(t, "测开") || strings.Contains(t, "test") {
+		return JobMetricsDraft{
+			RequiredSkills: []string{"功能与业务测试用例设计", "接口测试与抓包排查", "自动化测试脚本编写", "性能与压力测试评估"},
+			CoreCriteria:   []string{"缺陷敏锐定位与复盘", "质量风险阻断与把控", "研测流程协同推进"},
+		}
+	}
+
 	// 前端 / Web / 客户端
 	if strings.Contains(t, "前端") || strings.Contains(t, "web") || strings.Contains(t, "javascript") || strings.Contains(t, "vue") || strings.Contains(t, "react") || strings.Contains(t, "ios") || strings.Contains(t, "android") {
 		return JobMetricsDraft{
@@ -4194,14 +4462,6 @@ func (a *App) getFallbackJobMetrics(jobTitle string) JobMetricsDraft {
 		return JobMetricsDraft{
 			RequiredSkills: []string{"核心编程语言与框架", "关系型数据库与SQL调优", "Redis/中间件与缓存", "高并发与分布式微服务"},
 			CoreCriteria:   []string{"业务抽象与系统建模", "生产故障排障与高可用", "工程化规范与交付结果"},
-		}
-	}
-
-	// 测试 / QA
-	if strings.Contains(t, "测试") || strings.Contains(t, "qa") || strings.Contains(t, "质检") {
-		return JobMetricsDraft{
-			RequiredSkills: []string{"功能与业务测试用例设计", "接口测试与抓包排查", "自动化测试脚本编写", "性能与压力测试评估"},
-			CoreCriteria:   []string{"缺陷敏锐定位与复盘", "质量风险阻断与把控", "研测流程协同推进"},
 		}
 	}
 

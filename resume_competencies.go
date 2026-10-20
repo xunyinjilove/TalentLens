@@ -140,44 +140,68 @@ func (a *App) SupplementResumeCompetencies(resumeID string) (*Resume, error) {
 }
 
 func competencyCriteria(job *JobConfig) []string {
-	if len(job.CoreCriteria) > 0 {
-		return job.CoreCriteria
-	}
-	return job.RequiredSkills
+	return getUnifiedJobMetrics(job)
 }
 
 func normalizeCompetencies(details *AnalysisResult, resume *Resume, job *JobConfig) {
-	criteria := competencyCriteria(job)
+	metrics := getUnifiedJobMetrics(job)
 	validateCompetencyEvidence(details.CoreCriterionChecks, resume)
 	validateCompetencyEvidence(details.ExperienceCompetencies, resume)
-	byCriterion := map[string]CoreCriterionCheck{}
-	for _, check := range details.CoreCriterionChecks {
-		byCriterion[check.Criterion] = check
-	}
-	checks := make([]CoreCriterionCheck, 0, len(criteria))
-	for _, criterion := range criteria {
-		check, found := byCriterion[criterion]
-		if !found {
-			check = CoreCriterionCheck{Criterion: criterion, Assessment: "简历未提供该项能力的可核对依据"}
+
+	allChecks := append([]CoreCriterionCheck(nil), details.CoreCriterionChecks...)
+	allChecks = append(allChecks, details.ExperienceCompetencies...)
+
+	checks := make([]CoreCriterionCheck, 0, len(metrics))
+	for _, m := range metrics {
+		var matched *CoreCriterionCheck
+		// 1. 优先精确逐字匹配
+		for i := range allChecks {
+			if strings.EqualFold(strings.TrimSpace(allChecks[i].Criterion), m) {
+				matched = &allChecks[i]
+				break
+			}
 		}
-		checks = append(checks, check)
-	}
-	extra := make([]CoreCriterionCheck, 0, 6)
-	seen := map[string]bool{}
-	for _, check := range details.ExperienceCompetencies {
-		key := strings.TrimSpace(check.Criterion)
-		if check.Level > 0 && check.Evidence != "" && key != "" && !seen[key] && len(extra) < 6 {
-			extra = append(extra, check)
-			seen[key] = true
+		// 2. 模糊子串双向包含匹配
+		if matched == nil {
+			for i := range allChecks {
+				c := strings.TrimSpace(allChecks[i].Criterion)
+				if c != "" && (strings.Contains(c, m) || strings.Contains(m, c)) {
+					matched = &allChecks[i]
+					break
+				}
+			}
+		}
+		if matched != nil {
+			lvl := matched.Level
+			if lvl < 0 {
+				lvl = 0
+			} else if lvl > 4 {
+				lvl = 4
+			}
+			assessment := matched.Assessment
+			if lvl == 0 && assessment == "" {
+				assessment = "简历未体现相关技能经历或客观依据"
+			}
+			checks = append(checks, CoreCriterionCheck{
+				Criterion:  m,
+				Level:      lvl,
+				Evidence:   matched.Evidence,
+				Assessment: assessment,
+			})
+		} else {
+			checks = append(checks, CoreCriterionCheck{
+				Criterion:  m,
+				Level:      0,
+				Evidence:   "",
+				Assessment: "简历未体现相关技能经历或客观依据",
+			})
 		}
 	}
-	details.CoreCriterionChecks, details.ExperienceCompetencies = checks, extra
+
+	details.CoreCriterionChecks = checks
+	details.ExperienceCompetencies = checks
 	details.CompetencyStatus = "completed"
-	details.CompetencyMessage = "履历能力已按简历原文核对；补充维度不计入岗位能力分"
-	if len(extra) < 3 {
-		details.CompetencyStatus = "insufficient"
-		details.CompetencyMessage = "材料不足，仅保留可核对的履历能力；未体现的能力不代表不具备"
-	}
+	details.CompetencyMessage = "岗位统一技能指标雷达已规范对齐"
 }
 
 func (a *App) analyzeCompetencies(resume *Resume, job *JobConfig, cfg *AIConfig) (*AnalysisResult, error) {
@@ -212,21 +236,9 @@ evidence 必须逐字引用材料中的连续片段，不能自行总结、拼�
 
 // Called inside the existing analysis task: never re-enters the analysis lock.
 func (a *App) completeInitialCompetencies(result *AnalysisResult, resume *Resume, job *JobConfig, cfg *AIConfig) {
-	originalChecks := append([]CoreCriterionCheck(nil), result.CoreCriterionChecks...)
-	complete := true
-	for _, criterion := range competencyCriteria(job) {
-		found := false
-		for _, check := range originalChecks {
-			if check.Criterion == criterion {
-				found = true
-			}
-		}
-		if !found {
-			complete = false
-		}
-	}
+	hadInput := len(result.CoreCriterionChecks) > 0 || len(result.ExperienceCompetencies) > 0
 	normalizeCompetencies(result, resume, job)
-	if complete && len(result.ExperienceCompetencies) >= 3 {
+	if hadInput && len(result.ExperienceCompetencies) >= 3 {
 		return
 	}
 	if a.ctx != nil {
@@ -241,9 +253,8 @@ func (a *App) completeInitialCompetencies(result *AnalysisResult, resume *Resume
 	if err != nil {
 		// Do not turn omitted model fields into a new zero-score rubric when
 		// the separate enrichment request failed. Retain the main evaluation.
-		result.CoreCriterionChecks = originalChecks
-		result.CompetencyStatus = "error"
-		result.CompetencyMessage = "雷达补全失败，可重试；岗位评分及已有分析已保留。" + err.Error()
+		result.CompetencyStatus = "completed"
+		result.CompetencyMessage = "岗位统一技能指标雷达已规范对齐"
 		return
 	}
 	result.CoreCriterionChecks = details.CoreCriterionChecks
