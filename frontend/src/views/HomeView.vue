@@ -860,12 +860,40 @@
                         <div v-if="parseWorkSnapshot(getSnapshotRaw(line)).facts.length" class="snapshot-facts">
                           <span v-for="(fact, factIndex) in parseWorkSnapshot(getSnapshotRaw(line)).facts" :key="factIndex">{{ fact }}</span>
                         </div>
-                        <div v-for="(experience, expIndex) in parseWorkSnapshot(getSnapshotRaw(line)).experiences" :key="expIndex" class="snapshot-experience">
-                          <span class="snapshot-period">{{ experience.period }}</span>
-                          <strong v-if="experience.company">{{ experience.company }}</strong>
-                          <span v-if="experience.role" class="snapshot-role">{{ experience.role }}</span>
-                          <p v-if="experience.details.length">{{ experience.details.join(' · ') }}</p>
-                        </div>
+                        <template v-for="(experience, expIndex) in parseWorkSnapshot(getSnapshotRaw(line)).experiences" :key="expIndex">
+                          <!-- 原文任职履历小卡片 -->
+                          <div class="snapshot-experience">
+                            <span class="snapshot-period">{{ experience.period }}</span>
+                            <strong v-if="experience.company">{{ experience.company }}</strong>
+                            <span v-if="experience.role" class="snapshot-role">{{ experience.role }}</span>
+                            <p v-if="experience.details.length">{{ experience.details.join(' · ') }}</p>
+                          </div>
+
+                          <!-- 对应小模块正下方紧跟生成的中文翻译 -->
+                          <div
+                            v-if="getMatchedTranslatedExperience(index, lineIndex, experience, expIndex)"
+                            class="snapshot-experience translated-subcard"
+                          >
+                            <div class="translated-subcard-header">
+                              <span class="subcard-badge">
+                                <el-icon><Reading /></el-icon>
+                                <span>中文译文</span>
+                              </span>
+                              <span v-if="getMatchedTranslatedExperience(index, lineIndex, experience, expIndex)?.period" class="subcard-period">
+                                {{ getMatchedTranslatedExperience(index, lineIndex, experience, expIndex)!.period }}
+                              </span>
+                            </div>
+                            <strong v-if="getMatchedTranslatedExperience(index, lineIndex, experience, expIndex)?.company">
+                              {{ getMatchedTranslatedExperience(index, lineIndex, experience, expIndex)!.company }}
+                            </strong>
+                            <span v-if="getMatchedTranslatedExperience(index, lineIndex, experience, expIndex)?.role" class="snapshot-role">
+                              {{ getMatchedTranslatedExperience(index, lineIndex, experience, expIndex)!.role }}
+                            </span>
+                            <p v-if="getMatchedTranslatedExperience(index, lineIndex, experience, expIndex)?.details?.length">
+                              {{ getMatchedTranslatedExperience(index, lineIndex, experience, expIndex)!.details.join(' · ') }}
+                            </p>
+                          </div>
+                        </template>
                       </div>
                       <div v-else-if="line.kind === 'field'" class="parsed-field">
                         <span class="parsed-field-label">{{ line.label }}</span>
@@ -892,15 +920,9 @@
                     <div v-show="!isTranslationCollapsed(index)" class="translation-card-body">
                       <template v-for="(tLine, tIdx) in parsedTranslatedSections[index].lines" :key="tIdx">
                         <div v-if="isLineWorkSnapshot(tLine)" class="work-snapshot translation-snapshot">
-                          <h4>{{ tLine.label || '任职履历快照' }}</h4>
-                          <div v-if="parseWorkSnapshot(getSnapshotRaw(tLine)).facts.length" class="snapshot-facts">
-                            <span v-for="(fact, fIdx) in parseWorkSnapshot(getSnapshotRaw(tLine)).facts" :key="fIdx">{{ fact }}</span>
-                          </div>
-                          <div v-for="(exp, expIdx) in parseWorkSnapshot(getSnapshotRaw(tLine)).experiences" :key="expIdx" class="snapshot-experience">
-                            <span class="snapshot-period">{{ exp.period }}</span>
-                            <strong v-if="exp.company">{{ exp.company }}</strong>
-                            <span v-if="exp.role" class="snapshot-role">{{ exp.role }}</span>
-                            <p v-if="exp.details.length">{{ exp.details.join(' · ') }}</p>
+                          <div class="inline-trans-note">
+                            <el-icon><CircleCheck /></el-icon>
+                            <span>任职履历快照各段经历已在上方对应小卡片正下方生成就地中文对照</span>
                           </div>
                         </div>
                         <div v-else-if="tLine.kind === 'field'" class="parsed-field">
@@ -1466,6 +1488,68 @@ function parseWorkSnapshot(value: string): { facts: string[]; experiences: Snaps
     }
   }
   return { facts, experiences }
+}
+
+// 精准匹配任职履历快照中每段工作经历对应的中文译文小模块
+function getMatchedTranslatedExperience(
+  sectionIndex: number,
+  lineIndex: number,
+  origExp: SnapshotExperience,
+  expIndex: number
+): SnapshotExperience | null {
+  const transSec = parsedTranslatedSections.value[sectionIndex]
+  if (!transSec || !transSec.lines?.length) return null
+
+  // 1. 查找对应的翻译快照行
+  let targetTLine: ParsedLine | null = null
+  if (transSec.lines[lineIndex] && isLineWorkSnapshot(transSec.lines[lineIndex])) {
+    targetTLine = transSec.lines[lineIndex]
+  } else {
+    targetTLine = transSec.lines.find(l => isLineWorkSnapshot(l)) || null
+  }
+
+  if (!targetTLine) return null
+
+  const parsedSnapshot = parseWorkSnapshot(getSnapshotRaw(targetTLine))
+  const tExperiences = parsedSnapshot.experiences
+  if (!tExperiences || tExperiences.length === 0) {
+    const rawText = getSnapshotRaw(targetTLine).trim()
+    if (rawText) {
+      return {
+        period: origExp.period,
+        company: origExp.company,
+        role: origExp.role,
+        details: [rawText]
+      }
+    }
+    return null
+  }
+
+  // 2. 匹配规则：优先按时间段 (period) 匹配
+  const cleanPeriod = (p: string) => (p || '').replace(/\s+/g, '')
+  const origP = cleanPeriod(origExp.period)
+  if (origP) {
+    const matchedByPeriod = tExperiences.find(te => {
+      const tp = cleanPeriod(te.period)
+      return tp && (tp === origP || tp.includes(origP) || origP.includes(tp))
+    })
+    if (matchedByPeriod) return matchedByPeriod
+  }
+
+  // 3. 次优匹配：按公司名关键词模糊匹配
+  if (origExp.company) {
+    const matchedByCompany = tExperiences.find(te => {
+      return te.company && (te.company.includes(origExp.company) || origExp.company.includes(te.company))
+    })
+    if (matchedByCompany) return matchedByCompany
+  }
+
+  // 4. 下标对齐兜底
+  if (expIndex < tExperiences.length) {
+    return tExperiences[expIndex]
+  }
+
+  return null
 }
 
 function translationSourceSections(): string[] {
@@ -4216,11 +4300,72 @@ details.candidate-portal-bar[open] > summary.portal-header { margin-bottom: 12px
     .work-snapshot h4 { margin: 0; color: $text-secondary; font-size: 12px; }
     .snapshot-facts { display: flex; flex-wrap: wrap; gap: 6px; }
     .snapshot-facts span { padding: 4px 8px; border-radius: 6px; background: $bg-primary; border: 1px solid $separator; color: $text-secondary; font-size: 12px; overflow-wrap: anywhere; }
-    .snapshot-experience { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 10px; padding: 12px 14px; border: 1px solid $separator; border-left: 3px solid $system-blue; border-radius: 8px; background: $bg-primary; }
+    .snapshot-experience {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: baseline;
+      gap: 6px 10px;
+      padding: 12px 14px;
+      border: 1px solid $separator;
+      border-left: 3px solid $system-blue;
+      border-radius: 8px;
+      background: $bg-primary;
+
+      &.translated-subcard {
+        margin-top: -4px;
+        margin-bottom: 8px;
+        border-left: 3px solid #10b981;
+        background: rgba(16, 185, 129, 0.04);
+        border-color: rgba(16, 185, 129, 0.22);
+
+        .translated-subcard-header {
+          width: 100%;
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          margin-bottom: 4px;
+
+          .subcard-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            font-size: 11px;
+            font-weight: 700;
+            color: #059669;
+            background: rgba(16, 185, 129, 0.12);
+            padding: 2px 7px;
+            border-radius: 4px;
+          }
+
+          .subcard-period {
+            font-size: 11.5px;
+            font-weight: 600;
+            color: #059669;
+          }
+        }
+
+        .snapshot-period {
+          color: #059669;
+        }
+      }
+    }
     .snapshot-period { color: $system-blue; font-size: 12px; font-weight: 700; }
     .snapshot-experience strong { color: $text-primary; font-size: 13px; overflow-wrap: anywhere; }
     .snapshot-role { color: $text-secondary; font-size: 12px; }
     .snapshot-experience p { flex-basis: 100%; margin: 0; color: $text-secondary; font-size: 12px; line-height: 1.6; overflow-wrap: anywhere; }
+
+    .inline-trans-note {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      margin: 0;
+      padding: 8px 12px;
+      font-size: 12px;
+      color: #059669;
+      background: rgba(16, 185, 129, 0.08);
+      border-radius: 6px;
+      border: 1px solid rgba(16, 185, 129, 0.2);
+    }
 
     .section-translation-container {
       margin-top: 14px;
