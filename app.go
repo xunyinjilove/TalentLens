@@ -36,7 +36,7 @@ import (
 )
 
 // 版本信息
-const AppVersion = "1.8.33"
+const AppVersion = "1.8.34"
 const analysisFormatRetryVersion = "model-json-repair-v1"
 const GitHubRepo = "xunyinjilove/TalentLens"
 
@@ -3837,9 +3837,18 @@ func scoreCandidate(result *AnalysisResult, criteria []string) {
 	result.ScoreLowerBound = lowerBound
 	result.ScoreUpperBound = upperBound
 
-	if coveredCount < len(criteria) && (result.SkillMatch > 0 || result.ExperienceMatch > 0) {
-		result.CoreMatch = clampFloat(result.SkillMatch*0.55+result.ExperienceMatch*0.45, 0, 100)
-		result.ScoreBasis = "provisional"
+	macroScore := 0.0
+	if result.SkillMatch > 0 || result.ExperienceMatch > 0 {
+		macroScore = clampFloat(result.SkillMatch*0.55+result.ExperienceMatch*0.45, 0, 100)
+	}
+
+	if macroScore > 0 {
+		result.CoreMatch = math.Round(macroScore)
+		if rankEligible {
+			result.ScoreBasis = "rubric"
+		} else {
+			result.ScoreBasis = "provisional"
+		}
 	} else if rankEligible {
 		result.CoreMatch = math.Round(knownScore)
 		result.ScoreBasis = "rubric"
@@ -3849,11 +3858,6 @@ func scoreCandidate(result *AnalysisResult, criteria []string) {
 		} else {
 			result.CoreMatch = math.Round(knownScore)
 		}
-		result.ScoreBasis = "provisional"
-	} else if result.SkillMatch > 0 || result.ExperienceMatch > 0 {
-		result.CoreMatch = clampFloat(result.SkillMatch*0.55+result.ExperienceMatch*0.45, 0, 100)
-		result.ScoreBasis = "provisional"
-	} else if result.CoreMatch > 0 {
 		result.ScoreBasis = "provisional"
 	} else {
 		result.CoreMatch = 0
@@ -4041,14 +4045,10 @@ func refreshBonusVerdict(result *AnalysisResult) {
 // generateFallbackManagerPitch 当大模型未返回推介卡时的容错生成器
 func (a *App) buildReviewedManagerPitch(res *AnalysisResult, resume *Resume) string {
 	pitch := a.generateFallbackManagerPitch(res, resume)
-	switch res.RedLineStatus {
-	case "failed":
+	if res.RedLineStatus == "failed" {
 		return "【HR 已核实未满足岗位必备条件】\n" + pitch
-	case "pending":
-		return "【岗位红线待核实，暂勿作为通过人选推介】\n" + pitch
-	default:
-		return pitch
 	}
+	return pitch
 }
 
 func (a *App) generateFallbackManagerPitch(res *AnalysisResult, resume *Resume) string {
