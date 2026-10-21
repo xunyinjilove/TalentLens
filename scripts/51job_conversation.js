@@ -246,6 +246,146 @@ function readCommunicationJobs(keyword = '') {
       : '51job 暂未返回可选沟通职位，请输入职位关键词搜索或检查企业账号' };
 }
 
+// Run only the site's existing read-only job-list operations. Its request
+// client keeps credentials inside the already logged-in browser session.
+async function requestAccountJobPage(operation, parameters) {
+  if (!['getCombineJoblist', 'getTalentJobList'].includes(operation)) {
+    return { status: 'error', message: '不支持的职位目录读取操作' };
+  }
+  if (location.origin !== 'https://ehire.51job.com' || /\/login\b/i.test(location.pathname)) {
+    return { status: 'needs_login', message: '请先在 51job 企业浏览器中登录后同步职位' };
+  }
+  const chunks = window.webpackJsonp;
+  if (!chunks || typeof chunks.push !== 'function') {
+    return { status: 'catalog_unavailable', message: '51job 企业页面尚未加载职位读取组件' };
+  }
+  let requireModule;
+  const probeID = 'talentlens_readonly_job_catalog_' + Date.now() + '_' + Math.random().toString(36).slice(2);
+  const chunk = [[probeID], { [probeID]: (module, exports, require) => { requireModule = require; } }, [[probeID]]];
+  try {
+    chunks.push(chunk);
+    if (!requireModule?.m || !requireModule?.c) {
+      return { status: 'catalog_unavailable', message: '51job 当前页面不支持账号职位目录读取' };
+    }
+    // 5377 is the currently verified adapter. Look through loaded modules as
+    // well so a chunk/module renumbering need not force a candidate-page read.
+    const candidates = ['5377', ...Object.keys(requireModule.c).filter(id => id !== '5377')];
+    for (const id of candidates) {
+      const factory = requireModule.m[id];
+      if (typeof factory !== 'function') continue;
+      const source = Function.prototype.toString.call(factory);
+      if (!source.includes('responseType') || !source.includes('cancelable') || !source.includes('params')) continue;
+      const client = requireModule(id)?.a;
+      if (typeof client !== 'function') continue;
+      let timeout;
+      let result;
+      try {
+        result = await Promise.race([
+          client(operation, parameters),
+          new Promise((resolve, reject) => { timeout = setTimeout(() => reject(new Error('job catalog timeout')), 10000); })
+        ]);
+      } finally { clearTimeout(timeout); }
+      return { result: result?.result, data: result?.data, message: result?.message || result?.msg || '' };
+    }
+    return { status: 'catalog_unavailable', message: '51job 职位请求组件已变化，请刷新企业页面后同步' };
+  } catch {
+    return { status: 'error', message: '51job 账号职位目录读取失败，请确认登录与账号权限后重试' };
+  } finally {
+    if (requireModule) {
+      delete requireModule.m?.[probeID];
+      delete requireModule.c?.[probeID];
+    }
+    // Remove only our capture, leaving every platform chunk untouched.
+    const index = chunks.indexOf?.(chunk) ?? -1;
+    if (index >= 0) chunks.splice(index, 1);
+  }
+}
+
+async function listAccountCommunicationJobs(browser, keyword = '') {
+  const pages = (await browser.pages()).filter(page => {
+    try { return new URL(page.url()).origin === 'https://ehire.51job.com' && !/\/login\b/i.test(new URL(page.url()).pathname); }
+    catch { return false; }
+  });
+  if (!pages.length) return { status: 'needs_login', message: '请先在 51job 企业浏览器中登录后同步职位' };
+  const page = pages.find(p => p.url().includes('/Revision/navigate')) || pages[0];
+  const session = await page.createCDPSession?.();
+  try {
+    // Edge may freeze/minimize its background page. Keep only this read alive
+    // without navigating or bringing the browser window to the foreground.
+    if (session) {
+      await session.send('Page.setWebLifecycleState', { state: 'active' });
+      await session.send('Emulation.setFocusEmulationEnabled', { enabled: true });
+    }
+    return await readAccountCommunicationJobDirectory(page, keyword);
+  } finally {
+    if (session) {
+      await session.send('Emulation.setFocusEmulationEnabled', { enabled: false }).catch(() => {});
+      await session.detach().catch(() => {});
+    }
+  }
+}
+
+async function readAccountCommunicationJobDirectory(page, keyword = '') {
+  const query = String(keyword || '').trim();
+  const jobs = new Map();
+  const add = (items, source) => {
+    for (const item of items) {
+      const id = String(item.jobid || '').trim();
+      const title = String(item.jobname || item.job_name || '').trim();
+      if (!id || !title) continue;
+      const companyId = String(item.coid || '').trim();
+      const key = companyId + ':' + id;
+      jobs.set(key, { id, title, companyId,
+        company: String(item.coName || item.coname || '').trim(),
+        workArea: String(item.workArea || item.workarea || '').trim(),
+        publishStatus: String(item.publishStatus || item.publish_status || '').trim(),
+        source: jobs.get(key)?.source || source });
+    }
+  };
+  let hasMore = false;
+  if (!query) {
+    const initial = await page.evaluate(requestAccountJobPage, 'getCombineJoblist', {
+      page_size: 20, return_co_name: '1', isNeedOfflineJobs: false
+    });
+    if (initial?.status) return initial;
+    if (String(initial?.result) !== '1' || !Array.isArray(initial.data?.my_job_list) || !Array.isArray(initial.data?.company_job_list)) {
+      return { status: 'error', message: '51job 未返回有效的账号可沟通职位目录，请确认登录与职位权限' };
+    }
+    add(initial.data.my_job_list, '我的职位');
+    add(initial.data.company_job_list, '公司职位');
+    hasMore = ['1', 'true'].includes(String(initial.data.more_my_job)) || ['1', 'true'].includes(String(initial.data.more_company_job));
+  }
+  if (query || hasMore) {
+    let received = 0;
+    let previousPage = '';
+    for (let pageIndex = 1; pageIndex <= 100; pageIndex++) {
+      const result = await page.evaluate(requestAccountJobPage, 'getTalentJobList', {
+        jobName: query, type: '0', pageIndex: String(pageIndex), pageSize: '30', isChatList: '1', returnCoName: '1'
+      });
+      if (result?.status || String(result?.result) !== '1' || !Array.isArray(result.data?.joblist)) {
+        if (!jobs.size) return result?.status ? result : { status: 'error', message: '51job 职位分页读取失败' };
+        hasMore = true;
+        break;
+      }
+      const items = result.data.joblist;
+      const signature = JSON.stringify(items.map(j => [j.coid, j.jobid]));
+      if (pageIndex > 1 && signature === previousPage) {
+        hasMore = true;
+        break;
+      }
+      add(items, query ? '搜索结果' : '可沟通职位');
+      received += items.length;
+      const total = Number(result.data.totalcount);
+      hasMore = !Number.isFinite(total) || total < 0 || received < total;
+      if (!hasMore) break;
+      if (!items.length) break;
+      previousPage = signature;
+    }
+  }
+  return { status: 'jobs', jobs: [...jobs.values()], hasMore,
+    message: `已从 51job 账号目录读取 ${jobs.size} 个可沟通职位${hasMore ? '，部分分页未完成，可继续刷新' : ''}` };
+}
+
 async function listCommunicationJobs(page, keyword = '') {
   const query = String(keyword || '').trim();
   const session = await page.createCDPSession();
@@ -582,30 +722,38 @@ async function revealJobConfirmation(browser, page, outputDir) {
   } catch { return false; }
 }
 
-async function main(argv = process.argv.slice(2)) {
+async function main(argv = process.argv.slice(2), writeResult = result => process.stdout.write(JSON.stringify(result) + '\n'), connect = options => puppeteer.connect(options)) {
   let browser;
   const args = readArgs(argv);
   try {
-    const expected = parseCandidateUrl(args.url);
-    if (!['verify_candidate', 'list_jobs', 'preview_hi', 'confirm_hi', 'ask_resume', 'send_outreach', 'check_resume', 'check_replies'].includes(args.action)) throw new Error('不支持的 51job 沟通操作');
-    if (!/^[A-Za-z0-9_-]+$/.test(args.recordID)) throw new Error('候选人档案编号无效');
+    const accountCatalog = args.action === 'list_account_jobs';
+    const expected = accountCatalog ? null : parseCandidateUrl(args.url);
+    if (!['list_account_jobs', 'verify_candidate', 'list_jobs', 'preview_hi', 'confirm_hi', 'ask_resume', 'send_outreach', 'check_resume', 'check_replies'].includes(args.action)) throw new Error('不支持的 51job 沟通操作');
+    if (!accountCatalog && !/^[A-Za-z0-9_-]+$/.test(args.recordID)) throw new Error('候选人档案编号无效');
     if (args.action === 'confirm_hi' && (!args.name || !args.jobTitle || !args.expectedJobID || !args.targetID ||
         !Number.isSafeInteger(Number(args.expectedPoints)) || Number(args.expectedPoints) <= 0)) {
       throw new Error('51job 点数确认参数不完整，未点击发起Hi聊');
     }
     try {
-      browser = await puppeteer.connect({ browserURL: 'http://127.0.0.1:9503', defaultViewport: null });
+      browser = await connect({ browserURL: 'http://127.0.0.1:9503', defaultViewport: null, protocolTimeout: accountCatalog ? 20000 : 180000 });
     } catch (error) {
       for (let i = 0; i < 5; i++) {
         await new Promise(r => setTimeout(r, 600));
         try {
-          browser = await puppeteer.connect({ browserURL: 'http://127.0.0.1:9503', defaultViewport: null });
+          browser = await connect({ browserURL: 'http://127.0.0.1:9503', defaultViewport: null, protocolTimeout: accountCatalog ? 20000 : 180000 });
           if (browser) break;
         } catch (_) {}
       }
       if (!browser) {
         if (args.action === 'confirm_hi') throw error;
-        process.stdout.write(JSON.stringify({ status: 'needs_login', message: '51job 企业浏览器未就绪或尚未登录，已为您打开登录窗口，请在浏览器中登录后重试' }) + '\n');
+        writeResult({ status: 'needs_login', message: '51job 企业浏览器未就绪或尚未登录，已为您打开登录窗口，请在浏览器中登录后重试' });
+        return;
+      }
+    }
+    if (accountCatalog || args.action === 'list_jobs') {
+      const catalog = await listAccountCommunicationJobs(browser, args.message);
+      if (accountCatalog || catalog.status !== 'catalog_unavailable') {
+        writeResult(catalog);
         return;
       }
     }
@@ -616,12 +764,12 @@ async function main(argv = process.argv.slice(2)) {
         const page = await target?.page();
         if (page) await revealJobConfirmation(browser, page, args.outputDir);
       }
-      process.stdout.write(JSON.stringify(result) + '\n');
+      writeResult(result);
       return;
     }
     const page = await candidatePage(browser, expected, args.name);
     if (args.action === 'verify_candidate') {
-      process.stdout.write(JSON.stringify({ status: 'verified', targetId: expected.resumeId, message: '51job 详情页与候选人姓名已核对' }) + '\n');
+      writeResult({ status: 'verified', targetId: expected.resumeId, message: '51job 详情页与候选人姓名已核对' });
       return;
     }
     const readingReply = args.action === 'check_resume' || args.action === 'check_replies';
@@ -629,14 +777,14 @@ async function main(argv = process.argv.slice(2)) {
     const chat = await openCandidateChat(page, args.name,
       readingReply ? '' : args.jobTitle, !manualJobSelection);
     if (readingReply && chat.status) {
-      process.stdout.write(JSON.stringify({status:'waiting',message:'尚未发现可读取的已有会话；可打开平台核查，本次未发起Hi聊或发送消息',replies:[],attachmentNames:[]})+'\n');
+      writeResult({status:'waiting',message:'尚未发现可读取的已有会话；可打开平台核查，本次未发起Hi聊或发送消息',replies:[],attachmentNames:[]});
       return;
     }
     if (args.action === 'list_jobs') {
       const result = chat.status === 'needs_job_selection'
         ? await listCommunicationJobs(page, args.message)
         : { status: 'error', message: '51job 已有该候选人的聊天窗口；请先核对现有沟通记录，未重复打招呼' };
-      process.stdout.write(JSON.stringify(result) + '\n');
+      writeResult(result);
       return;
     }
     if (args.action === 'preview_hi') {
@@ -650,26 +798,26 @@ async function main(argv = process.argv.slice(2)) {
       if (result.status === 'needs_job_selection' || result.status === 'needs_manual_confirmation') {
         if (!await revealJobConfirmation(browser, page, args.outputDir)) result.message += '；请手动打开候选人页面';
       }
-      process.stdout.write(JSON.stringify(result) + '\n');
+      writeResult(result);
       return;
     }
     if (chat.status === 'needs_confirmation' || chat.status === 'needs_job_selection') {
       if (!await revealJobConfirmation(browser, page, args.outputDir)) {
         chat.message += '；请手动打开 51job 候选人页面查看';
       }
-      process.stdout.write(JSON.stringify(chat) + '\n');
+      writeResult(chat);
       return;
     }
     const result = readingReply
       ? await inspectReply(page, args.outputDir, args.recordID, JSON.parse(args.known || '[]'), args.action === 'check_resume')
       : await sendCandidateMessage(page, args.message, args.action === 'ask_resume');
-    process.stdout.write(JSON.stringify(result) + '\n');
+    writeResult(result);
   } catch (error) {
     const status = args.action === 'confirm_hi' ? 'uncertain' : error.code === '51JOB_BROWSER_UNAVAILABLE' ? 'needs_login' : 'error';
     const message = args.action === 'confirm_hi'
       ? `51job 发起Hi聊过程未完成（${error.message}）；请核对该候选人的聊天记录，暂勿重复操作`
       : error.message;
-    process.stdout.write(JSON.stringify({ status, message }) + '\n');
+    writeResult({ status, message });
   } finally {
     if (browser) await browser.disconnect().catch(() => {});
   }
@@ -681,5 +829,6 @@ module.exports = { parseCandidateUrl, sameCandidatePage, sameDisplayedName, find
   attachmentFingerprint, selectInboundAttachment, validResumeBytes, platformChatGateVisible,
   searchCommunicationJob, clickExactCommunicationJob, selectCommunicationJob, readHiChatQuote,
   readCommunicationJobs, listCommunicationJobs, setCommunicationJobByID, selectCommunicationJobByID,
+  requestAccountJobPage, listAccountCommunicationJobs,
   previewHiChat, clickQuotedHiChat, confirmHiChat, openCandidateChat,
   sendCandidateMessage, inspectReply, main };

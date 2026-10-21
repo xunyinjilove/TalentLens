@@ -325,11 +325,82 @@
 
         <el-form-item>
           <template #label>
-            <span>岗位职责与要求 (AI 画像核心参考)</span>
-            <el-button class="ai-description-action" type="primary" link :loading="aiDraftGenerating" @click="generateJobDescription">
-              AI 一键帮写
-            </el-button>
+            <div class="job-description-label-row">
+              <span>岗位职责与要求 (AI 画像核心参考)</span>
+              <el-dropdown trigger="click" @command="handleAiDraftCommand">
+                <el-button class="ai-description-action" type="primary" link :loading="aiDraftGenerating">
+                  ✨ AI 一键帮写 <el-icon class="el-icon--right"><ArrowDown /></el-icon>
+                </el-button>
+                <template #dropdown>
+                  <el-dropdown-menu>
+                    <el-dropdown-item command="fresh">按当前职位全新起草 (推荐)</el-dropdown-item>
+                    <el-dropdown-item command="refine" :disabled="!jobForm.job_description.trim()">基于现有描述优化润色</el-dropdown-item>
+                  </el-dropdown-menu>
+                </template>
+              </el-dropdown>
+            </div>
           </template>
+
+          <!-- 岗位方向确认卡片（针对器械/硬件等涉及多个细分领域的岗位） -->
+          <div v-if="directionPromptVisible" class="direction-prompt-card">
+            <div class="direction-prompt-title">
+              <el-icon color="#4f46e5"><Guide /></el-icon>
+              <span>职位【{{ jobForm.title }}】涉及多个专业方向，请指定具体的细分方向：</span>
+            </div>
+            <div class="direction-tags">
+              <el-button
+                v-for="dir in suggestedDirections"
+                :key="dir"
+                size="small"
+                plain
+                type="primary"
+                :loading="aiDraftGenerating"
+                @click="() => selectDirectionAndGenerate(dir)"
+              >
+                {{ dir }}
+              </el-button>
+            </div>
+            <div class="direction-custom-row">
+              <el-input
+                v-model="customDirectionInput"
+                size="small"
+                placeholder="或输入自定义专业方向，如：医疗器械机械结构设计"
+                style="max-width: 320px;"
+                @keyup.enter="() => selectDirectionAndGenerate(customDirectionInput)"
+              />
+              <el-button
+                size="small"
+                type="primary"
+                :disabled="!customDirectionInput.trim()"
+                @click="() => selectDirectionAndGenerate(customDirectionInput)"
+              >
+                按此方向生成
+              </el-button>
+              <el-button size="small" @click="directionPromptVisible = false">取消</el-button>
+            </div>
+          </div>
+
+          <!-- 跨领域历史遗留技能冲突警告 -->
+          <el-alert
+            v-if="activeConflicts.length"
+            type="warning"
+            show-icon
+            :closable="false"
+            style="margin-bottom: 12px"
+          >
+            <template #title>
+              <span>跨领域技能冲突提示</span>
+            </template>
+            <div style="font-size: 12px; margin-top: 4px;">
+              <div v-for="(c, idx) in activeConflicts" :key="idx">{{ c }}</div>
+              <div style="margin-top: 8px;">
+                <el-button size="small" type="danger" plain @click="removeConflictingSkills">
+                  一键移除表单中不匹配的遗留技能
+                </el-button>
+              </div>
+            </div>
+          </el-alert>
+
           <el-input
             v-model="jobForm.job_description"
             type="textarea"
@@ -341,8 +412,14 @@
 
         <div v-if="aiDraft" class="ai-description-preview">
           <div class="ai-preview-heading">
-            <strong>AI 起草预览</strong>
-            <el-button type="primary" size="small" @click="applyJobDescriptionDraft">应用到编辑框</el-button>
+            <div>
+              <strong>✨ AI 起草预览</strong>
+              <span v-if="currentDraftDirection" class="direction-badge">{{ currentDraftDirection }}</span>
+            </div>
+            <div style="display: flex; gap: 8px;">
+              <el-button size="small" @click="aiDraft = ''">放弃草稿</el-button>
+              <el-button type="primary" size="small" @click="applyJobDescriptionDraft">应用到编辑框</el-button>
+            </div>
           </div>
           <pre>{{ aiDraft }}</pre>
         </div>
@@ -350,7 +427,7 @@
         <el-form-item label="必备关键技能 / 评分项 (回车分隔)">
           <el-input
             v-model="skillsInput"
-            placeholder="如：Vue3, TypeScript, 性能优化（以逗号或回车隔开）"
+            placeholder="输入核心专业技能，多个技能以逗号或回车隔开 (选填，留空由 AI 智能拟定)"
             @blur="syncSkills"
           />
         </el-form-item>
@@ -398,7 +475,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, onMounted, onUnmounted, reactive, ref } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import {
   Search,
@@ -412,7 +489,10 @@ import {
   Link,
   Document,
   Refresh,
-  Delete
+  Delete,
+  ArrowDown,
+  Guide,
+  WarningFilled
 } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { useProjectStore, type Project } from '../composables/useProjectStore'
@@ -434,6 +514,13 @@ const loading = ref(false)
 const saving = ref(false)
 const aiDraftGenerating = ref(false)
 const aiDraft = ref('')
+const currentDraftDirection = ref('')
+const currentFormInstanceId = ref('')
+const directionPromptVisible = ref(false)
+const suggestedDirections = ref<string[]>([])
+const customDirectionInput = ref('')
+const activeConflicts = ref<string[]>([])
+let activeRequestSeq = 0
 const keyword = ref('')
 const globalSearch = ref('')
 const selectedDepartment = ref('')
@@ -473,6 +560,7 @@ const mappingOpen = computed({
 // 表单数据
 const jobForm = reactive({
   title: '',
+  direction: '',
   department: '研发中心',
   headcount: 1,
   recruiter: '',
@@ -601,9 +689,16 @@ function goToTalentPool(projectId: string) {
 // 模态弹窗控制
 function openCreateModal() {
   aiDraft.value = ''
+  currentDraftDirection.value = ''
+  directionPromptVisible.value = false
+  suggestedDirections.value = []
+  customDirectionInput.value = ''
+  activeConflicts.value = []
   isEditing.value = false
   currentEditProjectId.value = null
+  currentFormInstanceId.value = 'form_' + Date.now()
   jobForm.title = ''
+  jobForm.direction = ''
   jobForm.department = '研发中心'
   jobForm.headcount = 1
   jobForm.recruiter = ''
@@ -614,16 +709,23 @@ function openCreateModal() {
   jobForm.experience_years = '3-5 年'
   jobForm.education_level = '本科'
   jobForm.job_description = ''
-  skillsInput.value = 'Vue3, TypeScript, 性能优化'
+  skillsInput.value = '' // 清空默认值，杜绝硬编码预填前端技能
   interviewQuestionsInput.value = ''
   editModalVisible.value = true
 }
 
 function openEditModal(project: Project) {
   aiDraft.value = ''
+  currentDraftDirection.value = ''
+  directionPromptVisible.value = false
+  suggestedDirections.value = []
+  customDirectionInput.value = ''
+  activeConflicts.value = []
   isEditing.value = true
   currentEditProjectId.value = project.id
+  currentFormInstanceId.value = 'form_' + Date.now()
   jobForm.title = project.job_config?.title || project.name
+  jobForm.direction = ''
   jobForm.department = project.department || ''
   jobForm.headcount = project.headcount || 1
   jobForm.recruiter = project.recruiter || ''
@@ -634,7 +736,13 @@ function openEditModal(project: Project) {
   jobForm.experience_years = formatExpRequirement(project.job_config)
   jobForm.education_level = project.job_config?.education_level || '本科'
   jobForm.job_description = project.job_config?.job_description || ''
-  skillsInput.value = (project.job_config?.core_criteria || project.job_config?.required_skills || []).join(', ')
+
+  // 修复空数组短路 bug：若 core_criteria 为 [] 则正确读取 required_skills
+  const existingSkills = (project.job_config?.core_criteria && project.job_config.core_criteria.length > 0)
+    ? project.job_config.core_criteria
+    : (project.job_config?.required_skills || [])
+  skillsInput.value = existingSkills.join(', ')
+
   const qList = (project.job_config?.interview_questions || []).slice()
   if (!qList.length) {
     if (project.job_config?.red_lines) qList.push(...project.job_config.red_lines)
@@ -644,28 +752,103 @@ function openEditModal(project: Project) {
   editModalVisible.value = true
 }
 
-async function generateJobDescription() {
-  if (!jobForm.title.trim()) {
+// 职位标题变化时，使旧草稿和旧方向失效
+watch(() => jobForm.title, (newTitle, oldTitle) => {
+  if (oldTitle && newTitle !== oldTitle) {
+    aiDraft.value = ''
+    currentDraftDirection.value = ''
+    directionPromptVisible.value = false
+    activeConflicts.value = []
+  }
+})
+
+function handleAiDraftCommand(cmd: string) {
+  if (cmd === 'refine') {
+    void generateJobDescription('refine')
+  } else {
+    void generateJobDescription('fresh')
+  }
+}
+
+function selectDirectionAndGenerate(dir: string) {
+  const cleanDir = dir.trim()
+  if (!cleanDir) return
+  jobForm.direction = cleanDir
+  directionPromptVisible.value = false
+  customDirectionInput.value = ''
+  void generateJobDescription('fresh', cleanDir)
+}
+
+function removeConflictingSkills() {
+  const current = splitTags(skillsInput.value)
+  const filtered = current.filter(s => {
+    const sLower = s.toLowerCase()
+    return !['vue', 'vue3', 'typescript', 'ts', 'react', 'angular', 'css', 'css3', 'html5', 'webpack', 'vite', '前端开发', '代码评审', '性能优化'].some(kw => sLower.includes(kw))
+  })
+  skillsInput.value = filtered.join(', ')
+  activeConflicts.value = []
+  ElMessage.success('已清理跨领域遗留技能')
+}
+
+async function generateJobDescription(mode: 'fresh' | 'refine' = 'fresh', explicitDirection?: string) {
+  const title = jobForm.title.trim()
+  if (!title) {
     ElMessage.warning('请先填写职位名称')
     return
   }
+  const thisInstanceId = currentFormInstanceId.value
+  const reqSeq = ++activeRequestSeq
   aiDraftGenerating.value = true
   aiDraft.value = ''
+  directionPromptVisible.value = false
+
   try {
     const api: any = await import('../../wailsjs/go/main/App')
-    aiDraft.value = await api.GenerateJobDescriptionDraft({
-      title: jobForm.title.trim(),
+    const dir = explicitDirection !== undefined ? explicitDirection : jobForm.direction
+    const res = await api.GenerateJobDescriptionDraft({
+      formInstanceId: thisInstanceId,
+      projectId: currentEditProjectId.value || '',
+      requestId: `req_${reqSeq}`,
+      title,
+      direction: dir,
       department: jobForm.department.trim(),
       city: jobForm.city,
       experienceYears: parseExperienceYears(jobForm.experience_years),
       educationLevel: jobForm.education_level,
       skills: splitTags(skillsInput.value),
-      currentText: jobForm.job_description.trim()
+      currentText: mode === 'refine' ? jobForm.job_description.trim() : '',
+      mode
     })
+
+    // 竞态保护：如果返回时表单已关闭或切换到其他职位，丢弃过期响应
+    if (currentFormInstanceId.value !== thisInstanceId || jobForm.title.trim() !== title) {
+      return
+    }
+
+    if (res.status === 'needs_direction') {
+      suggestedDirections.value = res.suggestedDirections || []
+      directionPromptVisible.value = true
+      return
+    }
+
+    if (res.status === 'ready' || res.draft) {
+      aiDraft.value = res.draft
+      currentDraftDirection.value = res.direction || dir || title
+      activeConflicts.value = res.conflicts || []
+      if (res.conflicts && res.conflicts.length > 0) {
+        ElMessage.warning('检测到历史遗留技能与当前岗位方向冲突，已自动隔离')
+      } else {
+        ElMessage.success('已生成匹配该岗位的职责与要求草稿')
+      }
+    } else {
+      ElMessage.warning(res.message || '未能生成有效文案，请重试')
+    }
   } catch (err: any) {
     ElMessage.error(err?.message || String(err))
   } finally {
-    aiDraftGenerating.value = false
+    if (activeRequestSeq === reqSeq) {
+      aiDraftGenerating.value = false
+    }
   }
 }
 
@@ -673,7 +856,8 @@ function applyJobDescriptionDraft() {
   if (!aiDraft.value) return
   jobForm.job_description = aiDraft.value
   aiDraft.value = ''
-  ElMessage.success('草稿已填入编辑框，请核对后保存职位')
+  activeConflicts.value = []
+  ElMessage.success('草稿已填入编辑框，核对后请点击下方的“保存职位”')
 }
 
 async function saveJob() {
@@ -1283,6 +1467,56 @@ onUnmounted(() => {
 /* 表单与弹窗排版 */
 .job-dialog-form {
   padding-top: 8px;
+}
+
+.job-description-label-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  width: 100%;
+}
+
+.direction-prompt-card {
+  padding: 12px 14px;
+  background: rgba(79, 70, 229, 0.05);
+  border: 1px dashed rgba(79, 70, 229, 0.3);
+  border-radius: 8px;
+  margin-bottom: 12px;
+}
+
+.direction-prompt-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: 600;
+  color: #4f46e5;
+  margin-bottom: 8px;
+}
+
+.direction-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.direction-custom-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.direction-badge {
+  display: inline-block;
+  margin-left: 8px;
+  padding: 2px 8px;
+  border-radius: 4px;
+  background: rgba(79, 70, 229, 0.1);
+  color: #4f46e5;
+  font-size: 11px;
+  font-weight: normal;
 }
 
 .ai-description-action {

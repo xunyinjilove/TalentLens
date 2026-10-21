@@ -8,7 +8,137 @@ const { parseCandidateUrl, sameCandidatePage, sameDisplayedName, attachmentFinge
   searchCommunicationJob, clickExactCommunicationJob, selectCommunicationJob, platformChatGateVisible,
   readHiChatQuote, previewHiChat, clickQuotedHiChat, confirmHiChat,
   readCommunicationJobs, listCommunicationJobs, setCommunicationJobByID, selectCommunicationJobByID,
-  waitCandidateReady, candidatePage } = require('./51job_conversation');
+  waitCandidateReady, candidatePage, requestAccountJobPage, listAccountCommunicationJobs, main } = require('./51job_conversation');
+
+test('account job sync reads real job lists without any candidate or chat entry', async () => {
+  const calls = [];
+  const sessionCalls = [];
+  let active = false;
+  const page = {
+    url: () => 'https://ehire.51job.com/Revision/navigate/',
+    createCDPSession: async () => ({
+      send: async (method, parameters) => {
+        sessionCalls.push(method);
+        if (method === 'Emulation.setFocusEmulationEnabled') active = parameters.enabled;
+      },
+      detach: async () => { sessionCalls.push('detach'); }
+    }),
+    evaluate: async (fn, operation, params) => {
+      assert.equal(fn, requestAccountJobPage);
+      assert.equal(active, true, '后台目录读取须保持页面活动而不激活浏览器窗口');
+      calls.push(operation);
+      assert.equal(params.isNeedOfflineJobs, false);
+      return { result: '1', data: { my_job_list: [], company_job_list: [
+        { jobid: 101, job_name: '测试工程师', coid: 50, coname: '测试公司', workarea: '上海' }
+      ], more_my_job: '0', more_company_job: '0' } };
+    },
+    goto: () => assert.fail('账号目录同步不应导航到候选人'),
+    click: () => assert.fail('同步职位不能点击聊天或发送')
+  };
+  const result = await listAccountCommunicationJobs({ pages: async () => [page] });
+  assert.equal(result.status, 'jobs');
+  assert.equal(result.jobs[0].id, '101');
+  assert.equal(result.jobs[0].companyId, '50');
+  assert.equal(result.jobs[0].source, '公司职位');
+  assert.equal(result.hasMore, false);
+  assert.deepEqual(calls, ['getCombineJoblist']);
+  assert.equal(active, false);
+  assert.deepEqual(sessionCalls, ['Page.setWebLifecycleState', 'Emulation.setFocusEmulationEnabled', 'Emulation.setFocusEmulationEnabled', 'detach']);
+});
+
+test('legacy list_jobs uses the account catalog before touching an unavailable candidate', async () => {
+  const outputs = [];
+  let disconnected = false;
+  const connect = async () => ({
+    pages: async () => [{ url: () => 'https://ehire.51job.com/Revision/navigate/', evaluate: async (fn, operation) => {
+      assert.equal(fn, requestAccountJobPage);
+      assert.equal(operation, 'getCombineJoblist');
+      return { result: '1', data: { my_job_list: [], company_job_list: [{ jobid: 101, job_name: '测试工程师' }], more_my_job: '0', more_company_job: '0' } };
+    } }],
+    disconnect: async () => { disconnected = true; }
+  });
+  await main(['--action', 'list_jobs', '--candidate-url', 'https://ehire.51job.com/Revision/talent/resume/detail?resumeId=123', '--resume-record', 'readonly_sync'], result => outputs.push(result), connect);
+  assert.equal(outputs.length, 1);
+  const result = outputs[0];
+  assert.equal(result.status, 'jobs');
+  assert.equal(result.jobs.length, 1);
+  assert.equal(disconnected, true);
+});
+
+test('account job sync follows verified pagination and preserves partial results on a failed page', async () => {
+  const calls = [];
+  const page = { url: () => 'https://ehire.51job.com/Revision/navigate/', evaluate: async (fn, operation, params) => {
+    calls.push([operation, params.pageIndex]);
+    if (operation === 'getCombineJoblist') return { result: '1', data: {
+      my_job_list: [{ jobid: 1, job_name: '职位1' }], company_job_list: [], more_my_job: '1', more_company_job: '0'
+    } };
+    if (params.pageIndex === '1') return { result: '1', data: {
+      totalcount: 31, joblist: Array.from({ length: 30 }, (_, i) => ({ jobid: i + 1, jobname: '职位' + (i + 1) }))
+    } };
+    return { status: 'error', message: 'fixture pagination failed' };
+  } };
+  let result = await listAccountCommunicationJobs({ pages: async () => [page] });
+  assert.equal(result.status, 'jobs');
+  assert.equal(result.jobs.length, 30);
+  assert.equal(result.hasMore, true);
+  assert.equal(calls.length, 3);
+  const evaluate = page.evaluate;
+  page.evaluate = async (fn, operation, params) => params.pageIndex === '2'
+    ? { result: '1', data: { totalcount: 31, joblist: [{ jobid: 31, jobname: '职位31' }] } }
+    : evaluate(fn, operation, params);
+  result = await listAccountCommunicationJobs({ pages: async () => [page] });
+  assert.equal(result.jobs.length, 31);
+  assert.equal(result.hasMore, false);
+});
+
+test('a repeated platform page never masquerades as a complete job directory', async () => {
+  let calls = 0;
+  const page = { url: () => 'https://ehire.51job.com/Revision/navigate/', evaluate: async (fn, operation) => {
+    calls++;
+    if (operation === 'getCombineJoblist') return { result: '1', data: {
+      my_job_list: [], company_job_list: [], more_my_job: '1', more_company_job: '0'
+    } };
+    return { result: '1', data: { totalcount: 2, joblist: [{ jobid: 1, job_name: '同一职位' }] } };
+  } };
+  const result = await listAccountCommunicationJobs({ pages: async () => [page] });
+  assert.equal(result.jobs.length, 1);
+  assert.equal(result.hasMore, true);
+  assert.equal(calls, 3);
+});
+
+test('an invalid or unauthenticated account response is not cached as a valid empty list', async () => {
+  const page = { url: () => 'https://ehire.51job.com/Revision/navigate/', evaluate: async () => ({ result: '0' }) };
+  assert.equal((await listAccountCommunicationJobs({ pages: async () => [page] })).status, 'error');
+  page.url = () => 'https://ehire.51job.com/login';
+  assert.equal((await listAccountCommunicationJobs({ pages: async () => [page] })).status, 'needs_login');
+});
+
+test('account job requests whitelist read operations and clean up the runtime capture', async () => {
+  assert.equal((await requestAccountJobPage('confirm_hi', {})).status, 'error');
+  const oldWindow = global.window, oldLocation = global.location;
+  const calls = [];
+  const client = async (operation, parameters) => { calls.push(operation); return { result: '1', data: { my_job_list: [], company_job_list: [] } }; };
+  const req = id => req.c[id]?.exports;
+  req.m = { '5377': function verifiedRequestClient() { /* responseType cancelable params */ } };
+  req.c = { '5377': { exports: { a: client } } };
+  const chunks = [];
+  chunks.push = chunk => {
+    Array.prototype.push.call(chunks, chunk);
+    const id = chunk[2][0][0];
+    req.m[id] = chunk[1][id];
+    req.c[id] = { exports: {} };
+    req.m[id]({}, {}, req);
+  };
+  global.window = { webpackJsonp: chunks };
+  global.location = { origin: 'https://ehire.51job.com', pathname: '/Revision/navigate/' };
+  try {
+    assert.equal((await requestAccountJobPage('getCombineJoblist', {})).result, '1');
+    assert.deepEqual(calls, ['getCombineJoblist']);
+    assert.deepEqual(Object.keys(req.m), ['5377']);
+    assert.deepEqual(Object.keys(req.c), ['5377']);
+    assert.equal(chunks.length, 0);
+  } finally { global.window = oldWindow; global.location = oldLocation; }
+});
 
 test('51job detail opens chat through its visible div.chat_btn entry', () => {
   const entry = { innerText: '立即Hi聊', className: 'chat_btn', getClientRects: () => [1] };

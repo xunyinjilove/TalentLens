@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"strings"
 	"time"
 
@@ -268,7 +269,17 @@ func (a *App) GetCommunicationJobs(projectID, platform string) CommunicationJobQ
 	if snapshot != nil {
 		res.SyncStatus = snapshot.Status
 		res.SyncMessage = snapshot.ErrorMessage
-		res.LastSyncedAt = snapshot.FinishedAt
+		if snapshot.Status == "complete" {
+			res.LastSyncedAt = snapshot.FinishedAt
+		} else {
+			// A failed attempt must not make old cached data appear fresh.
+			if db, err := a.getRecruitmentDB(); err == nil {
+				_ = db.QueryRow(`SELECT finished_at FROM communication_job_sync_snapshots
+					WHERE platform=? AND scope_account=? AND status='complete'
+					ORDER BY finished_at DESC, id DESC LIMIT 1`, platform, "").Scan(&res.LastSyncedAt)
+			}
+			res.NeedsRefresh = true
+		}
 		if res.LastSyncedAt != "" {
 			if t, err := time.Parse(time.RFC3339, res.LastSyncedAt); err == nil {
 				if time.Since(t) > 24*time.Hour {
@@ -285,7 +296,7 @@ func (a *App) GetCommunicationJobs(projectID, platform string) CommunicationJobQ
 	if len(cachedJobs) == 0 {
 		res.NeedsRefresh = true
 		if res.SyncMessage == "" {
-			res.SyncMessage = "本地暂未缓存在招职位，请点击同步"
+			res.SyncMessage = "本地暂未缓存可沟通职位，请点击同步"
 		}
 	}
 
@@ -294,11 +305,18 @@ func (a *App) GetCommunicationJobs(projectID, platform string) CommunicationJobQ
 
 // SyncCommunicationJobs 触发 51job 沟通职位后台同步，自动读取并在本地落盘。
 func (a *App) SyncCommunicationJobs(projectID, platform string) CommunicationJobQueryResult {
+	return a.syncCommunicationJobs(projectID, platform, a.List51JobAccountCommunicationJobs, a.List51JobCommunicationJobs)
+}
+
+func (a *App) syncCommunicationJobs(projectID, platform string, readAccount func(string) JobConversationResult, readJobs func(string, string) JobConversationResult) CommunicationJobQueryResult {
 	a.jobSyncMu.Lock()
 	defer a.jobSyncMu.Unlock()
 
 	if strings.TrimSpace(platform) == "" {
 		platform = "51job"
+	}
+	if platform != "51job" {
+		return CommunicationJobQueryResult{Status: "empty", Jobs: []JobCommunicationOption{}, SyncStatus: "failed", SyncMessage: "当前仅支持同步 51job 可沟通职位", NeedsRefresh: true}
 	}
 
 	snapID := fmt.Sprintf("sync_%d", time.Now().UnixNano())
@@ -312,35 +330,52 @@ func (a *App) SyncCommunicationJobs(projectID, platform string) CommunicationJob
 		StartedAt:    now,
 	})
 
-	// 寻找可用于打开 51job 选职窗口的候选人上下文
-	resumeID := a.find51JobSyncCandidate(projectID)
-	if resumeID == "" {
-		_ = a.SaveCommunicationJobSyncSnapshot(&CommunicationJobSyncSnapshot{
-			ID:           snapID,
-			Platform:     platform,
-			ScopeAccount: "",
-			Status:       "failed",
-			ErrorMessage: "未找到包含有效 51job 详情链接的候选人，无法打开选职窗口；请先导入或核验候选人",
-			StartedAt:    now,
-			FinishedAt:   time.Now().UTC().Format(time.RFC3339),
-		})
-		return a.GetCommunicationJobs(projectID, platform)
+	// Prefer the authenticated account directory. Candidate context is only a
+	// compatibility fallback when the platform's read adapter is unavailable.
+	result := JobConversationResult{Status: "catalog_unavailable", Message: "账号职位读取组件不可用"}
+	if readAccount != nil {
+		result = readAccount("")
 	}
-
-	// 执行平台选职读取
-	result := a.List51JobCommunicationJobs(resumeID, "")
+	if result.Status == "catalog_unavailable" && readJobs != nil {
+		for _, resumeID := range a.find51JobSyncCandidates(projectID) {
+			result = readJobs(resumeID, "")
+			if result.Status == "jobs" || result.Status == "needs_login" || result.Status == "uncertain" {
+				break
+			}
+		}
+	}
 	finishNow := time.Now().UTC().Format(time.RFC3339)
-	if result.Status == "jobs" && len(result.Jobs) > 0 {
-		_ = a.SaveCommunicationJobs(platform, "", result.Jobs)
-		_ = a.SaveCommunicationJobSyncSnapshot(&CommunicationJobSyncSnapshot{
+	if result.Status == "jobs" {
+		if err := a.SaveCommunicationJobs(platform, "", result.Jobs); err != nil {
+			result = JobConversationResult{Status: "error", Message: "已读取平台职位，但保存本地目录失败：" + err.Error()}
+		}
+	}
+	if result.Status == "jobs" {
+		syncStatus := "complete"
+		message := ""
+		if result.HasMore {
+			syncStatus, message = "partial", "已保存可读取的职位，部分分页未完成，可稍后刷新补全"
+		}
+		if len(result.Jobs) == 0 {
+			if previous, _ := a.ListCachedCommunicationJobs(platform, ""); len(previous) > 0 {
+				syncStatus, message = "partial", "平台本次未返回可沟通职位，旧目录已保留，请核对当前企业账号与职位权限"
+			}
+		}
+		err := a.SaveCommunicationJobSyncSnapshot(&CommunicationJobSyncSnapshot{
 			ID:           snapID,
 			Platform:     platform,
 			ScopeAccount: "",
-			Status:       "complete",
+			Status:       syncStatus,
 			TotalJobs:    len(result.Jobs),
+			ErrorMessage: message,
 			StartedAt:    now,
 			FinishedAt:   finishNow,
 		})
+		if err != nil {
+			response := a.GetCommunicationJobs(projectID, platform)
+			response.SyncStatus, response.SyncMessage = "failed", "职位已保存，但同步状态保存失败："+err.Error()
+			return response
+		}
 		if a.ctx != nil {
 			runtime.EventsEmit(a.ctx, "communication_jobs:synced", map[string]interface{}{
 				"platform": platform,
@@ -366,14 +401,14 @@ func (a *App) SyncCommunicationJobs(projectID, platform string) CommunicationJob
 	return a.GetCommunicationJobs(projectID, platform)
 }
 
-// find51JobSyncCandidate 在当前项目或全局候选人库中定位一个可用于打开沟通窗口的候选人档案
-func (a *App) find51JobSyncCandidate(projectID string) string {
+// Candidate fallbacks are bounded and deduplicated by actual platform URL,
+// rather than repeatedly picking another document version of the same person.
+func (a *App) find51JobSyncCandidates(projectID string) []string {
 	db, err := a.getRecruitmentDB()
 	if err != nil {
-		return ""
+		return nil
 	}
-
-	// 1. 优先在当前项目中寻找
+	var ids []string
 	if projectID != "" {
 		rows, err := db.Query(`SELECT rv.legacy_resume_id FROM project_candidates pc
 			JOIN project_candidate_resumes pcr ON pcr.project_candidate_id=pc.id
@@ -381,35 +416,49 @@ func (a *App) find51JobSyncCandidate(projectID string) string {
 			WHERE pc.project_id=? AND rv.legacy_resume_id<>''
 			ORDER BY pc.created_at DESC LIMIT 10`, projectID)
 		if err == nil {
-			defer rows.Close()
 			for rows.Next() {
 				var legacyID string
-				if err := rows.Scan(&legacyID); err == nil && legacyID != "" {
-					if r, err := a.load51JobContactResume(legacyID); err == nil && r != nil {
-						return legacyID
-					}
+				if rows.Scan(&legacyID) == nil {
+					ids = append(ids, legacyID)
 				}
 			}
+			rows.Close()
 		}
 	}
-
-	// 2. 全局最近的 51job 候选人
 	rows, err := db.Query(`SELECT legacy_resume_id FROM resume_versions
 		WHERE legacy_resume_id<>''
 		ORDER BY created_at DESC LIMIT 30`)
 	if err == nil {
-		defer rows.Close()
 		for rows.Next() {
 			var legacyID string
-			if err := rows.Scan(&legacyID); err == nil && legacyID != "" {
-				if r, err := a.load51JobContactResume(legacyID); err == nil && r != nil {
-					return legacyID
-				}
+			if rows.Scan(&legacyID) == nil {
+				ids = append(ids, legacyID)
 			}
 		}
+		rows.Close()
 	}
-
-	return ""
+	seen := map[string]bool{}
+	var candidates []string
+	for _, id := range ids {
+		resume, err := a.load51JobContactResume(id)
+		if err != nil || resume.ContactStatus != "" {
+			continue
+		}
+		parsed, err := url.Parse(resume.URL)
+		if err != nil {
+			continue
+		}
+		identity := parsed.Query().Get("resumeId")
+		if identity == "" || seen[identity] {
+			continue
+		}
+		seen[identity] = true
+		candidates = append(candidates, id)
+		if len(candidates) == 5 {
+			break
+		}
+	}
+	return candidates
 }
 
 func (a *App) suggestedProjectCommunicationJob(projectID string, batch OutreachBatch, jobs []JobCommunicationOption) string {

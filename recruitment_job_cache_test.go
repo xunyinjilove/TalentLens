@@ -1,10 +1,91 @@
 package main
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 	"time"
 )
+
+func TestCommunicationJobSyncContinuesAfterUnusableCandidate(t *testing.T) {
+	a := NewApp()
+	a.dataDirOverride = t.TempDir()
+	defer a.closeRecruitmentDB()
+	p := a.CreateProject("职位同步回归", "研发", 1, "HR", "", &JobConfig{Title: "测试工程师"})
+	for i := 1; i <= 2; i++ {
+		resume := &Resume{ID: fmt.Sprintf("sync_context_%d", i), ProjectID: p.ID,
+			FileName: fmt.Sprintf("测试人选%d.txt", i), Status: "pending", Content: "用于职位同步的测试记录",
+			URL: fmt.Sprintf("https://ehire.51job.com/Revision/talent/resume/detail?resumeId=%d", i)}
+		if err := a.persistSearchCandidate(resume); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var calls []string
+	result := a.syncCommunicationJobs(p.ID, "51job", nil, func(id, keyword string) JobConversationResult {
+		calls = append(calls, id)
+		if len(calls) == 1 {
+			return JobConversationResult{Status: "error", Message: "候选人页面沟通入口未就绪，已自动重试；本次未发送"}
+		}
+		return JobConversationResult{Status: "jobs", Jobs: []JobCommunicationOption{{ID: "job_sync_1", Title: "测试工程师", CompanyID: "company_sync"}}}
+	})
+	if result.SyncStatus != "complete" || len(result.Jobs) != 1 || result.Jobs[0].ID != "job_sync_1" {
+		t.Fatalf("单个候选人没有入口不能使职位同步永久失败：calls=%v, status=%s, error=%s, jobs=%d", calls, result.SyncStatus, result.SyncMessage, len(result.Jobs))
+	}
+	if len(calls) != 2 || calls[0] == calls[1] {
+		t.Fatalf("应只尝试不同读取上下文：%v", calls)
+	}
+}
+
+func TestCommunicationJobSyncDoesNotRequireCandidates(t *testing.T) {
+	a := NewApp()
+	a.dataDirOverride = t.TempDir()
+	defer a.closeRecruitmentDB()
+	accountCalls := 0
+	result := a.syncCommunicationJobs("", "51job", func(keyword string) JobConversationResult {
+		accountCalls++
+		return JobConversationResult{Status: "jobs", Jobs: []JobCommunicationOption{{ID: "account_job_1", Title: "测试工程师", CompanyID: "company_1"}}}
+	}, func(id, keyword string) JobConversationResult {
+		t.Fatal("账号职位目录可读时，不得再打开候选人或Hi聊入口")
+		return JobConversationResult{}
+	})
+	if accountCalls != 1 || result.SyncStatus != "complete" || len(result.Jobs) != 1 {
+		t.Fatalf("无候选人也应能完成职位同步：calls=%d, result=%+v", accountCalls, result)
+	}
+}
+
+func TestCommunicationJobSyncPreservesPartialDirectory(t *testing.T) {
+	a := NewApp()
+	a.dataDirOverride = t.TempDir()
+	defer a.closeRecruitmentDB()
+	result := a.syncCommunicationJobs("", "51job", func(string) JobConversationResult {
+		return JobConversationResult{Status: "jobs", HasMore: true, Jobs: []JobCommunicationOption{{ID: "partial_job", Title: "测试工程师"}}}
+	}, nil)
+	if result.SyncStatus != "partial" || len(result.Jobs) != 1 || !result.NeedsRefresh {
+		t.Fatalf("未完成分页不能标为全量同步成功：%+v", result)
+	}
+}
+
+func TestFailedCommunicationJobRefreshKeepsCacheAndLastSuccessfulTime(t *testing.T) {
+	a := NewApp()
+	a.dataDirOverride = t.TempDir()
+	defer a.closeRecruitmentDB()
+	if err := a.SaveCommunicationJobs("51job", "", []JobCommunicationOption{{ID: "old_job", Title: "已有职位"}}); err != nil {
+		t.Fatal(err)
+	}
+	oldTime := time.Now().Add(-48 * time.Hour).UTC().Format(time.RFC3339)
+	if err := a.SaveCommunicationJobSyncSnapshot(&CommunicationJobSyncSnapshot{ID: "old_complete", Platform: "51job", Status: "complete", StartedAt: oldTime, FinishedAt: oldTime}); err != nil {
+		t.Fatal(err)
+	}
+	result := a.syncCommunicationJobs("", "51job", func(string) JobConversationResult {
+		return JobConversationResult{Status: "needs_login", Message: "请登录企业账号"}
+	}, func(string, string) JobConversationResult {
+		t.Fatal("登录失效时不应继续轮换候选人读取")
+		return JobConversationResult{}
+	})
+	if result.SyncStatus != "failed" || len(result.Jobs) != 1 || result.LastSyncedAt != oldTime || !result.NeedsRefresh {
+		t.Fatalf("失败不能清空缓存或把旧目录变新：%+v", result)
+	}
+}
 
 func TestCommunicationJobsCacheStorageAndList(t *testing.T) {
 	a := NewApp()
@@ -99,12 +180,12 @@ func TestGetCommunicationJobsImmediateAndDefaultPriority(t *testing.T) {
 	}
 	now := time.Now().UTC().Format(time.RFC3339)
 	_ = a.SaveCommunicationJobSyncSnapshot(&CommunicationJobSyncSnapshot{
-		ID:           "sync_test",
-		Platform:     "51job",
-		Status:       "complete",
-		TotalJobs:    2,
-		StartedAt:    now,
-		FinishedAt:   now,
+		ID:         "sync_test",
+		Platform:   "51job",
+		Status:     "complete",
+		TotalJobs:  2,
+		StartedAt:  now,
+		FinishedAt: now,
 	})
 
 	// 此时无项目默认职位，应按项目招聘岗位标题唯一精准匹配到 j2
@@ -134,12 +215,12 @@ func TestListOutreachCommunicationJobsUsesCacheWithoutOnlineBrowser(t *testing.T
 
 	p := a.CreateProject("项目A", "部门A", 1, "HR", "", &JobConfig{Title: "临床试验项目经理"})
 	r := &Resume{
-		ID:       "r_test_1",
+		ID:        "r_test_1",
 		ProjectID: p.ID,
-		FileName: "张三_临床试验.pdf",
-		Content:  "多年临床试验经验",
-		Status:   "done",
-		Analysis: &AnalysisResult{CandidateName: "张三", OverallScore: 85},
+		FileName:  "张三_临床试验.pdf",
+		Content:   "多年临床试验经验",
+		Status:    "done",
+		Analysis:  &AnalysisResult{CandidateName: "张三", OverallScore: 85},
 	}
 	if err := a.persistSearchCandidate(r); err != nil {
 		t.Fatal(err)
@@ -177,12 +258,12 @@ func TestAuthorizeOutreachBudgetValidatesFromCacheAndRemembersChoice(t *testing.
 
 	p := a.CreateProject("项目B", "部门B", 1, "HR", "", &JobConfig{Title: "临床试验项目经理"})
 	r := &Resume{
-		ID:       "r_test_2",
+		ID:        "r_test_2",
 		ProjectID: p.ID,
-		FileName: "李四_临床试验.pdf",
-		Content:  "多年临床试验经验",
-		Status:   "done",
-		Analysis: &AnalysisResult{CandidateName: "李四", OverallScore: 90},
+		FileName:  "李四_临床试验.pdf",
+		Content:   "多年临床试验经验",
+		Status:    "done",
+		Analysis:  &AnalysisResult{CandidateName: "李四", OverallScore: 90},
 	}
 	if err := a.persistSearchCandidate(r); err != nil {
 		t.Fatal(err)
