@@ -1,4 +1,4 @@
-$version = "1.8.41"
+$version = "1.8.42"
 Write-Host "Syncing runtime assets..."
 node scripts/sync-runtime-assets.js
 

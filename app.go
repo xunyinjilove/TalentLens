@@ -36,7 +36,7 @@ import (
 )
 
 // 版本信息
-const AppVersion = "1.8.41"
+const AppVersion = "1.8.42"
 const analysisFormatRetryVersion = "model-json-repair-v1"
 const GitHubRepo = "xunyinjilove/TalentLens"
 
@@ -2910,6 +2910,52 @@ func (a *App) MigrateExistingResumes() string {
 	return p.ID
 }
 
+// resolveCandidateRadarScore 获取候选人在指定雷达技能指标上的得分 (0-4)
+func resolveCandidateRadarScore(analysis *AnalysisResult, metric string) (int, bool) {
+	if analysis == nil {
+		return 0, false
+	}
+	cleanMetric := strings.TrimSpace(metric)
+	if cleanMetric == "" {
+		return 0, false
+	}
+
+	var allChecks []CoreCriterionCheck
+	allChecks = append(allChecks, analysis.CoreCriterionChecks...)
+	allChecks = append(allChecks, analysis.ExperienceCompetencies...)
+
+	// 1. 优先精确逐字匹配（忽略大小写与首尾空白）
+	for _, item := range allChecks {
+		c := strings.TrimSpace(item.Criterion)
+		if strings.EqualFold(c, cleanMetric) {
+			lvl := item.Level
+			if lvl < 0 {
+				lvl = 0
+			} else if lvl > 4 {
+				lvl = 4
+			}
+			return lvl, true
+		}
+	}
+
+	// 2. 模糊双向包含匹配（处理如“Vue3”匹配“Vue3前端框架”或反向包含）
+	for _, item := range allChecks {
+		c := strings.TrimSpace(item.Criterion)
+		if c != "" && (strings.Contains(c, cleanMetric) || strings.Contains(cleanMetric, c)) {
+			lvl := item.Level
+			if lvl < 0 {
+				lvl = 0
+			} else if lvl > 4 {
+				lvl = 4
+			}
+			return lvl, true
+		}
+	}
+
+	// 候选人已完成分析但该项未体现/未提及，按雷达模型规范确定为 0 级
+	return 0, true
+}
+
 // ExportProjectReport 导出项目分析报告为 Excel
 func (a *App) ExportProjectReport(projectID string) (string, error) {
 	p := a.GetProject(projectID)
@@ -2926,20 +2972,55 @@ func (a *App) ExportProjectReport(projectID string) (string, error) {
 	sheet := "候选人排名"
 	f.SetSheetName("Sheet1", sheet)
 
+	// 提取岗位统一雷达指标（技能要求 + 核心能力）
+	radarMetrics := getUnifiedJobMetrics(&p.JobConfig)
+	seenMetrics := make(map[string]bool)
+	for _, m := range radarMetrics {
+		seenMetrics[m] = true
+	}
+	// 兼容历史分析：如果历史简历中存在未在当前岗位配置中列出的核心指标，自动收集到表头后方
+	for _, r := range resumes {
+		if r.Analysis != nil {
+			for _, check := range r.Analysis.CoreCriterionChecks {
+				c := strings.TrimSpace(check.Criterion)
+				if c != "" && !seenMetrics[c] {
+					seenMetrics[c] = true
+					radarMetrics = append(radarMetrics, c)
+				}
+			}
+		}
+	}
+
 	// 表头
-	headers := []string{"排名", "姓名", "文件名", "综合分", "技能匹配", "经验匹配", "学历匹配", "推荐等级", "优势", "不足", "风险", "AI初试提纲及参考回答", "总结"}
+	headers := []string{"排名", "姓名", "文件名", "综合分", "技能匹配", "经验匹配", "学历匹配", "推荐等级"}
+	for _, m := range radarMetrics {
+		headers = append(headers, fmt.Sprintf("【技能雷达】%s (0-4分)", m))
+	}
+	headers = append(headers, "优势", "不足", "风险", "AI初试提纲及参考回答", "总结")
+
 	for i, h := range headers {
 		cell, _ := excelize.CoordinatesToCellName(i+1, 1)
 		f.SetCellValue(sheet, cell, h)
 	}
 
-	// 表头样式
+	// 表头样式：蓝底白字居中加粗
 	headerStyle, _ := f.NewStyle(&excelize.Style{
 		Font:      &excelize.Font{Bold: true, Size: 11, Color: "FFFFFF"},
 		Fill:      excelize.Fill{Type: "pattern", Color: []string{"007AFF"}, Pattern: 1},
 		Alignment: &excelize.Alignment{Horizontal: "center", Vertical: "center"},
 	})
 	f.SetRowStyle(sheet, 1, 1, headerStyle)
+	f.SetRowHeight(sheet, 1, 26)
+
+	// 居中单元格样式（用于排名、得分及雷达评分）
+	centerStyle, _ := f.NewStyle(&excelize.Style{
+		Alignment: &excelize.Alignment{Horizontal: "center", Vertical: "center"},
+	})
+
+	// 多行文本换行样式（用于优势、不足、风险、面试提纲与总结）
+	wrapStyle, _ := f.NewStyle(&excelize.Style{
+		Alignment: &excelize.Alignment{Vertical: "top", WrapText: true},
+	})
 
 	// 数据行
 	recMap := map[string]string{
@@ -2985,7 +3066,7 @@ func (a *App) ExportProjectReport(projectID string) (string, error) {
 
 		rowData := []interface{}{
 			i + 1, name, r.FileName, r.Score,
-			0, 0, 0, rec, strengths, weaknesses, risks, interviewQAText, summary,
+			0, 0, 0, rec,
 		}
 		if r.Analysis != nil {
 			rowData[4] = r.Analysis.SkillMatch
@@ -2993,16 +3074,70 @@ func (a *App) ExportProjectReport(projectID string) (string, error) {
 			rowData[6] = r.Analysis.EducationMatch
 		}
 
+		// 追加各项雷达指标得分
+		for _, m := range radarMetrics {
+			if r.Analysis != nil {
+				score, _ := resolveCandidateRadarScore(r.Analysis, m)
+				rowData = append(rowData, score)
+			} else {
+				rowData = append(rowData, "")
+			}
+		}
+
+		// 追加文本详情
+		rowData = append(rowData, strengths, weaknesses, risks, interviewQAText, summary)
+
 		for j, val := range rowData {
 			cell, _ := excelize.CoordinatesToCellName(j+1, row)
 			f.SetCellValue(sheet, cell, val)
+
+			// 排名、综合分、匹配度、推荐等级及雷达得分列居中对齐
+			isCenterCol := (j == 0) || (j >= 3 && j < 8+len(radarMetrics))
+			if isCenterCol && centerStyle != 0 {
+				_ = f.SetCellStyle(sheet, cell, cell, centerStyle)
+			} else if j >= 8+len(radarMetrics) && wrapStyle != 0 {
+				// 优势、不足、风险、提纲与总结列顶部对齐并自动换行
+				_ = f.SetCellStyle(sheet, cell, cell, wrapStyle)
+			}
 		}
 	}
 
-	// 设置列宽
-	colWidths := map[string]float64{"A": 6, "B": 12, "C": 25, "D": 8, "E": 10, "F": 10, "G": 10, "H": 10, "I": 30, "J": 30, "K": 25, "L": 50, "M": 40}
-	for col, w := range colWidths {
-		f.SetColWidth(sheet, col, col, w)
+	// 动态设置列宽
+	for colIdx, h := range headers {
+		colName, err := excelize.ColumnNumberToName(colIdx + 1)
+		if err != nil {
+			continue
+		}
+		var width float64
+		switch h {
+		case "排名":
+			width = 6
+		case "姓名":
+			width = 12
+		case "文件名":
+			width = 25
+		case "综合分":
+			width = 8
+		case "技能匹配", "经验匹配", "学历匹配":
+			width = 10
+		case "推荐等级":
+			width = 12
+		case "优势", "不足":
+			width = 30
+		case "风险":
+			width = 25
+		case "AI初试提纲及参考回答":
+			width = 50
+		case "总结":
+			width = 40
+		default:
+			// 雷达指标列根据表头文字自适应宽度，确保表头不被截断
+			width = float64(len([]rune(h)))*1.5 + 4
+			if width < 16 {
+				width = 16
+			}
+		}
+		f.SetColWidth(sheet, colName, colName, width)
 	}
 
 	// 保存
