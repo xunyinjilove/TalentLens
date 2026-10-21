@@ -141,7 +141,10 @@
             </div>
 
             <div class="expand-full" style="margin-top: 12px;">
-              <label class="expand-label">核心必备技能点 (可回车添加)</label>
+              <div class="label-row">
+                <label class="expand-label">核心必备技能点 (可回车添加)</label>
+                <span class="label-tip">这里的关键技能会用于生成技能指标雷达，可以分析八项以内的技能，若不足则AI自动匹配技能</span>
+              </div>
               <el-select
                 v-model="currentJobConfig.requiredSkills"
                 multiple
@@ -154,6 +157,9 @@
               >
                 <el-option v-for="s in commonSkillsList" :key="s" :label="s" :value="s" />
               </el-select>
+              <div class="skill-help-text" style="margin-top: 5px; font-size: 12px; color: #64748b;">
+                💡 这里的关键技能会用于生成技能指标雷达，可以分析八项以内的技能，若不足则AI自动匹配技能。
+              </div>
             </div>
 
             <div class="expand-full" style="margin-top: 12px;">
