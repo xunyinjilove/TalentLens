@@ -764,6 +764,7 @@
       :project-id="selectedProject.id"
       :project-name="selectedProject.name"
       :job-title="selectedProject.job_config?.title || selectedProject.name"
+      :city="selectedProject.job_config?.city || '上海'"
       :exp-years="selectedProject.job_config?.experience_years || 0"
       :edu-level="selectedProject.job_config?.education_level || ''"
       @refresh="refresh"

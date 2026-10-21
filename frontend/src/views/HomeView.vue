@@ -678,39 +678,65 @@
                   <span v-if="translatedSections.length" class="translation-status-pill">已生成中文对照译文</span>
                 </div>
                 <div class="content-actions">
-                  <el-button
-                    v-if="!translatedSections.length"
-                    size="small"
-                    type="primary"
-                    plain
-                    :loading="translationBusy"
-                    @click="handleTranslateToChinese(false)"
-                  >
-                    <el-icon><RefreshRight /></el-icon>
-                    一键翻译为中文
-                  </el-button>
-                  <template v-else>
-                    <el-button size="small" plain @click="toggleAllTranslations">
-                      {{ allTranslationsCollapsed ? '展开全部译文' : '折叠全部译文' }}
+                  <el-radio-group v-model="contentViewMode" size="small" class="view-mode-radios">
+                    <el-radio-button value="web">
+                      <el-icon style="margin-right: 3px;"><Platform /></el-icon> 仿网站 UI
+                    </el-radio-button>
+                    <el-radio-button value="sections">
+                      <el-icon style="margin-right: 3px;"><Tickets /></el-icon> 分区排版
+                    </el-radio-button>
+                    <el-radio-button value="raw">
+                      <el-icon style="margin-right: 3px;"><Document /></el-icon> 完整原文
+                    </el-radio-button>
+                  </el-radio-group>
+
+                  <template v-if="contentViewMode === 'sections'">
+                    <el-button
+                      v-if="!translatedSections.length"
+                      size="small"
+                      type="primary"
+                      plain
+                      :loading="translationBusy"
+                      @click="handleTranslateToChinese(false)"
+                    >
+                      <el-icon><RefreshRight /></el-icon>
+                      一键翻译为中文
                     </el-button>
-                    <el-button size="small" plain :loading="translationBusy" @click="handleTranslateToChinese(true)">
-                      重新翻译
-                    </el-button>
+                    <template v-else>
+                      <el-button size="small" plain @click="toggleAllTranslations">
+                        {{ allTranslationsCollapsed ? '展开全部译文' : '折叠全部译文' }}
+                      </el-button>
+                      <el-button size="small" plain :loading="translationBusy" @click="handleTranslateToChinese(true)">
+                        重新翻译
+                      </el-button>
+                    </template>
                   </template>
-                  <el-button size="small" plain @click="showRawContent = !showRawContent">
-                    {{ showRawContent ? '查看分区排版' : '查看完整原文' }}
-                  </el-button>
                 </div>
               </div>
               <div class="content-hint">
-                {{ translatedSections.length ? '已在对应分区模块下方生成中文译文，保留完整原文以便中英核对。' : '以下内容只调整排版，不改写简历原文。' }}
+                <template v-if="contentViewMode === 'web'">
+                  仿招聘网站 UI 模式：已为您 1:1 结构化还原招聘平台在线真实微简历抽屉，支持随时切换查看分区或完整原文。
+                </template>
+                <template v-else>
+                  {{ translatedSections.length ? '已在对应分区模块下方生成中文译文，保留完整原文以便中英核对。' : '以下内容只调整排版，不改写简历原文。' }}
+                </template>
               </div>
               <el-alert v-if="translationError" :title="translationError" type="warning" :closable="true" @close="translationError = ''" />
 
-              <div v-if="showRawContent" class="raw-content-view">
+              <!-- 仿网站真实抽屉 UI 视图 -->
+              <div v-if="contentViewMode === 'web'" class="web-resume-view">
+                <MicroResumeWebView
+                  :raw-content="activeRawContent"
+                  :candidate-name="resumeStore.selectedResume.fileName"
+                />
+              </div>
+
+              <!-- 完整原文视图 -->
+              <div v-else-if="contentViewMode === 'raw'" class="raw-content-view">
                 <pre class="content-text">{{ activeRawContent }}</pre>
               </div>
 
+              <!-- 分区排版视图 -->
               <div v-else class="parsed-sections">
                 <section v-for="(section, index) in originalParsedSections" :key="index" class="parsed-section">
                   <div class="parsed-section-heading">
@@ -845,6 +871,7 @@
       :project-id="projectId"
       :project-name="projectName"
       :job-title="projectStore.currentProject?.job_config?.title || jobTitle"
+      :city="projectStore.currentProject?.job_config?.city || '上海'"
       :job-description="projectStore.currentProject?.job_config?.description || projectStore.currentJobConfig?.description"
       :exp-years="projectStore.currentProject?.job_config?.experience_years"
       :edu-level="projectStore.currentProject?.job_config?.education_level"
@@ -949,7 +976,7 @@ import {
   RefreshRight, MoreFilled, Tickets, QuestionFilled, DocumentCopy, InfoFilled, Search,
   ChatDotRound, DocumentAdd, Connection, CloseBold, Paperclip, Compass, Check, Message,
   Link, Plus, Share, Aim, Filter, Download, Delete, Finished, Histogram, Calendar,
-  Reading, UploadFilled
+  Reading, UploadFilled, Platform
 } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import TitleBar from '../components/TitleBar.vue'
@@ -964,6 +991,7 @@ import TopTenOutreachDialog from '../components/TopTenOutreachDialog.vue'
 import SvgDonutRing from '../components/charts/SvgDonutRing.vue'
 import SvgRadarChart from '../components/charts/SvgRadarChart.vue'
 import InterviewAccordionCard from '../components/InterviewAccordionCard.vue'
+import MicroResumeWebView from '../components/MicroResumeWebView.vue'
 import { useResumeStore } from '../composables/useResumeStore'
 import { useProjectStore } from '../composables/useProjectStore'
 import { runWith51JobBrowser } from '../composables/51jobBrowserRecovery'
@@ -1232,6 +1260,23 @@ watch(
 const parsedContent = ref('')
 const contentLoading = ref(false)
 const showRawContent = ref(false)
+const contentViewMode = ref<'web' | 'sections' | 'raw'>('web')
+
+function checkIsOnlineMicroResume(text: string): boolean {
+  if (!text) return false
+  return text.includes('微简历') ||
+    text.includes('在线卡片') ||
+    text.includes('推荐牛人档案') ||
+    text.includes('任职履历快照') ||
+    text.includes('平台活跃标记') ||
+    text.includes('来源渠道：前程无忧') ||
+    text.includes('来源渠道：BOSS') ||
+    text.includes('BOSS直聘推荐牛人档案')
+}
+
+const isOnlineMicroResume = computed(() => {
+  return checkIsOnlineMicroResume(activeRawContent.value)
+})
 const isChineseView = ref(false)
 const translatedSections = ref<string[]>([])
 const translationBusy = ref(false)
@@ -2210,6 +2255,11 @@ async function loadParsedContent() {
         translationBusy.value = false
       }
       parsedContent.value = content
+      if (checkIsOnlineMicroResume(content)) {
+        contentViewMode.value = 'web'
+      } else {
+        contentViewMode.value = 'sections'
+      }
     }
   } catch {
     if (resumeStore.selectedId === requestedId) parsedContent.value = ''
@@ -4363,6 +4413,14 @@ details.candidate-portal-bar[open] > summary.portal-header { margin-bottom: 12px
       background: $bg-primary;
       border-left: 1px solid $separator;
       border-right: 1px solid $separator;
+    }
+
+    .web-resume-view {
+      padding: 12px;
+      background: $bg-primary;
+      border: 1px solid $separator;
+      border-top: none;
+      border-radius: 0 0 $radius-lg $radius-lg;
     }
 
     .parsed-sections {
