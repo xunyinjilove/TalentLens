@@ -30,10 +30,14 @@ async function checkMaximizedState() {
     }
   } catch {}
 
-  // 纯浏览器降级兜底检测
-  const isNearScreen = Math.abs(window.innerWidth - screen.availWidth) < 10 &&
-                       Math.abs(window.innerHeight - screen.availHeight) < 20
-  isMaximized.value = isNearScreen
+  // 纯浏览器降级兜底检测（仅在无 Wails 环境下使用极严格阈值）
+  if (typeof (window as any).runtime === 'undefined') {
+    const isNearScreen = Math.abs(window.innerWidth - screen.availWidth) < 5 &&
+                         Math.abs(window.innerHeight - screen.availHeight) < 5
+    isMaximized.value = isNearScreen
+  } else {
+    isMaximized.value = false
+  }
 }
 
 // 启动原生拉伸逻辑
@@ -42,26 +46,19 @@ async function startResize(edge: string, event: MouseEvent) {
   event.preventDefault()
   event.stopPropagation()
 
+  // 1. 优先调用 Wails 运行时内核专有的 WailsInvoke("resize:<edge>") 通道
+  // Wails 底层在前端主窗口直接执行 w32.PostMessage(f.mainWindow.Handle(), WM_NCLBUTTONDOWN, border, 0)
+  if (typeof (window as any).WailsInvoke === 'function') {
+    (window as any).WailsInvoke(`resize:${edge}`)
+  }
+
+  // 2. 双重保障：通知 Go 后端通过 Win32 API 追溯顶层主窗口句柄并发送 WM_NCLBUTTONDOWN
   try {
     const WailsApp = await import('../../wailsjs/go/main/App')
     if (WailsApp && typeof WailsApp.StartWindowResize === 'function') {
       await WailsApp.StartWindowResize(edge)
-      return
     }
   } catch {}
-
-  const wailsObj = (window as any).wails
-  if (wailsObj && wailsObj.flags) {
-    wailsObj.flags.resizeEdge = edge
-  }
-
-  // 触发 Wails 后端 Windows 原生 Win32 WM_NCLBUTTONDOWN 处理管道
-  if (typeof (window as any).WailsInvoke === 'function') {
-    (window as any).WailsInvoke(`resize:${edge}`)
-  } else {
-    // 浏览器预览环境降级（纯演示）
-    console.debug('[WindowResizeOverlay] Wails runtime not present, edge:', edge)
-  }
 }
 
 // 窗口尺寸发生变动时，防抖同步保存至持久化配置
@@ -120,70 +117,70 @@ onUnmounted(() => {
   -webkit-app-region: no-drag;
 }
 
-/* 顶部与底部边缘：厚度 7px，两端各预留 14px 给角落 */
+/* 顶部与底部边缘：厚度 8px，两端各预留 16px 给角落 */
 .resize-handle.top {
   top: 0;
-  left: 14px;
-  right: 14px;
-  height: 7px;
+  left: 16px;
+  right: 16px;
+  height: 8px;
   cursor: n-resize;
 }
 
 .resize-handle.bottom {
   bottom: 0;
-  left: 14px;
-  right: 14px;
-  height: 7px;
+  left: 16px;
+  right: 16px;
+  height: 8px;
   cursor: s-resize;
 }
 
-/* 左侧与右侧边缘：厚度 7px，两端各预留 14px 给角落 */
+/* 左侧与右侧边缘：厚度 8px，两端各预留 16px 给角落 */
 .resize-handle.left {
   left: 0;
-  top: 14px;
-  bottom: 14px;
-  width: 7px;
+  top: 16px;
+  bottom: 16px;
+  width: 8px;
   cursor: w-resize;
 }
 
 .resize-handle.right {
   right: 0;
-  top: 14px;
-  bottom: 14px;
-  width: 7px;
+  top: 16px;
+  bottom: 16px;
+  width: 8px;
   cursor: e-resize;
 }
 
-/* 四个角落手柄：14px × 14px */
+/* 四个角落手柄：16px × 16px */
 .resize-handle.top-left {
   top: 0;
   left: 0;
-  width: 14px;
-  height: 14px;
+  width: 16px;
+  height: 16px;
   cursor: nw-resize;
 }
 
 .resize-handle.top-right {
   top: 0;
   right: 0;
-  width: 14px;
-  height: 14px;
+  width: 16px;
+  height: 16px;
   cursor: ne-resize;
 }
 
 .resize-handle.bottom-left {
   bottom: 0;
   left: 0;
-  width: 14px;
-  height: 14px;
+  width: 16px;
+  height: 16px;
   cursor: sw-resize;
 }
 
 .resize-handle.bottom-right {
   bottom: 0;
   right: 0;
-  width: 14px;
-  height: 14px;
+  width: 16px;
+  height: 16px;
   cursor: se-resize;
 }
 </style>
