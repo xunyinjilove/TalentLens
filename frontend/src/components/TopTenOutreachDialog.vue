@@ -108,18 +108,46 @@
         </el-button>
       </div>
     </div>
-    <el-dialog v-model="budgetOpen" title="确认沟通职位并开始打招呼" width="min(560px, 92vw)" append-to-body :close-on-click-modal="false" :close-on-press-escape="!confirming" :show-close="!confirming">
+    <el-dialog v-model="budgetOpen" title="确认沟通职位并开始打招呼" width="min(580px, 92vw)" append-to-body :close-on-click-modal="false" :close-on-press-escape="!confirming" :show-close="!confirming">
       <p class="budget-hint">招聘岗位：{{ batch?.projectTitle }}。请确认本批沟通职位，系统将默认消耗 51job 平台 Hi 点数发起沟通（不设点数上限）。</p>
+      
+      <!-- 职位本地缓存与同步状态条 -->
+      <div class="job-sync-status-bar">
+        <div class="sync-status-left">
+          <span class="status-dot" :class="jobOptions.length > 0 ? 'online' : 'empty'"></span>
+          <span v-if="jobOptions.length > 0">
+            已缓存 <strong>{{ jobOptions.length }}</strong> 个职位
+            <span v-if="syncInfo.lastSyncedAt" class="sync-time">（同步于 {{ formatSyncTime(syncInfo.lastSyncedAt) }}）</span>
+            <span v-if="syncInfo.needsRefresh" class="sync-stale-tag">建议更新</span>
+          </span>
+          <span v-else class="wb-muted">本地尚未同步 51job 职位</span>
+        </div>
+        <div class="sync-status-right">
+          <el-button size="small" :loading="syncingJobs" @click="() => syncJobs(true)">
+            <el-icon style="margin-right: 4px"><Refresh /></el-icon>同步职位
+          </el-button>
+          <el-button size="small" type="primary" plain @click="open51JobBrowser">
+            51job 浏览器
+          </el-button>
+        </div>
+      </div>
+
       <el-form label-position="top" @submit.prevent>
-        <el-alert v-if="jobsError" :title="jobsError" type="warning" :closable="false" style="margin-bottom:12px">
-          <div style="margin-top: 8px; display: flex; gap: 8px;">
-            <el-button size="small" type="primary" plain @click="open51JobBrowser">打开 51job 浏览器</el-button>
-            <el-button size="small" :loading="jobsLoading" @click="loadJobs">刷新职位列表</el-button>
-          </div>
-        </el-alert>
-        <el-form-item label="沟通职位（来自当前企业账号）">
-          <el-select v-model="selectedJobID" placeholder="请选择沟通职位" style="width:100%" :loading="jobsLoading">
-            <el-option v-for="job in jobOptions" :key="job.id" :value="job.id" :label="`${job.title} · ${job.workArea || job.company || ''} · ID ${job.id}`" />
+        <el-alert v-if="jobsError" :title="jobsError" type="warning" :closable="false" style="margin-bottom:12px" />
+        <el-form-item label="沟通职位（优先自本地缓存，支持搜索）">
+          <el-select
+            v-model="selectedJobID"
+            filterable
+            placeholder="请选择或搜索沟通职位"
+            style="width:100%"
+            :loading="jobsLoading"
+          >
+            <el-option
+              v-for="job in jobOptions"
+              :key="job.id"
+              :value="job.id"
+              :label="`${job.title}${job.workArea || job.company ? ' · ' + (job.workArea || job.company) : ''} · ID ${job.id}`"
+            />
           </el-select>
         </el-form-item>
         <div class="hi-budget-tip">
@@ -129,7 +157,7 @@
       </el-form>
       <template #footer>
         <el-button :disabled="confirming" @click="budgetOpen=false">取消</el-button>
-        <el-button type="primary" :loading="confirming" :disabled="!selectedJobID || jobsLoading" @click="confirm">
+        <el-button type="primary" :loading="confirming" :disabled="!selectedJobID || (jobsLoading && !jobOptions.length)" @click="confirm">
           立即开始打招呼
         </el-button>
       </template>
@@ -152,7 +180,7 @@
 
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
-import { InfoFilled } from '@element-plus/icons-vue'
+import { InfoFilled, Refresh } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 
 interface Item { id:string; rank:number; candidateName:string; platform:string; platformCandidateId:string; profileUrl:string; redLineStatus:string; abilityScore:number; evidence:string; message:string; status:string; result:string }
@@ -175,6 +203,8 @@ const sendingBatch=ref(false)
 const stopRequested=ref(false)
 const budgetOpen=ref(false)
 const jobsLoading=ref(false)
+const syncingJobs=ref(false)
+const syncInfo=ref({ lastSyncedAt:'', syncStatus:'', syncMessage:'', needsRefresh:false })
 const jobsError=ref('')
 const jobOptions=ref<JobOption[]>([])
 const jobsHasMore=ref(false)
@@ -318,23 +348,124 @@ async function loadJobs(){
   jobsLoading.value=true; jobsError.value=''
   try{
     const api:any=await import('../../wailsjs/go/main/App')
-    if (api.EnsurePlatformBrowser) {
-      await api.EnsurePlatformBrowser('51job')
+    // 优先秒级读取本地已缓存职位（不启动浏览器，不依赖在线网页）
+    if (api.GetCommunicationJobs) {
+      const q = await api.GetCommunicationJobs(props.projectId, '51job')
+      if (q && Array.isArray(q.jobs) && q.jobs.length > 0) {
+        jobOptions.value = q.jobs
+        syncInfo.value = {
+          lastSyncedAt: q.lastSyncedAt || '',
+          syncStatus: q.syncStatus || 'complete',
+          syncMessage: q.syncMessage || '',
+          needsRefresh: !!q.needsRefresh
+        }
+        if (!jobOptions.value.some(j => j.id === selectedJobID.value)) {
+          selectedJobID.value = q.defaultJobId || ''
+        }
+        jobsLoading.value = false
+        // 若距上次同步超过 24 小时，静默在后台排队刷新，不阻断当前操作
+        if (q.needsRefresh) {
+          void syncJobs(false)
+        }
+        return
+      }
+      if (q) {
+        syncInfo.value = {
+          lastSyncedAt: q.lastSyncedAt || '',
+          syncStatus: q.syncStatus || 'not_started',
+          syncMessage: q.syncMessage || '',
+          needsRefresh: true
+        }
+      }
     }
-    const result=await api.ListOutreachCommunicationJobs(batch.value.id,'')
-    if(result.status==='needs_login' || (result.status!=='jobs' && String(result.message).includes('未启动'))){
-      if(api.EnsurePlatformBrowser) await api.EnsurePlatformBrowser('51job')
-      jobsError.value='已为您自动打开 51job 企业浏览器，请在弹出的窗口中登录企业账号后点击【刷新职位列表】。'
-      jobOptions.value=[]
-      selectedJobID.value=''
+
+    // 本地尚无缓存时的兜底（兼容旧接口或首次读取）
+    const result = await api.ListOutreachCommunicationJobs(batch.value.id, '')
+    if (result.status === 'needs_login' || (result.status !== 'jobs' && String(result.message).includes('未启动'))) {
+      if (api.EnsurePlatformBrowser) await api.EnsurePlatformBrowser('51job')
+      jobsError.value = '已为您自动打开 51job 企业浏览器，请在弹出的窗口中登录企业账号后点击【同步职位】。'
       return
     }
-    if(result.status!=='jobs')throw new Error(result.message||'无法读取平台职位')
-    jobOptions.value=result.jobs||[]; jobsHasMore.value=!!result.hasMore
-    if(!jobOptions.value.some(job=>job.id===selectedJobID.value))selectedJobID.value=result.suggestedJobId||''
-    if(!jobOptions.value.length)jobsError.value='当前账号未找到在招职位，请确认 51job 后台是否有在招职位'
-  }catch(err:any){jobsError.value=err?.message||String(err);jobOptions.value=[];selectedJobID.value=''}
-  finally{jobsLoading.value=false}
+    if (result.status === 'jobs' && Array.isArray(result.jobs) && result.jobs.length > 0) {
+      jobOptions.value = result.jobs
+      syncInfo.value = {
+        lastSyncedAt: new Date().toISOString(),
+        syncStatus: 'complete',
+        syncMessage: '',
+        needsRefresh: false
+      }
+      if (!jobOptions.value.some(job => job.id === selectedJobID.value)) {
+        selectedJobID.value = result.suggestedJobId || ''
+      }
+    } else {
+      jobsError.value = result.message || '本地尚未缓存职位；请确保 51job 浏览器已登录并点击【同步职位】'
+    }
+  } catch (err: any) {
+    if (jobOptions.value.length === 0) {
+      jobsError.value = err?.message || String(err)
+    }
+  } finally {
+    jobsLoading.value = false
+  }
+}
+
+async function syncJobs(manual = true) {
+  if (syncingJobs.value) return
+  syncingJobs.value = true
+  if (manual) jobsError.value = ''
+  try {
+    const api: any = await import('../../wailsjs/go/main/App')
+    if (api.EnsurePlatformBrowser && manual) {
+      await api.EnsurePlatformBrowser('51job')
+    }
+    let res: any = null
+    if (api.SyncCommunicationJobs) {
+      res = await api.SyncCommunicationJobs(props.projectId, '51job')
+    } else if (batch.value) {
+      res = await api.ListOutreachCommunicationJobs(batch.value.id, '')
+    }
+    if (res && Array.isArray(res.jobs) && res.jobs.length > 0) {
+      jobOptions.value = res.jobs
+      syncInfo.value = {
+        lastSyncedAt: res.lastSyncedAt || new Date().toISOString(),
+        syncStatus: 'complete',
+        syncMessage: '',
+        needsRefresh: false
+      }
+      if (!jobOptions.value.some(j => j.id === selectedJobID.value)) {
+        selectedJobID.value = res.defaultJobId || res.suggestedJobId || ''
+      }
+      if (manual) {
+        ElMessage.success(`已同步 ${res.jobs.length} 个在招职位并更新本地目录`)
+      }
+    } else if (res && (res.syncStatus === 'failed' || res.status === 'error')) {
+      const msg = res.syncMessage || res.message || '职位同步未完成'
+      if (manual || jobOptions.value.length === 0) {
+        jobsError.value = msg
+      }
+    }
+  } catch (err: any) {
+    if (manual || jobOptions.value.length === 0) {
+      jobsError.value = err?.message || String(err)
+    }
+  } finally {
+    syncingJobs.value = false
+  }
+}
+
+function formatSyncTime(raw: string) {
+  if (!raw) return ''
+  try {
+    const d = new Date(raw)
+    if (isNaN(d.getTime())) return raw
+    const now = new Date()
+    const diffHours = Math.round((now.getTime() - d.getTime()) / (1000 * 3600))
+    if (diffHours < 1) return '刚刚'
+    if (diffHours < 24) return `${diffHours} 小时前`
+    return `${d.getMonth() + 1}月${d.getDate()}日 ${d.getHours().toString().padStart(2, '0')}:${d.getMinutes().toString().padStart(2, '0')}`
+  } catch {
+    return raw
+  }
 }
 async function confirm(){
   if(!batch.value || !selectedJobID.value)return
@@ -443,4 +574,12 @@ watch(()=>props.candidateIds,()=>{if(props.modelValue)void preview(true)},{deep:
 .budget-summary p{flex-basis:100%;margin:0}
 .budget-hint{font-size:13px;line-height:1.6;color:var(--wb-text);margin:0 0 16px}
 .hi-budget-tip{display:flex;align-items:center;gap:8px;margin-top:14px;padding:10px 14px;background:rgba(37, 99, 235, 0.08);border:1px solid rgba(37, 99, 235, 0.15);border-radius:8px;font-size:13px;color:#1d4ed8}
+.job-sync-status-bar{display:flex;align-items:center;justify-content:space-between;padding:8px 12px;background:var(--wb-surface-soft);border:1px solid var(--wb-border);border-radius:8px;margin-bottom:14px;font-size:12px;flex-wrap:wrap;gap:8px}
+.sync-status-left{display:flex;align-items:center;gap:6px;color:var(--wb-text)}
+.sync-status-right{display:flex;align-items:center;gap:6px}
+.status-dot{width:8px;height:8px;border-radius:50%;display:inline-block}
+.status-dot.online{background:#10b981}
+.status-dot.empty{background:#f59e0b}
+.sync-time{color:var(--wb-text-secondary);font-size:11px}
+.sync-stale-tag{font-size:10px;padding:1px 4px;border-radius:3px;background:rgba(245, 158, 11, 0.15);color:#d97706;margin-left:4px}
 </style>

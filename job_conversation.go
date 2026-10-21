@@ -40,6 +40,7 @@ type JobCommunicationOption struct {
 	ID            string `json:"id"`
 	Title         string `json:"title"`
 	Company       string `json:"company,omitempty"`
+	CompanyID     string `json:"companyId,omitempty"`
 	WorkArea      string `json:"workArea,omitempty"`
 	Source        string `json:"source,omitempty"`
 	PublishStatus string `json:"publishStatus,omitempty"`

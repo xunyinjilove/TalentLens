@@ -95,6 +95,9 @@ async function waitCandidateReady(page, expected, name) {
         if (chat?.closest('[data-type="embed"]')?.id === 'im-sdk-container' &&
             chat.querySelector('.input-textarea_self')?.getClientRects().length &&
             (!expectedName || (chat.querySelector('.username-text')?.textContent || '').trim().replace(/小姐$/, '女士') === expectedName.replace(/小姐$/, '女士'))) return true;
+        const gate = Array.from(document.querySelectorAll('.el-dialog[aria-label="立即Hi聊"]'))
+          .some(dialog => dialog.getClientRects().length > 0);
+        if (gate) return true;
         return Array.from(document.querySelectorAll('button.store_resume_button, .btn_item_chat .chat_btn'))
           .some(el => ['立即Hi聊', '继续沟通', 'Hi聊'].includes((el.innerText || '').trim().replace(/\s+/g, '')) && el.getClientRects().length > 0);
       }, { polling: 250, timeout: 12000 }, expected.resumeId, name || '');
@@ -231,6 +234,7 @@ function readCommunicationJobs(keyword = '') {
       if (!id || !title || seen.has(id)) continue;
       seen.add(id);
       jobs.push({ id, title, company: String(item.coName || item.coname || '').trim(),
+        companyId: String(item.coid || '').trim(),
         workArea: String(item.workArea || item.workarea || '').trim(), source,
         publishStatus: String(item.publishStatus || item.publish_status || '').trim() });
     }
@@ -281,10 +285,10 @@ function setCommunicationJobByID(jobID, title) {
   const picker = dialog?.querySelector('.eh_forwarder_searcher')?.parentElement?.__vue__;
   if (!picker || typeof picker.setJob !== 'function') return false;
   const items = [...(picker.jobList || []), ...(picker.myJobList || []), ...(picker.companJobList || [])];
-  const item = items.find(job => String(job.jobid || '') === jobID &&
-    String(job.jobname || job.job_name || '').trim() === title);
+  const item = items.find(job => String(job.jobid || '') === String(jobID || '') &&
+    (!title || String(job.jobname || job.job_name || '').trim() === String(title).trim()));
   if (!item) return false;
-  picker.setJob(String(item.coid || ''), String(item.coName || item.coname || ''), jobID, title);
+  picker.setJob(String(item.coid || ''), String(item.coName || item.coname || ''), jobID, title || String(item.jobname || item.job_name || '').trim());
   return true;
 }
 

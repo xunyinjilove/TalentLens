@@ -36,7 +36,7 @@ import (
 )
 
 // 版本信息
-const AppVersion = "1.8.39"
+const AppVersion = "1.8.40"
 const analysisFormatRetryVersion = "model-json-repair-v1"
 const GitHubRepo = "xunyinjilove/TalentLens"
 
@@ -393,6 +393,7 @@ type App struct {
 	contactMutex       sync.Mutex
 	translationMutex   sync.Mutex
 	outreachMutex      sync.Mutex
+	jobSyncMu          sync.Mutex
 	contactPending     map[string]pending51JobHiQuote
 	analysisMutex      sync.Mutex
 	activeAnalyses     map[string]bool
