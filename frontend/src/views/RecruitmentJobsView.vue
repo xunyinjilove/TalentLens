@@ -63,18 +63,6 @@
           <el-option label="已暂停" value="paused" />
         </el-select>
 
-        <el-button
-          type="success"
-          plain
-          class="sync-51job-btn"
-          :loading="syncing51JobCities"
-          title="从 51job 企业端【职位管理】抓取已发布岗位的真实发布城市（如南昌、宁波、上海）并批量同步"
-          @click="handleSync51JobCities"
-        >
-          <el-icon style="margin-right: 4px;"><Refresh /></el-icon>
-          抓取 51job [职位管理] 城市
-        </el-button>
-
         <el-button type="primary" class="create-job-btn" @click="openCreateModal">
           <el-icon style="margin-right: 4px;"><Plus /></el-icon>
           新建职位
@@ -555,7 +543,6 @@ const globalSearch = ref('')
 const selectedDepartment = ref('')
 const selectedStatus = ref('')
 const jobStatsMap = ref<Record<string, JobStats>>({})
-const syncing51JobCities = ref(false)
 const cached51JobJobs = ref<Array<{ title: string; city: string; salary?: string }>>([])
 
 // 表格横向滚轮滚动
@@ -717,35 +704,19 @@ function goToTalentPool(projectId: string) {
   router.push({ path: '/talent', query: { project: projectId } })
 }
 
-// 抓取 51job [职位管理] 岗位城市并批量同步
-async function handleSync51JobCities() {
-  syncing51JobCities.value = true
+// 自动静默同步 51job [职位管理] 岗位城市（后台无感同步，不打扰用户）
+async function autoSync51JobCities() {
   try {
     const api: any = await import('../../wailsjs/go/main/App')
     const res = await api.Sync51JobJobManagementCities()
     if (res.jobs && res.jobs.length) {
       cached51JobJobs.value = res.jobs
     }
-    if (res.success) {
-      await load()
-      if (res.matchedLogs && res.matchedLogs.length > 0) {
-        ElMessageBox.alert(
-          `<div><strong>${res.message}</strong></div><ul style="margin-top: 10px; padding-left: 20px; max-height: 200px; overflow-y: auto;">` +
-          res.matchedLogs.map((log: string) => `<li>${log}</li>`).join('') +
-          '</ul>',
-          '51job 职位城市同步结果',
-          { dangerouslyUseHTMLString: true, confirmButtonText: '确定' }
-        )
-      } else {
-        ElMessage.success(res.message || '51job 职位城市已是最新匹配状态')
-      }
-    } else {
-      ElMessage.warning(res.message || '未能同步 51job 职位城市')
+    if (res.success && res.updatedCount > 0) {
+      await projectStore.loadProjects()
     }
-  } catch (err: any) {
-    ElMessage.error(err?.message || '同步 51job 职位城市失败')
-  } finally {
-    syncing51JobCities.value = false
+  } catch {
+    // 静默处理网络或登录异常
   }
 }
 
@@ -1119,6 +1090,7 @@ onMounted(async () => {
     tableResponsiveRef.value.addEventListener('wheel', handleTableWheel, { passive: false })
   }
   await load()
+  void autoSync51JobCities()
   const editId = String(route.query.edit || '')
   if (!editId) return
   const project = projectStore.projects.find(item => item.id === editId)
@@ -1651,10 +1623,6 @@ onUnmounted(() => {
   display: flex;
   align-items: center;
   gap: 6px;
-}
-
-.sync-51job-btn {
-  font-weight: 500;
 }
 
 .ai-description-preview {

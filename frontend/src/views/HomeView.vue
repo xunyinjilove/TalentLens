@@ -678,65 +678,39 @@
                   <span v-if="translatedSections.length" class="translation-status-pill">已生成中文对照译文</span>
                 </div>
                 <div class="content-actions">
-                  <el-radio-group v-model="contentViewMode" size="small" class="view-mode-radios">
-                    <el-radio-button value="web">
-                      <el-icon style="margin-right: 3px;"><Platform /></el-icon> 仿网站 UI
-                    </el-radio-button>
-                    <el-radio-button value="sections">
-                      <el-icon style="margin-right: 3px;"><Tickets /></el-icon> 分区排版
-                    </el-radio-button>
-                    <el-radio-button value="raw">
-                      <el-icon style="margin-right: 3px;"><Document /></el-icon> 完整原文
-                    </el-radio-button>
-                  </el-radio-group>
-
-                  <template v-if="contentViewMode === 'sections'">
-                    <el-button
-                      v-if="!translatedSections.length"
-                      size="small"
-                      type="primary"
-                      plain
-                      :loading="translationBusy"
-                      @click="handleTranslateToChinese(false)"
-                    >
-                      <el-icon><RefreshRight /></el-icon>
-                      一键翻译为中文
+                  <el-button
+                    v-if="!translatedSections.length"
+                    size="small"
+                    type="primary"
+                    plain
+                    :loading="translationBusy"
+                    @click="handleTranslateToChinese(false)"
+                  >
+                    <el-icon><RefreshRight /></el-icon>
+                    一键翻译为中文
+                  </el-button>
+                  <template v-else>
+                    <el-button size="small" plain @click="toggleAllTranslations">
+                      {{ allTranslationsCollapsed ? '展开全部译文' : '折叠全部译文' }}
                     </el-button>
-                    <template v-else>
-                      <el-button size="small" plain @click="toggleAllTranslations">
-                        {{ allTranslationsCollapsed ? '展开全部译文' : '折叠全部译文' }}
-                      </el-button>
-                      <el-button size="small" plain :loading="translationBusy" @click="handleTranslateToChinese(true)">
-                        重新翻译
-                      </el-button>
-                    </template>
+                    <el-button size="small" plain :loading="translationBusy" @click="handleTranslateToChinese(true)">
+                      重新翻译
+                    </el-button>
                   </template>
+                  <el-button size="small" plain @click="showRawContent = !showRawContent">
+                    {{ showRawContent ? '查看分区排版' : '查看完整原文' }}
+                  </el-button>
                 </div>
               </div>
               <div class="content-hint">
-                <template v-if="contentViewMode === 'web'">
-                  仿招聘网站 UI 模式：已为您 1:1 结构化还原招聘平台在线真实微简历抽屉，支持随时切换查看分区或完整原文。
-                </template>
-                <template v-else>
-                  {{ translatedSections.length ? '已在对应分区模块下方生成中文译文，保留完整原文以便中英核对。' : '以下内容只调整排版，不改写简历原文。' }}
-                </template>
+                {{ translatedSections.length ? '已在对应分区模块下方生成中文译文，保留完整原文以便中英核对。' : '以下内容只调整排版，不改写简历原文。' }}
               </div>
               <el-alert v-if="translationError" :title="translationError" type="warning" :closable="true" @close="translationError = ''" />
 
-              <!-- 仿网站真实抽屉 UI 视图 -->
-              <div v-if="contentViewMode === 'web'" class="web-resume-view">
-                <MicroResumeWebView
-                  :raw-content="activeRawContent"
-                  :candidate-name="resumeStore.selectedResume.fileName"
-                />
-              </div>
-
-              <!-- 完整原文视图 -->
-              <div v-else-if="contentViewMode === 'raw'" class="raw-content-view">
+              <div v-if="showRawContent" class="raw-content-view">
                 <pre class="content-text">{{ activeRawContent }}</pre>
               </div>
 
-              <!-- 分区排版视图 -->
               <div v-else class="parsed-sections">
                 <section v-for="(section, index) in originalParsedSections" :key="index" class="parsed-section">
                   <div class="parsed-section-heading">
@@ -744,53 +718,63 @@
                     <h3>{{ section.title }}</h3>
                   </div>
                   <div class="parsed-section-body">
-                    <template v-for="(line, lineIndex) in section.lines" :key="lineIndex">
-                      <div v-if="isLineWorkSnapshot(line)" class="work-snapshot">
-                        <h4>{{ line.label || '任职履历快照' }}</h4>
-                        <div v-if="parseWorkSnapshot(getSnapshotRaw(line)).facts.length" class="snapshot-facts">
-                          <span v-for="(fact, factIndex) in parseWorkSnapshot(getSnapshotRaw(line)).facts" :key="factIndex">{{ fact }}</span>
-                        </div>
-                        <template v-for="(experience, expIndex) in parseWorkSnapshot(getSnapshotRaw(line)).experiences" :key="expIndex">
-                          <!-- 原文任职履历小卡片 -->
-                          <div class="snapshot-experience">
-                            <span class="snapshot-period">{{ experience.period }}</span>
-                            <strong v-if="experience.company">{{ experience.company }}</strong>
-                            <span v-if="experience.role" class="snapshot-role">{{ experience.role }}</span>
-                            <p v-if="experience.details.length">{{ experience.details.join(' · ') }}</p>
+                    <!-- 如果是【在线微简历完整正文】等在线卡片分区，采用高仿真网站卡片UI优化展示 -->
+                    <template v-if="isOnlineMicroResumeSection(section.title)">
+                      <MicroResumeWebView
+                        :raw-content="getSectionRawText(section)"
+                        :full-content="activeRawContent"
+                        :candidate-name="resumeStore.selectedResume.fileName"
+                      />
+                    </template>
+                    <template v-else>
+                      <template v-for="(line, lineIndex) in section.lines" :key="lineIndex">
+                        <div v-if="isLineWorkSnapshot(line)" class="work-snapshot">
+                          <h4>{{ line.label || '任职履历快照' }}</h4>
+                          <div v-if="parseWorkSnapshot(getSnapshotRaw(line)).facts.length" class="snapshot-facts">
+                            <span v-for="(fact, factIndex) in parseWorkSnapshot(getSnapshotRaw(line)).facts" :key="factIndex">{{ fact }}</span>
                           </div>
-
-                          <!-- 对应小模块正下方紧跟生成的中文翻译 -->
-                          <div
-                            v-if="getMatchedTranslatedExperience(index, lineIndex, experience, expIndex)"
-                            class="snapshot-experience translated-subcard"
-                          >
-                            <div class="translated-subcard-header">
-                              <span class="subcard-badge">
-                                <el-icon><Reading /></el-icon>
-                                <span>中文译文</span>
-                              </span>
-                              <span v-if="getMatchedTranslatedExperience(index, lineIndex, experience, expIndex)?.period" class="subcard-period">
-                                {{ getMatchedTranslatedExperience(index, lineIndex, experience, expIndex)!.period }}
-                              </span>
+                          <template v-for="(experience, expIndex) in parseWorkSnapshot(getSnapshotRaw(line)).experiences" :key="expIndex">
+                            <!-- 原文任职履历小卡片 -->
+                            <div class="snapshot-experience">
+                              <span class="snapshot-period">{{ experience.period }}</span>
+                              <strong v-if="experience.company">{{ experience.company }}</strong>
+                              <span v-if="experience.role" class="snapshot-role">{{ experience.role }}</span>
+                              <p v-if="experience.details.length">{{ experience.details.join(' · ') }}</p>
                             </div>
-                            <strong v-if="getMatchedTranslatedExperience(index, lineIndex, experience, expIndex)?.company">
-                              {{ getMatchedTranslatedExperience(index, lineIndex, experience, expIndex)!.company }}
-                            </strong>
-                            <span v-if="getMatchedTranslatedExperience(index, lineIndex, experience, expIndex)?.role" class="snapshot-role">
-                              {{ getMatchedTranslatedExperience(index, lineIndex, experience, expIndex)!.role }}
-                            </span>
-                            <p v-if="getMatchedTranslatedExperience(index, lineIndex, experience, expIndex)?.details?.length">
-                              {{ getMatchedTranslatedExperience(index, lineIndex, experience, expIndex)!.details.join(' · ') }}
-                            </p>
-                          </div>
-                        </template>
-                      </div>
-                      <div v-else-if="line.kind === 'field'" class="parsed-field">
-                        <span class="parsed-field-label">{{ line.label }}</span>
-                        <span class="parsed-field-value">{{ line.value }}</span>
-                      </div>
-                      <div v-else-if="line.kind === 'bullet'" class="parsed-bullet"><span aria-hidden="true">•</span>{{ line.text }}</div>
-                      <p v-else class="parsed-paragraph">{{ line.text }}</p>
+
+                            <!-- 对应小模块正下方紧跟生成的中文翻译 -->
+                            <div
+                              v-if="getMatchedTranslatedExperience(index, lineIndex, experience, expIndex)"
+                              class="snapshot-experience translated-subcard"
+                            >
+                              <div class="translated-subcard-header">
+                                <span class="subcard-badge">
+                                  <el-icon><Reading /></el-icon>
+                                  <span>中文译文</span>
+                                </span>
+                                <span v-if="getMatchedTranslatedExperience(index, lineIndex, experience, expIndex)?.period" class="subcard-period">
+                                  {{ getMatchedTranslatedExperience(index, lineIndex, experience, expIndex)!.period }}
+                                </span>
+                              </div>
+                              <strong v-if="getMatchedTranslatedExperience(index, lineIndex, experience, expIndex)?.company">
+                                {{ getMatchedTranslatedExperience(index, lineIndex, experience, expIndex)!.company }}
+                              </strong>
+                              <span v-if="getMatchedTranslatedExperience(index, lineIndex, experience, expIndex)?.role" class="snapshot-role">
+                                {{ getMatchedTranslatedExperience(index, lineIndex, experience, expIndex)!.role }}
+                              </span>
+                              <p v-if="getMatchedTranslatedExperience(index, lineIndex, experience, expIndex)?.details?.length">
+                                {{ getMatchedTranslatedExperience(index, lineIndex, experience, expIndex)!.details.join(' · ') }}
+                              </p>
+                            </div>
+                          </template>
+                        </div>
+                        <div v-else-if="line.kind === 'field'" class="parsed-field">
+                          <span class="parsed-field-label">{{ line.label }}</span>
+                          <span class="parsed-field-value">{{ line.value }}</span>
+                        </div>
+                        <div v-else-if="line.kind === 'bullet'" class="parsed-bullet"><span aria-hidden="true">•</span>{{ line.text }}</div>
+                        <p v-else class="parsed-paragraph">{{ line.text }}</p>
+                      </template>
                     </template>
                   </div>
 
@@ -976,7 +960,7 @@ import {
   RefreshRight, MoreFilled, Tickets, QuestionFilled, DocumentCopy, InfoFilled, Search,
   ChatDotRound, DocumentAdd, Connection, CloseBold, Paperclip, Compass, Check, Message,
   Link, Plus, Share, Aim, Filter, Download, Delete, Finished, Histogram, Calendar,
-  Reading, UploadFilled, Platform
+  Reading, UploadFilled
 } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import TitleBar from '../components/TitleBar.vue'
@@ -1260,23 +1244,22 @@ watch(
 const parsedContent = ref('')
 const contentLoading = ref(false)
 const showRawContent = ref(false)
-const contentViewMode = ref<'web' | 'sections' | 'raw'>('web')
 
-function checkIsOnlineMicroResume(text: string): boolean {
-  if (!text) return false
-  return text.includes('微简历') ||
-    text.includes('在线卡片') ||
-    text.includes('推荐牛人档案') ||
-    text.includes('任职履历快照') ||
-    text.includes('平台活跃标记') ||
-    text.includes('来源渠道：前程无忧') ||
-    text.includes('来源渠道：BOSS') ||
-    text.includes('BOSS直聘推荐牛人档案')
+function isOnlineMicroResumeSection(title: string): boolean {
+  if (!title) return false
+  return title.includes('在线微简历') ||
+    title.includes('在线卡片') ||
+    title.includes('微简历完整正文') ||
+    title.includes('推荐牛人档案')
 }
 
-const isOnlineMicroResume = computed(() => {
-  return checkIsOnlineMicroResume(activeRawContent.value)
-})
+function getSectionRawText(section: ParsedSection): string {
+  return section.lines.map(line => {
+    if (line.kind === 'field') return `${line.label}：${line.value}`
+    if (line.kind === 'bullet') return `• ${line.text}`
+    return line.text || ''
+  }).join('\n')
+}
 const isChineseView = ref(false)
 const translatedSections = ref<string[]>([])
 const translationBusy = ref(false)
@@ -2255,11 +2238,6 @@ async function loadParsedContent() {
         translationBusy.value = false
       }
       parsedContent.value = content
-      if (checkIsOnlineMicroResume(content)) {
-        contentViewMode.value = 'web'
-      } else {
-        contentViewMode.value = 'sections'
-      }
     }
   } catch {
     if (resumeStore.selectedId === requestedId) parsedContent.value = ''
@@ -4413,14 +4391,6 @@ details.candidate-portal-bar[open] > summary.portal-header { margin-bottom: 12px
       background: $bg-primary;
       border-left: 1px solid $separator;
       border-right: 1px solid $separator;
-    }
-
-    .web-resume-view {
-      padding: 12px;
-      background: $bg-primary;
-      border: 1px solid $separator;
-      border-top: none;
-      border-radius: 0 0 $radius-lg $radius-lg;
     }
 
     .parsed-sections {
