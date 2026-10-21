@@ -430,6 +430,7 @@ const props = defineProps<{
   expYears?: number
   eduLevel?: string
   isContinue?: boolean  // true=继续寻才模式，自动跳过已有候选人
+  city?: string
 }>()
 
 const recruitmentStore = useRecruitmentStore()
@@ -807,8 +808,11 @@ watch(() => props.modelValue, (val) => {
     captchaAlert.active = false
     searchLogs.value = []
 
-    // 每次打开弹窗根据当前选中的职位刷新默认关键词
+    // 每次打开弹窗根据当前选中的职位刷新默认关键词与岗位城市
     form.keyword = props.jobTitle || form.keyword || '临床项目经理'
+    if (props.city && props.city.trim()) {
+      form.city = props.city.trim()
+    }
 
     if (props.isContinue) {
       currentStatusText.value = '继续寻才模式 — 请选择/确认招聘平台后启动'

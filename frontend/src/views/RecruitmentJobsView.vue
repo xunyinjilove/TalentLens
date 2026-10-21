@@ -63,6 +63,18 @@
           <el-option label="已暂停" value="paused" />
         </el-select>
 
+        <el-button
+          type="success"
+          plain
+          class="sync-51job-btn"
+          :loading="syncing51JobCities"
+          title="从 51job 企业端【职位管理】抓取已发布岗位的真实发布城市（如南昌、宁波、上海）并批量同步"
+          @click="handleSync51JobCities"
+        >
+          <el-icon style="margin-right: 4px;"><Refresh /></el-icon>
+          抓取 51job [职位管理] 城市
+        </el-button>
+
         <el-button type="primary" class="create-job-btn" @click="openCreateModal">
           <el-icon style="margin-right: 4px;"><Plus /></el-icon>
           新建职位
@@ -253,14 +265,24 @@
             <el-input-number v-model="jobForm.headcount" :min="1" :max="99" style="width: 100%" />
           </el-form-item>
           <el-form-item label="工作城市">
-            <el-select v-model="jobForm.city" placeholder="选择城市" allow-create filterable>
+            <el-select v-model="jobForm.city" placeholder="选择城市" allow-create filterable style="width: 100%">
               <el-option label="上海" value="上海" />
               <el-option label="北京" value="北京" />
               <el-option label="深圳" value="深圳" />
               <el-option label="杭州" value="杭州" />
               <el-option label="广州" value="广州" />
+              <el-option label="宁波" value="宁波" />
+              <el-option label="南昌" value="南昌" />
+              <el-option label="苏州" value="苏州" />
+              <el-option label="南京" value="南京" />
+              <el-option label="武汉" value="武汉" />
+              <el-option label="成都" value="成都" />
               <el-option label="远程" value="远程" />
             </el-select>
+            <div v-if="suggested51JobCity && suggested51JobCity !== jobForm.city" class="city-sync-suggestion">
+              💡 51job [职位管理] 匹配城市：<strong>{{ suggested51JobCity }}</strong>
+              <el-button link type="primary" size="small" @click="jobForm.city = suggested51JobCity">一键应用</el-button>
+            </div>
           </el-form-item>
           <el-form-item label="工作性质">
             <el-select v-model="jobForm.employment_type" placeholder="性质">
@@ -426,9 +448,9 @@
 
         <el-form-item>
           <template #label>
-            <div class="skills-label-row">
-              <span class="skills-label-title">必备关键技能 / 评分项 (回车分隔)</span>
-              <span class="skills-label-tip">（关键技能用于生成技能指标雷达，可分析八项以内的技能，若不足则AI自动匹配技能）</span>
+            <div class="skills-label-wrapper">
+              <div class="skills-label-title">必备关键技能 / 评分项 (回车分隔)</div>
+              <div class="skills-label-tip">（关键技能用于生成技能指标雷达，可分析八项以内的技能，若不足则AI自动匹配技能）</div>
             </div>
           </template>
           <el-input
@@ -472,6 +494,7 @@
       :project-id="sourcingProject.id"
       :project-name="sourcingProject.name"
       :job-title="sourcingProject.job_config?.title || sourcingProject.name"
+      :city="sourcingProject.job_config?.city || '上海'"
       :exp-years="sourcingProject.job_config?.experience_years || 0"
       :edu-level="sourcingProject.job_config?.education_level || ''"
       @refresh="load"
@@ -532,6 +555,8 @@ const globalSearch = ref('')
 const selectedDepartment = ref('')
 const selectedStatus = ref('')
 const jobStatsMap = ref<Record<string, JobStats>>({})
+const syncing51JobCities = ref(false)
+const cached51JobJobs = ref<Array<{ title: string; city: string; salary?: string }>>([])
 
 // 表格横向滚轮滚动
 const tableResponsiveRef = ref<HTMLElement | null>(null)
@@ -692,8 +717,67 @@ function goToTalentPool(projectId: string) {
   router.push({ path: '/talent', query: { project: projectId } })
 }
 
+// 抓取 51job [职位管理] 岗位城市并批量同步
+async function handleSync51JobCities() {
+  syncing51JobCities.value = true
+  try {
+    const api: any = await import('../../wailsjs/go/main/App')
+    const res = await api.Sync51JobJobManagementCities()
+    if (res.jobs && res.jobs.length) {
+      cached51JobJobs.value = res.jobs
+    }
+    if (res.success) {
+      await load()
+      if (res.matchedLogs && res.matchedLogs.length > 0) {
+        ElMessageBox.alert(
+          `<div><strong>${res.message}</strong></div><ul style="margin-top: 10px; padding-left: 20px; max-height: 200px; overflow-y: auto;">` +
+          res.matchedLogs.map((log: string) => `<li>${log}</li>`).join('') +
+          '</ul>',
+          '51job 职位城市同步结果',
+          { dangerouslyUseHTMLString: true, confirmButtonText: '确定' }
+        )
+      } else {
+        ElMessage.success(res.message || '51job 职位城市已是最新匹配状态')
+      }
+    } else {
+      ElMessage.warning(res.message || '未能同步 51job 职位城市')
+    }
+  } catch (err: any) {
+    ElMessage.error(err?.message || '同步 51job 职位城市失败')
+  } finally {
+    syncing51JobCities.value = false
+  }
+}
+
+// 快速异步拉取 51job 职位管理列表缓存
+async function ensure51JobJobsCache() {
+  if (cached51JobJobs.value.length > 0) return
+  try {
+    const api: any = await import('../../wailsjs/go/main/App')
+    const res = await api.Fetch51JobManagementJobs()
+    if (res.status === 'success' && res.jobs) {
+      cached51JobJobs.value = res.jobs
+    }
+  } catch {
+    // 忽略静默网络异常
+  }
+}
+
+// 智能根据表单职位名称匹配 51job 对应发布城市
+const suggested51JobCity = computed(() => {
+  const currentTitle = jobForm.title.trim()
+  if (!currentTitle || !cached51JobJobs.value.length) return ''
+  const cleanTitle = currentTitle.toLowerCase().replace(/[（）()]/g, '')
+  const matched = cached51JobJobs.value.find(j => {
+    const jClean = j.title.toLowerCase().replace(/[（）()]/g, '')
+    return jClean === cleanTitle || jClean.includes(cleanTitle) || cleanTitle.includes(jClean)
+  })
+  return matched ? matched.city : ''
+})
+
 // 模态弹窗控制
 function openCreateModal() {
+  void ensure51JobJobsCache()
   aiDraft.value = ''
   currentDraftDirection.value = ''
   directionPromptVisible.value = false
@@ -721,6 +805,7 @@ function openCreateModal() {
 }
 
 function openEditModal(project: Project) {
+  void ensure51JobJobsCache()
   aiDraft.value = ''
   currentDraftDirection.value = ''
   directionPromptVisible.value = false
@@ -765,6 +850,10 @@ watch(() => jobForm.title, (newTitle, oldTitle) => {
     currentDraftDirection.value = ''
     directionPromptVisible.value = false
     activeConflicts.value = []
+  }
+  // 若为新建且当前城市是默认上海，匹配到 51job 对应城市则自动带入
+  if (!isEditing.value && suggested51JobCity.value && (jobForm.city === '上海' || !jobForm.city)) {
+    jobForm.city = suggested51JobCity.value
   }
 })
 
@@ -1535,22 +1624,37 @@ onUnmounted(() => {
   color: var(--wb-muted);
 }
 
-.skills-label-row {
+.skills-label-wrapper {
   display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 8px;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 3px;
   width: 100%;
 }
 
 .skills-label-title {
   font-weight: 500;
+  color: var(--wb-text);
 }
 
 .skills-label-tip {
   font-size: 12px;
-  font-weight: normal;
-  color: var(--wb-muted, #94a3b8);
+  font-weight: 500;
+  color: #2563eb !important;
+  line-height: 1.4;
+}
+
+.city-sync-suggestion {
+  margin-top: 4px;
+  font-size: 12px;
+  color: #059669;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.sync-51job-btn {
+  font-weight: 500;
 }
 
 .ai-description-preview {

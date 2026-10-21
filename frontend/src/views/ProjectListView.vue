@@ -141,9 +141,9 @@
             </div>
 
             <div class="expand-full" style="margin-top: 12px;">
-              <div class="label-row">
-                <label class="expand-label">核心必备技能点 (可回车添加)</label>
-                <span class="label-tip">（关键技能用于生成技能指标雷达，可分析八项以内的技能，若不足则AI自动匹配技能）</span>
+              <div class="label-row" style="flex-direction: column; align-items: flex-start; gap: 3px;">
+                <label class="expand-label">必备关键技能 / 评分项 (回车分隔)</label>
+                <span class="label-tip" style="color: #2563eb !important; font-weight: 500;">（关键技能用于生成技能指标雷达，可分析八项以内的技能，若不足则AI自动匹配技能）</span>
               </div>
               <el-select
                 v-model="currentJobConfig.requiredSkills"
