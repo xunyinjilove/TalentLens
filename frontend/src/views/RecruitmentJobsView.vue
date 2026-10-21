@@ -424,12 +424,19 @@
           <pre>{{ aiDraft }}</pre>
         </div>
 
-        <el-form-item label="必备关键技能 / 评分项 (回车分隔)">
+        <el-form-item>
+          <template #label>
+            <div class="skills-label-row">
+              <span class="skills-label-title">必备关键技能 / 评分项 (回车分隔)</span>
+              <span class="skills-label-tip">（这里的关键技能会用于生成技能指标雷达，可以分析八项以内的技能，若不足则AI自动匹配技能）</span>
+            </div>
+          </template>
           <el-input
             v-model="skillsInput"
             placeholder="输入核心专业技能，多个技能以逗号或回车隔开 (选填，留空由 AI 智能拟定)"
             @blur="syncSkills"
           />
+          <div class="skills-field-help">💡 这里的关键技能会用于生成技能指标雷达，可以分析八项以内的技能，若不足则AI自动匹配技能。</div>
         </el-form-item>
 
         <el-form-item label="初试重点核查题纲（进入初试环节时自动生成重点核验题目，以逗号或分号分隔）">
@@ -1526,6 +1533,31 @@ onUnmounted(() => {
 .description-help {
   margin-top: 5px;
   font-size: 12px;
+  color: var(--wb-muted);
+}
+
+.skills-label-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  width: 100%;
+}
+
+.skills-label-title {
+  font-weight: 500;
+}
+
+.skills-label-tip {
+  font-size: 12px;
+  font-weight: normal;
+  color: #4f46e5;
+}
+
+.skills-field-help {
+  margin-top: 5px;
+  font-size: 12px;
+  line-height: 1.5;
   color: var(--wb-muted);
 }
 
