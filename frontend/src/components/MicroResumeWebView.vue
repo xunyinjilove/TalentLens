@@ -9,9 +9,15 @@
           <el-icon v-else class="platform-icon"><User /></el-icon>
           <strong class="platform-name">{{ resumeData.platformName }}</strong>
         </span>
-        <span class="platform-card-type">在线微简历 · 平台真实抽屉</span>
+        <span class="platform-card-type">在线微简历 · 真实抽屉</span>
       </div>
       <div class="banner-right">
+        <span v-if="resumeData.talentId" class="talent-id-pill" title="平台官方人才标识编号">
+          ID: {{ resumeData.talentId }}
+        </span>
+        <span v-if="resumeData.activeTime" class="talent-time-pill" title="平台最近活跃刷新时间">
+          {{ resumeData.activeTime }}
+        </span>
         <span v-if="resumeData.activityLabel" class="activity-pulse-tag">
           <span class="pulse-dot"></span>
           {{ resumeData.activityLabel }}
@@ -53,7 +59,14 @@
             </div>
           </div>
 
-          <div class="hero-target-job">
+          <!-- 电话或直接沟通偏好提醒 -->
+          <div v-if="resumeData.phonePreference" class="phone-pref-callout">
+            <el-icon class="phone-icon"><Phone /></el-icon>
+            <span>{{ resumeData.phonePreference }}</span>
+          </div>
+
+          <!-- 期望求职岗位 / 期望城市 / 期望薪资 -->
+          <div v-if="resumeData.targetRole || resumeData.targetCity || resumeData.targetSalary" class="hero-target-job">
             <span class="target-job-label">期望求职：</span>
             <strong class="target-job-value">{{ resumeData.targetRole || '对应专业岗位' }}</strong>
             <span v-if="resumeData.targetCity" class="dot-sep">·</span>
@@ -209,10 +222,10 @@
       </div>
     </div>
 
-    <!-- 原始抓取数据流折叠面板 (供 HR 核对源字段) -->
+    <!-- 原始抓取流折叠面板 (已自动过滤网页端无关导航杂讯) -->
     <div class="raw-data-expander">
       <el-collapse>
-        <el-collapse-item title="🔍 查看原始卡片抓取数据流 (Raw Text)">
+        <el-collapse-item title="🔍 查看原始微简历流水数据 (已自动过滤网页导航杂讯)">
           <pre class="raw-dump-pre">{{ rawContent }}</pre>
         </el-collapse-item>
       </el-collapse>
@@ -229,7 +242,8 @@ import {
   Location,
   Money,
   Calendar,
-  Link
+  Link,
+  Phone
 } from '@element-plus/icons-vue'
 
 interface WorkExperience {
@@ -250,8 +264,11 @@ interface MicroResumeData {
   platform: '51job' | 'boss' | 'other'
   platformName: string
   name: string
+  talentId: string
+  activeTime: string
   activityLabel: string
   statusTags: string[]
+  phonePreference: string
   targetRole: string
   targetCity: string
   targetSalary: string
@@ -259,6 +276,7 @@ interface MicroResumeData {
   experience: string
   education: string
   location: string
+  profileSummary: string
   skills: string[]
   workExperiences: WorkExperience[]
   educations: Education[]
@@ -268,35 +286,40 @@ interface MicroResumeData {
 
 const props = defineProps<{
   rawContent: string
+  fullContent?: string
   candidateName?: string
   candidateUrl?: string
 }>()
 
 const resumeData = computed<MicroResumeData>(() => {
-  return parseMicroResume(props.rawContent, props.candidateName, props.candidateUrl)
+  return parseMicroResume(props.rawContent, props.fullContent, props.candidateName, props.candidateUrl)
 })
 
 const avatarChar = computed(() => {
   const n = resumeData.value.name.trim()
   if (!n) return '牛'
-  // 若以先生/女士结尾，取首字
   return n.charAt(0)
 })
 
 function getStatusClass(tag: string): string {
   if (tag.includes('急切') || tag.includes('随时到岗') || tag.includes('离职')) return 'status-urgent'
   if (tag.includes('活跃') || tag.includes('刚刚') || tag.includes('在线')) return 'status-active'
-  if (tag.includes('回复快') || tag.includes('沟通')) return 'status-reply'
+  if (tag.includes('回复快') || tag.includes('沟通') || tag.includes('考虑') || tag.includes('观望')) return 'status-reply'
   return 'status-normal'
 }
 
-function parseMicroResume(content: string, propName?: string, propUrl?: string): MicroResumeData {
+function parseMicroResume(content: string, fullContent?: string, propName?: string, propUrl?: string): MicroResumeData {
+  const allText = (fullContent ? fullContent + '\n\n' : '') + (content || '')
+  
   const res: MicroResumeData = {
     platform: 'other',
     platformName: '在线微简历',
     name: propName ? propName.replace(/^【.*?】/, '').replace(/_.*$/, '') : '',
+    talentId: '',
+    activeTime: '',
     activityLabel: '',
     statusTags: [],
+    phonePreference: '',
     targetRole: '',
     targetCity: '',
     targetSalary: '',
@@ -304,6 +327,7 @@ function parseMicroResume(content: string, propName?: string, propUrl?: string):
     experience: '',
     education: '',
     location: '',
+    profileSummary: '',
     skills: [],
     workExperiences: [],
     educations: [],
@@ -314,44 +338,33 @@ function parseMicroResume(content: string, propName?: string, propUrl?: string):
   if (!content) return res
 
   // 1. 平台判定
-  if (content.includes('前程无忧') || content.includes('51job')) {
+  if (allText.includes('前程无忧') || allText.includes('51job')) {
     res.platform = '51job'
     res.platformName = '前程无忧 51job'
-  } else if (content.includes('BOSS') || content.includes('boss')) {
+  } else if (allText.includes('BOSS') || allText.includes('boss')) {
     res.platform = 'boss'
     res.platformName = 'BOSS 直聘'
   }
 
   // 2. URL 提取
-  const urlMatch = content.match(/在线直达网址[：:]\s*(https?:\/\/[^\s\r\n]+)/)
+  const urlMatch = allText.match(/在线直达网址[：:]\s*(https?:\/\/[^\s\r\n]+)/)
   if (urlMatch) res.url = urlMatch[1].trim()
 
-  // 3. 姓名 / 称谓提取
-  const nameMatch = content.match(/姓名(?:\s*\/\s*称谓)?[：:]\s*([^\s\r\n]+)/)
+  // 3. 从全文提取标准字段
+  const nameMatch = allText.match(/姓名(?:\s*\/\s*称谓)?[：:]\s*([^\s\r\n]+)/)
   if (nameMatch) {
     res.name = nameMatch[1].trim()
   }
 
-  // 4. 活跃度提取
-  const actMatch = content.match(/(?:平台活跃标记|活跃状态)[：:]\s*([^\s\r\n]+)/)
+  const actMatch = allText.match(/(?:平台活跃标记|活跃状态)[：:]\s*([^\s\r\n]+)/)
   if (actMatch) res.activityLabel = actMatch[1].trim()
 
-  // 5. 求职状态 / 意向标签
-  const statusMatch = content.match(/求职状态[：:]\s*([^\r\n]+)/)
+  const statusMatch = allText.match(/求职状态[：:]\s*([^\r\n]+)/)
   if (statusMatch) {
     res.statusTags.push(...statusMatch[1].split(/[/,，、|]/).map(s => s.trim()).filter(Boolean))
   }
 
-  // 扫描全文常见标签词（急切求职、回复快、电话沟通等）
-  const commonTags = ['急切求职', '回复快', '电话沟通', '在职-月内到岗', '随时到岗', '离职-随时到岗', '在职-考虑好机会']
-  for (const t of commonTags) {
-    if (content.includes(t) && !res.statusTags.includes(t)) {
-      res.statusTags.push(t)
-    }
-  }
-
-  // 6. 期望岗位 / 期望城市 / 期望薪资
-  const jobMatch = content.match(/(?:检索岗位|求职意向)[：:]\s*([^\r\n]+)/)
+  const jobMatch = allText.match(/(?:检索岗位|求职意向)[：:]\s*([^\r\n]+)/)
   if (jobMatch) {
     const val = jobMatch[1].trim()
     if (val.includes('万') || val.includes('K') || val.includes('k') || val.includes('元')) {
@@ -363,11 +376,11 @@ function parseMicroResume(content: string, propName?: string, propUrl?: string):
     }
   }
 
-  const cityMatch = content.match(/(?:目标城市|当前城市)[：:]\s*([^\s\r\n]+)/)
+  const cityMatch = allText.match(/(?:目标城市|当前城市)[：:]\s*([^\s\r\n]+)/)
   if (cityMatch) res.targetCity = cityMatch[1].trim()
 
-  // 7. 技能列表提取
-  const skillsBlock = content.match(/【核心专业技能】([\s\S]*?)(?=【|$)/)
+  // 核心专业技能
+  const skillsBlock = allText.match(/【核心专业技能】([\s\S]*?)(?=【|$)/)
   if (skillsBlock) {
     const lines = skillsBlock[1]
       .split('\n')
@@ -376,48 +389,123 @@ function parseMicroResume(content: string, propName?: string, propUrl?: string):
     res.skills = lines.filter(s => s !== '岗位专业技能' && !s.includes('核心专业技能'))
   }
 
-  // 8. 优势与自我评价提取
-  const advBlock = content.match(/【(?:个人综合优势|自我评价|综合优势|自我介绍)】([\s\S]*?)(?=【|$)/)
+  // 优势与评价
+  const advBlock = allText.match(/【(?:个人综合优势|自我评价|综合优势|自我介绍)】([\s\S]*?)(?=【|$)/)
   if (advBlock) {
     res.advantage = advBlock[1].trim()
   }
 
-  // 9. 年龄、工龄、学历、地点提取
-  const portraitMatch = content.match(/基本画像[：:]\s*([^\r\n]+)/)
-  const textToScan = (portraitMatch ? portraitMatch[1] : '') + '\n' + content
+  // 4. 清洗当前微简历内容行，过滤掉网页导航噪声词
+  const noiseWords = new Set(['通知', '手机版', '帮助', '扫码分享', '在线简历', 'resume', '立即hi聊', '不感兴趣', '聊天', '投递', '收藏', '转发', '普通公民'])
+  const rawLines = content.split('\n').map(s => s.trim()).filter(Boolean)
+  const cleanedLines = rawLines.filter(line => {
+    const l = line.toLowerCase()
+    if (noiseWords.has(l)) return false
+    if (/^\d{1,3}$/.test(l)) return false // 如通知数 "22"
+    if (/^\d{8,25}$/.test(l)) return false // 如纯数字串 "223480984442"
+    return true
+  })
 
-  const ageM = textToScan.match(/(\d{2})\s*岁/)
-  if (ageM) res.age = ageM[1] + ' 岁'
+  // 5. 遍历清洗后的行，智能结构化提取
+  for (let i = 0; i < cleanedLines.length; i++) {
+    const line = cleanedLines[i]
 
-  const expM = textToScan.match(/(?:工作年限[：:]\s*)?(\d+年(?:以上|及以上|经验|工作经验)?)/)
-  if (expM) {
-    res.experience = expM[1].includes('年') && !expM[1].includes('经验') ? expM[1] + '经验' : expM[1]
+    // 人才 ID 与活跃时间
+    const idMatch = line.match(/人才ID\s*([0-9a-zA-Z]+)(?:\s*活跃时间[：:]\s*([0-9.-]+))?/)
+    if (idMatch) {
+      res.talentId = idMatch[1]
+      if (idMatch[2]) res.activeTime = idMatch[2]
+      continue
+    }
+
+    // 活跃标签 (如 "1个月内活跃", "刚刚活跃")
+    if (line.includes('活跃') && !res.activityLabel) {
+      res.activityLabel = line
+      continue
+    }
+
+    // 候选人姓名/称谓 (如 "周先生", "沈女士")
+    if (!res.name && ((line.includes('先生') || line.includes('女士')) || (line.length >= 2 && line.length <= 4 && !line.includes('活跃') && !line.includes('沟通') && !line.includes('经历') && !line.includes('背景')))) {
+      res.name = line
+      continue
+    }
+
+    // 求职意向状态 (如 "观望有好机会会考虑 (三个月内到岗)", "离职-随时到岗")
+    if (line.includes('观望') || line.includes('随时到岗') || line.includes('离职') || line.includes('急切') || line.includes('考虑好机会') || line.includes('月内到岗')) {
+      if (!res.statusTags.includes(line)) {
+        res.statusTags.push(line)
+      }
+      continue
+    }
+
+    // 基本画像综合行 (如 "44岁 21年经验 硕士 现居·上海-浦东新区 普通公民")
+    if (line.includes('岁') || line.includes('经验') || line.includes('现居')) {
+      res.profileSummary = line
+      const ageM = line.match(/(\d{2})\s*岁/)
+      if (ageM) res.age = ageM[1] + ' 岁'
+
+      const expM = line.match(/(\d+年(?:以上|及以上|经验|工作经验)?)/)
+      if (expM) res.experience = expM[1]
+
+      const eduM = line.match(/(博士|硕士|本科|大专|高中|中专)/)
+      if (eduM) res.education = eduM[1]
+
+      const locM = line.match(/(?:现居[·\s]*)?([^\s·]+-[^\s·]+)/)
+      if (locM) res.location = locM[1]
+      continue
+    }
+
+    // 沟通偏好
+    if (line === '电话沟通' || line.includes('偏好电话') || line.includes('电话直接沟通') || line.includes('在线沟通')) {
+      if (!res.phonePreference) res.phonePreference = line
+      else if (!res.phonePreference.includes(line)) res.phonePreference += ' · ' + line
+      continue
+    }
+
+    // 薪资匹配
+    const salM = line.match(/(\d+(?:\.\d+)?-\d+(?:\.\d+)?(?:万|千|K|k)(?:\/[月年])?)/)
+    if (salM && !res.targetSalary) {
+      res.targetSalary = salM[1]
+    }
+
+    // 工作经历时间线匹配 (如 "2018.03-至今 (6年)")
+    if (/(?:19|20)\d{2}[./-]\d{1,2}/.test(line) && (line.includes('至今') || line.includes('-') || line.includes('~'))) {
+      const next1 = cleanedLines[i + 1] || ''
+      const next2 = cleanedLines[i + 2] || ''
+      const next3 = cleanedLines[i + 3] || ''
+
+      const isEdu = next1.includes('大学') || next1.includes('学院') || ['硕士', '本科', '大专', '博士'].includes(next2)
+      if (isEdu) {
+        res.educations.push({
+          period: line,
+          school: next1,
+          major: !['硕士', '本科', '大专', '博士'].includes(next2) ? next2 : next3,
+          degree: ['硕士', '本科', '大专', '博士'].includes(next2) ? next2 : (['硕士', '本科', '大专', '博士'].includes(next3) ? next3 : (res.education || '本科'))
+        })
+        i += 2
+      } else {
+        res.workExperiences.push({
+          period: line,
+          company: next1 || '行业企业',
+          role: next2 || '专业岗位',
+          details: []
+        })
+        i += 2
+      }
+    }
   }
 
-  const eduM = textToScan.match(/(博士|硕士|本科|大专|高中|中专)/)
-  if (eduM) res.education = eduM[1]
-
-  const locM = textToScan.match(/([^\s·|：:\r\n]+-[^\s·|\r\n]+)/)
-  if (locM) res.location = locM[1]
-
-  const salM = content.match(/(\d+(?:\.\d+)?-\d+(?:\.\d+)?(?:万|千|K|k)(?:\/[月年])?)/)
-  if (salM) res.targetSalary = salM[1]
-
-  // 10. 解析工作履历与教育经历 (任职履历快照)
-  const snapshotMatch = content.match(/任职履历快照[：:]\s*([^\r\n]+)/)
-  if (snapshotMatch) {
+  // 兼容任职履历快照
+  const snapshotMatch = allText.match(/任职履历快照[：:]\s*([^\r\n]+)/)
+  if (snapshotMatch && res.workExperiences.length === 0) {
     const rawSegs = snapshotMatch[1].split('|').map(s => s.trim().replace(/^[•●·*\-]\s*/, '')).filter(Boolean)
-    
-    // 如果快照前几个是画像标签，跳过它们
     for (let i = 0; i < rawSegs.length; i++) {
       const seg = rawSegs[i]
-      // 检测时间范围：形如 2020.09-至今 (6年) 或 2012.09-2016.06
       if (/(?:19|20)\d{2}[./-]\d{1,2}/.test(seg) && (seg.includes('至今') || seg.includes('-') || seg.includes('~'))) {
         const next1 = rawSegs[i + 1] || ''
         const next2 = rawSegs[i + 2] || ''
         const next3 = rawSegs[i + 3] || ''
 
-        // 若 next1 是学校或者 next2 是学历
         const isEdu = next1.includes('大学') || next1.includes('学院') || ['本科', '硕士', '大专', '博士'].includes(next2)
         if (isEdu) {
           res.educations.push({
@@ -440,43 +528,6 @@ function parseMicroResume(content: string, propName?: string, propUrl?: string):
     }
   }
 
-  // 兼容 BOSS 风格的【工作经历与项目成果】
-  const workBlock = content.match(/【工作经历与项目成果】([\s\S]*?)(?=【|$)/)
-  if (workBlock && res.workExperiences.length === 0) {
-    const text = workBlock[1].replace(/工作经历[：:]/, '').trim()
-    res.workExperiences.push({
-      period: res.experience || '历年任职',
-      company: '相关生物医药/医疗器械企业',
-      role: res.targetRole || '项目主管',
-      details: [text]
-    })
-  }
-
-  // 兼容 BOSS 风格的【教育背景】
-  const eduBlock = content.match(/【教育背景】([\s\S]*?)(?=【|$)/)
-  if (eduBlock && res.educations.length === 0) {
-    const parts = eduBlock[1].trim().split('|').map(s => s.trim())
-    if (parts.length >= 2) {
-      res.educations.push({
-        period: '最高学历院校',
-        school: parts[0],
-        major: parts[1] || '',
-        degree: parts[2] || res.education || '本科'
-      })
-    }
-  }
-
-  // 若没有从快照提取到姓名，从第一行提取
-  if (!res.name) {
-    const lines = content.split('\n').map(s => s.trim()).filter(Boolean)
-    for (const l of lines) {
-      if ((l.includes('先生') || l.includes('女士')) && l.length <= 6) {
-        res.name = l
-        break
-      }
-    }
-  }
-
   return res
 }
 </script>
@@ -485,8 +536,8 @@ function parseMicroResume(content: string, propName?: string, propUrl?: string):
 .micro-resume-web-view {
   display: flex;
   flex-direction: column;
-  gap: 16px;
-  padding: 4px;
+  gap: 14px;
+  padding: 2px;
 }
 
 /* 顶部平台来源与真实性标识横幅 */
@@ -494,8 +545,8 @@ function parseMicroResume(content: string, propName?: string, propUrl?: string):
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 10px 16px;
-  border-radius: 10px;
+  padding: 8px 14px;
+  border-radius: 8px;
   background: var(--wb-surface-soft, #f8fafc);
   border: 1px solid var(--wb-border, #e2e8f0);
 }
@@ -552,7 +603,18 @@ function parseMicroResume(content: string, propName?: string, propUrl?: string):
 .banner-right {
   display: flex;
   align-items: center;
-  gap: 12px;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.talent-id-pill,
+.talent-time-pill {
+  font-size: 11px;
+  color: var(--wb-muted, #64748b);
+  background: var(--wb-surface, #ffffff);
+  border: 1px solid var(--wb-border, #e2e8f0);
+  padding: 2px 8px;
+  border-radius: 6px;
 }
 
 .activity-pulse-tag {
@@ -563,7 +625,7 @@ function parseMicroResume(content: string, propName?: string, propUrl?: string):
   font-weight: 500;
   color: #10b981;
   background: rgba(16, 185, 129, 0.1);
-  padding: 3px 10px;
+  padding: 2px 8px;
   border-radius: 12px;
 }
 
@@ -598,7 +660,7 @@ function parseMicroResume(content: string, propName?: string, propUrl?: string):
   font-size: 12px;
   color: var(--wb-primary, #2563eb);
   text-decoration: none;
-  padding: 3px 8px;
+  padding: 2px 8px;
   border-radius: 6px;
   border: 1px solid rgba(37, 99, 235, 0.2);
   transition: all 0.2s;
@@ -610,32 +672,32 @@ function parseMicroResume(content: string, propName?: string, propUrl?: string):
 
 /* 候选人主卡片 Hero */
 .candidate-hero-card {
-  padding: 20px;
-  border-radius: 12px;
+  padding: 16px 18px;
+  border-radius: 10px;
   background: var(--wb-surface, #ffffff);
   border: 1px solid var(--wb-border, #e2e8f0);
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.03);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.03);
 }
 
 .hero-main-row {
   display: flex;
   align-items: center;
   gap: 16px;
-  margin-bottom: 20px;
+  margin-bottom: 14px;
 }
 
 .hero-avatar {
-  width: 58px;
-  height: 58px;
+  width: 52px;
+  height: 52px;
   border-radius: 50%;
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 24px;
+  font-size: 22px;
   font-weight: 700;
   color: #fff;
   flex-shrink: 0;
-  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.12);
+  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.1);
 }
 
 .hero-avatar.platform-51job {
@@ -659,13 +721,13 @@ function parseMicroResume(content: string, propName?: string, propUrl?: string):
   display: flex;
   align-items: center;
   flex-wrap: wrap;
-  gap: 10px;
-  margin-bottom: 6px;
+  gap: 8px;
+  margin-bottom: 4px;
 }
 
 .candidate-name {
   margin: 0;
-  font-size: 20px;
+  font-size: 18px;
   font-weight: 700;
   color: var(--wb-text, #0f172a);
 }
@@ -707,6 +769,20 @@ function parseMicroResume(content: string, propName?: string, propUrl?: string):
   border: 1px solid #e2e8f0;
 }
 
+.phone-pref-callout {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 500;
+  color: #0284c7;
+  background: #f0f9ff;
+  padding: 2px 8px;
+  border-radius: 6px;
+  border: 1px solid #bae6fd;
+  margin-bottom: 6px;
+}
+
 .hero-target-job {
   display: flex;
   align-items: center;
@@ -738,17 +814,17 @@ function parseMicroResume(content: string, propName?: string, propUrl?: string):
 /* 核心指标栅格 */
 .metrics-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
-  gap: 12px;
-  padding-top: 16px;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  gap: 10px;
+  padding-top: 14px;
   border-top: 1px dashed var(--wb-border, #e2e8f0);
 }
 
 .metric-item {
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 10px 12px;
+  gap: 8px;
+  padding: 8px 10px;
   border-radius: 8px;
   background: var(--wb-surface-soft, #f8fafc);
   border: 1px solid var(--wb-border, #f1f5f9);
@@ -770,15 +846,15 @@ function parseMicroResume(content: string, propName?: string, propUrl?: string):
 }
 
 .metric-icon-wrap {
-  width: 32px;
-  height: 32px;
-  border-radius: 8px;
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
   background: var(--wb-primary-subtle, #eff6ff);
   color: var(--wb-primary, #2563eb);
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 16px;
+  font-size: 15px;
   flex-shrink: 0;
 }
 
@@ -793,14 +869,15 @@ function parseMicroResume(content: string, propName?: string, propUrl?: string):
 }
 
 .metric-val {
-  font-size: 13px;
+  font-size: 12px;
+  font-weight: 600;
   color: var(--wb-text, #1e293b);
 }
 
-/* 通用分区卡片 */
+/* 分区卡片 */
 .web-section-card {
-  padding: 18px 20px;
-  border-radius: 12px;
+  padding: 14px 16px;
+  border-radius: 10px;
   background: var(--wb-surface, #ffffff);
   border: 1px solid var(--wb-border, #e2e8f0);
 }
@@ -809,7 +886,7 @@ function parseMicroResume(content: string, propName?: string, propUrl?: string):
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin-bottom: 14px;
+  margin-bottom: 12px;
 }
 
 .title-with-bar {
@@ -820,13 +897,13 @@ function parseMicroResume(content: string, propName?: string, propUrl?: string):
 
 .accent-bar {
   width: 3px;
-  height: 15px;
+  height: 14px;
   border-radius: 2px;
   background: var(--wb-primary, #2563eb);
 }
 
 .section-title {
-  font-size: 14px;
+  font-size: 13px;
   font-weight: 600;
   color: var(--wb-text, #0f172a);
 }
@@ -843,15 +920,15 @@ function parseMicroResume(content: string, propName?: string, propUrl?: string):
 .skills-cloud {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
+  gap: 6px;
 }
 
 .skill-chip {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  padding: 5px 12px;
-  border-radius: 20px;
+  gap: 5px;
+  padding: 4px 10px;
+  border-radius: 16px;
   font-size: 12px;
   font-weight: 500;
   color: #1d4ed8;
@@ -870,12 +947,12 @@ function parseMicroResume(content: string, propName?: string, propUrl?: string):
 .timeline-container {
   display: flex;
   flex-direction: column;
-  padding-left: 6px;
+  padding-left: 4px;
 }
 
 .timeline-item {
   display: flex;
-  gap: 16px;
+  gap: 14px;
   position: relative;
 }
 
@@ -887,8 +964,8 @@ function parseMicroResume(content: string, propName?: string, propUrl?: string):
 }
 
 .timeline-dot {
-  width: 10px;
-  height: 10px;
+  width: 9px;
+  height: 9px;
   border-radius: 50%;
   background: var(--wb-primary, #2563eb);
   box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.2);
@@ -899,13 +976,13 @@ function parseMicroResume(content: string, propName?: string, propUrl?: string):
   width: 2px;
   flex: 1;
   background: var(--wb-border, #e2e8f0);
-  margin: 6px 0;
-  min-height: 36px;
+  margin: 4px 0;
+  min-height: 28px;
 }
 
 .timeline-content {
   flex: 1;
-  padding-bottom: 20px;
+  padding-bottom: 16px;
 }
 
 .timeline-header {
@@ -913,29 +990,29 @@ function parseMicroResume(content: string, propName?: string, propUrl?: string):
   align-items: center;
   justify-content: space-between;
   flex-wrap: wrap;
-  gap: 8px;
-  margin-bottom: 6px;
+  gap: 6px;
+  margin-bottom: 4px;
 }
 
 .company-role-group {
   display: flex;
   align-items: center;
   flex-wrap: wrap;
-  gap: 8px;
+  gap: 6px;
 }
 
 .company-name {
-  font-size: 14px;
+  font-size: 13px;
   font-weight: 600;
   color: var(--wb-text, #1e293b);
 }
 
 .role-badge {
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 500;
   color: #0369a1;
   background: #e0f2fe;
-  padding: 1px 8px;
+  padding: 1px 6px;
   border-radius: 4px;
 }
 
@@ -943,49 +1020,49 @@ function parseMicroResume(content: string, propName?: string, propUrl?: string):
   font-size: 11px;
   color: var(--wb-muted, #64748b);
   background: var(--wb-surface-soft, #f8fafc);
-  padding: 2px 8px;
-  border-radius: 6px;
+  padding: 1px 6px;
+  border-radius: 4px;
   border: 1px solid var(--wb-border, #f1f5f9);
 }
 
 .timeline-details {
-  margin-top: 6px;
-  font-size: 13px;
+  margin-top: 4px;
+  font-size: 12px;
   color: var(--wb-muted, #475569);
-  line-height: 1.6;
+  line-height: 1.5;
 }
 
 .detail-line {
-  margin: 4px 0;
+  margin: 3px 0;
 }
 
 /* 教育背景卡片 */
 .education-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
-  gap: 12px;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 10px;
 }
 
 .education-card {
   display: flex;
   align-items: center;
-  gap: 12px;
-  padding: 12px 14px;
+  gap: 10px;
+  padding: 10px 12px;
   border-radius: 8px;
   background: var(--wb-surface-soft, #f8fafc);
   border: 1px solid var(--wb-border, #e2e8f0);
 }
 
 .school-icon-circle {
-  width: 40px;
-  height: 40px;
-  border-radius: 8px;
+  width: 36px;
+  height: 36px;
+  border-radius: 6px;
   background: #e0e7ff;
   color: #4338ca;
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 18px;
+  font-size: 16px;
   flex-shrink: 0;
 }
 
@@ -997,8 +1074,8 @@ function parseMicroResume(content: string, propName?: string, propUrl?: string):
 .school-name-row {
   display: flex;
   align-items: center;
-  gap: 8px;
-  margin-bottom: 4px;
+  gap: 6px;
+  margin-bottom: 3px;
 }
 
 .school-name {
@@ -1012,12 +1089,12 @@ function parseMicroResume(content: string, propName?: string, propUrl?: string):
   font-weight: 500;
   color: #4f46e5;
   background: #eef2ff;
-  padding: 1px 6px;
+  padding: 1px 5px;
   border-radius: 4px;
 }
 
 .major-period-row {
-  font-size: 12px;
+  font-size: 11px;
   color: var(--wb-muted, #64748b);
 }
 
@@ -1029,14 +1106,14 @@ function parseMicroResume(content: string, propName?: string, propUrl?: string):
 
 .advantage-quote-box {
   display: flex;
-  gap: 12px;
-  padding: 10px 14px;
-  border-radius: 8px;
-  background: rgba(255, 255, 255, 0.8);
+  gap: 10px;
+  padding: 8px 12px;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.85);
 }
 
 .quote-icon {
-  font-size: 32px;
+  font-size: 28px;
   line-height: 1;
   font-family: Georgia, serif;
   color: #16a34a;
@@ -1046,26 +1123,26 @@ function parseMicroResume(content: string, propName?: string, propUrl?: string):
 .advantage-text {
   margin: 0;
   font-size: 13px;
-  line-height: 1.6;
+  line-height: 1.5;
   color: #166534;
 }
 
 /* 原始数据折叠 */
 .raw-data-expander {
-  margin-top: 8px;
+  margin-top: 6px;
 }
 
 .raw-dump-pre {
   margin: 0;
-  padding: 12px;
+  padding: 10px;
   background: #0f172a;
   color: #e2e8f0;
-  border-radius: 8px;
-  font-size: 12px;
+  border-radius: 6px;
+  font-size: 11px;
   line-height: 1.5;
   white-space: pre-wrap;
   word-break: break-all;
-  max-height: 260px;
+  max-height: 220px;
   overflow-y: auto;
 }
 </style>
