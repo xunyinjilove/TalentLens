@@ -56,6 +56,29 @@ func (a *App) ListOutreachCommunicationJobs(batchID, keyword string) JobConversa
 	if err != nil {
 		return JobConversationResult{Status: "error", Message: err.Error()}
 	}
+
+	// 1. 优先从本地 SQLite 缓存读取，实现秒级展示，不阻塞在候选人网页加载
+	cachedJobs, _ := a.ListCachedCommunicationJobs("51job", "")
+	if len(cachedJobs) > 0 {
+		var matched []JobCommunicationOption
+		kw := strings.TrimSpace(keyword)
+		for _, job := range cachedJobs {
+			if kw == "" || strings.Contains(job.Title, kw) || strings.Contains(job.ID, kw) {
+				matched = append(matched, job)
+			}
+		}
+		if len(matched) > 0 {
+			suggested := a.suggestedProjectCommunicationJob(batch.ProjectID, batch, matched)
+			return JobConversationResult{
+				Status:         "jobs",
+				Jobs:           matched,
+				SuggestedJobID: suggested,
+				Message:        fmt.Sprintf("已从本地目录加载 %d 个可选沟通职位", len(matched)),
+			}
+		}
+	}
+
+	// 2. 本地尚无缓存时，尝试通过候选人上下文在线拉取并自动持久化至本地
 	for _, item := range batch.Items {
 		if item.Platform != "51job" || (item.Status != "draft" && item.Status != "queued" && item.Status != "awaiting_confirmation") {
 			continue
@@ -64,12 +87,27 @@ func (a *App) ListOutreachCommunicationJobs(batchID, keyword string) JobConversa
 			continue
 		}
 		result := a.List51JobCommunicationJobs(item.ResumeID, keyword)
-		if result.Status == "jobs" {
-			result.SuggestedJobID = suggestedOutreachJob(batch, result.Jobs)
+		if result.Status == "jobs" && len(result.Jobs) > 0 {
+			_ = a.SaveCommunicationJobs("51job", "", result.Jobs)
+			now := time.Now().UTC().Format(time.RFC3339)
+			_ = a.SaveCommunicationJobSyncSnapshot(&CommunicationJobSyncSnapshot{
+				ID:           fmt.Sprintf("sync_%d", time.Now().UnixNano()),
+				Platform:     "51job",
+				ScopeAccount: "",
+				Status:       "complete",
+				TotalJobs:    len(result.Jobs),
+				StartedAt:    now,
+				FinishedAt:   now,
+			})
+			result.SuggestedJobID = a.suggestedProjectCommunicationJob(batch.ProjectID, batch, result.Jobs)
 		}
 		return result
 	}
-	return JobConversationResult{Status: "error", Message: "本批没有可核验的 51job 待发送候选人，请先核验详情链接"}
+
+	if len(cachedJobs) > 0 {
+		return JobConversationResult{Status: "jobs", Jobs: []JobCommunicationOption{}, Message: "未找到匹配关键词的职位"}
+	}
+	return JobConversationResult{Status: "error", Message: "本地尚未同步 51job 职位目录，且本批暂无可用候选人触发同步；请在 51job 浏览器中登录并同步职位"}
 }
 
 func suggestedOutreachJob(batch OutreachBatch, jobs []JobCommunicationOption) string {
@@ -125,18 +163,31 @@ func (a *App) AuthorizeOutreachBudget(batchID, jobID, jobTitle string, perPerson
 			return batch, fmt.Errorf("本批存在发送结果待核查的人选，请先核对并登记平台结果")
 		}
 	}
-	result := a.ListOutreachCommunicationJobs(batchID, jobTitle)
-	if result.Status != "jobs" {
-		return batch, fmt.Errorf("读取平台职位失败：%s", result.Message)
-	}
+	// 校验所选职位：从本地 communication_jobs 目录校验，解耦对在线网页重拉的依赖
+	cachedJobs, _ := a.ListCachedCommunicationJobs("51job", "")
 	valid := false
-	for _, job := range result.Jobs {
-		if job.ID == jobID && job.Title == jobTitle {
+	var companyID string
+	if len(cachedJobs) > 0 {
+		for _, job := range cachedJobs {
+			if job.ID == jobID && (strings.TrimSpace(job.Title) == strings.TrimSpace(jobTitle) || jobTitle == "") {
+				valid = true
+				companyID = job.CompanyID
+				break
+			}
+		}
+	} else {
+		// 容错：首次或离线场景下，只要 HR 明确传入了有效 jobID 和 jobTitle 即视为结构有效
+		if strings.TrimSpace(jobID) != "" && strings.TrimSpace(jobTitle) != "" {
 			valid = true
 		}
 	}
 	if !valid {
-		return batch, fmt.Errorf("所选职位未在平台返回列表中，请刷新并重新选择")
+		return batch, fmt.Errorf("所选职位未在有效职位列表中，请刷新并重新选择")
+	}
+
+	// 记录项目默认沟通职位，便于同项目后续批次优先预选
+	if batch.ProjectID != "" {
+		_ = a.SetProjectDefaultCommunicationJob(batch.ProjectID, "51job", "", jobID, jobTitle, companyID)
 	}
 	reserved := 0
 	if batch.Authorization != nil {

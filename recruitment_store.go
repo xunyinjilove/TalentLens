@@ -157,6 +157,42 @@ CREATE TABLE IF NOT EXISTS interviews (
   note TEXT NOT NULL DEFAULT '', status TEXT NOT NULL DEFAULT 'scheduled',
   created_at TEXT NOT NULL, updated_at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS communication_jobs (
+  id TEXT PRIMARY KEY,
+  platform TEXT NOT NULL,
+  scope_account TEXT NOT NULL DEFAULT '',
+  job_id TEXT NOT NULL,
+  company_id TEXT NOT NULL DEFAULT '',
+  company_name TEXT NOT NULL DEFAULT '',
+  title TEXT NOT NULL,
+  work_area TEXT NOT NULL DEFAULT '',
+  sources TEXT NOT NULL DEFAULT '',
+  publish_status TEXT NOT NULL DEFAULT '',
+  is_valid INTEGER NOT NULL DEFAULT 1,
+  last_synced_at TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_comm_jobs_unique ON communication_jobs(platform, scope_account, job_id, company_id);
+CREATE TABLE IF NOT EXISTS project_communication_jobs (
+  project_id TEXT NOT NULL REFERENCES projects(id),
+  platform TEXT NOT NULL,
+  scope_account TEXT NOT NULL DEFAULT '',
+  job_id TEXT NOT NULL,
+  job_title TEXT NOT NULL,
+  company_id TEXT NOT NULL DEFAULT '',
+  confirmed_at TEXT NOT NULL,
+  PRIMARY KEY (project_id, platform, scope_account)
+);
+CREATE TABLE IF NOT EXISTS communication_job_sync_snapshots (
+  id TEXT PRIMARY KEY,
+  platform TEXT NOT NULL,
+  scope_account TEXT NOT NULL DEFAULT '',
+  status TEXT NOT NULL,
+  total_jobs INTEGER NOT NULL DEFAULT 0,
+  error_message TEXT NOT NULL DEFAULT '',
+  started_at TEXT NOT NULL,
+  finished_at TEXT NOT NULL DEFAULT ''
+);
 `
 
 func (a *App) getRecruitmentDB() (*sql.DB, error) {
