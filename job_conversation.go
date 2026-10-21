@@ -167,16 +167,19 @@ func (a *App) run51JobConversation(resume *Resume, action, message string, quote
 	a.EnsurePlatformBrowser("51job")
 
 	timeout := 30 * time.Second
-	if action == "preview_hi" || action == "list_jobs" || action == "check_resume" || action == "check_replies" {
+	if action == "preview_hi" || action == "list_jobs" || action == "list_account_jobs" || action == "check_resume" || action == "check_replies" {
 		timeout = 75 * time.Second // 包括候选人入口就绪重试与职位、点数读取。
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 	dataDir := filepath.Join(a.getDataDir(), "candidates_multi")
-	args := []string{script, "--action", action, "--candidate-url", resume.URL,
-		"--candidate-name", conversationCandidateName(resume), "--resume-record", resume.ID,
-		"--data-dir", dataDir}
-	if action != "check_resume" && action != "check_replies" {
+	args := []string{script, "--action", action, "--data-dir", dataDir}
+	if resume != nil {
+		args = append(args, "--candidate-url", resume.URL, "--candidate-name", conversationCandidateName(resume), "--resume-record", resume.ID)
+	} else if action != "list_account_jobs" {
+		return JobConversationResult{Status: "error", Message: "缺少需要核验的候选人，未执行沟通操作"}
+	}
+	if resume != nil && action != "check_resume" && action != "check_replies" {
 		jobTitle := a.conversationJobTitle(resume)
 		if quote != nil && quote.JobTitle != "" {
 			jobTitle = quote.JobTitle
@@ -204,6 +207,9 @@ func (a *App) run51JobConversation(resume *Resume, action, message string, quote
 	output, err := cmd.Output()
 	if err != nil {
 		if ctx.Err() != nil {
+			if action == "list_jobs" || action == "list_account_jobs" {
+				return JobConversationResult{Status: "error", Message: "51job 职位目录读取超时，未发起Hi聊；请确认浏览器已登录后重试"}
+			}
 			return JobConversationResult{Status: "uncertain", Message: "51job 响应超时，请核对聊天记录后再决定是否重试"}
 		}
 		if action == "confirm_hi" {
@@ -216,6 +222,18 @@ func (a *App) run51JobConversation(resume *Resume, action, message string, quote
 		return JobConversationResult{Status: "uncertain", Message: "无法确认 51job 返回状态，请先查看聊天记录"}
 	}
 	return result
+}
+
+// List51JobAccountCommunicationJobs reads the account's actual communication
+// directory without requiring a fresh candidate or opening a Hi-chat window.
+func (a *App) List51JobAccountCommunicationJobs(keyword string) JobConversationResult {
+	a.contactMutex.Lock()
+	defer a.contactMutex.Unlock()
+	keyword = strings.TrimSpace(keyword)
+	if len([]rune(keyword)) > 100 {
+		return JobConversationResult{Status: "error", Message: "职位搜索词不能超过 100 字"}
+	}
+	return a.run51JobConversation(nil, "list_account_jobs", keyword, nil)
 }
 
 // List51JobCommunicationJobs 返回平台当前可选择的沟通职位，不会发起Hi聊。

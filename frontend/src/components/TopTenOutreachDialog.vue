@@ -351,11 +351,11 @@ async function loadJobs(){
     // 优先秒级读取本地已缓存职位（不启动浏览器，不依赖在线网页）
     if (api.GetCommunicationJobs) {
       const q = await api.GetCommunicationJobs(props.projectId, '51job')
-      if (q && Array.isArray(q.jobs) && q.jobs.length > 0) {
-        jobOptions.value = q.jobs
+      if (q) {
+        jobOptions.value = Array.isArray(q.jobs) ? q.jobs : []
         syncInfo.value = {
           lastSyncedAt: q.lastSyncedAt || '',
-          syncStatus: q.syncStatus || 'complete',
+          syncStatus: q.syncStatus || 'not_started',
           syncMessage: q.syncMessage || '',
           needsRefresh: !!q.needsRefresh
         }
@@ -364,19 +364,14 @@ async function loadJobs(){
         }
         jobsLoading.value = false
         // 若距上次同步超过 24 小时，静默在后台排队刷新，不阻断当前操作
-        if (q.needsRefresh) {
+        if (q.syncStatus === 'failed') {
+          jobsError.value = q.syncMessage || '上次职位同步失败，请确认登录后点击同步职位'
+        } else if (q.needsRefresh && q.syncStatus !== 'syncing') {
           void syncJobs(false)
         }
         return
       }
-      if (q) {
-        syncInfo.value = {
-          lastSyncedAt: q.lastSyncedAt || '',
-          syncStatus: q.syncStatus || 'not_started',
-          syncMessage: q.syncMessage || '',
-          needsRefresh: true
-        }
-      }
+      return
     }
 
     // 本地尚无缓存时的兜底（兼容旧接口或首次读取）
@@ -424,24 +419,26 @@ async function syncJobs(manual = true) {
     } else if (batch.value) {
       res = await api.ListOutreachCommunicationJobs(batch.value.id, '')
     }
-    if (res && Array.isArray(res.jobs) && res.jobs.length > 0) {
-      jobOptions.value = res.jobs
+    if (res) {
+      if (Array.isArray(res.jobs)) jobOptions.value = res.jobs
       syncInfo.value = {
-        lastSyncedAt: res.lastSyncedAt || new Date().toISOString(),
-        syncStatus: 'complete',
-        syncMessage: '',
-        needsRefresh: false
+        lastSyncedAt: res.lastSyncedAt || '',
+        syncStatus: res.syncStatus || (res.status === 'jobs' ? 'complete' : 'failed'),
+        syncMessage: res.syncMessage || res.message || '',
+        needsRefresh: !!res.needsRefresh
       }
       if (!jobOptions.value.some(j => j.id === selectedJobID.value)) {
         selectedJobID.value = res.defaultJobId || res.suggestedJobId || ''
       }
-      if (manual) {
-        ElMessage.success(`已同步 ${res.jobs.length} 个在招职位并更新本地目录`)
-      }
-    } else if (res && (res.syncStatus === 'failed' || res.status === 'error')) {
-      const msg = res.syncMessage || res.message || '职位同步未完成'
-      if (manual || jobOptions.value.length === 0) {
-        jobsError.value = msg
+      if (syncInfo.value.syncStatus === 'failed') {
+        jobsError.value = syncInfo.value.syncMessage || '职位同步未完成'
+        if (manual) ElMessage.warning(jobsError.value)
+      } else if (syncInfo.value.syncStatus === 'partial') {
+        jobsError.value = syncInfo.value.syncMessage || '部分职位已保存，分页尚未完成'
+        if (manual) ElMessage.warning(jobsError.value)
+      } else {
+        jobsError.value = ''
+        if (manual) ElMessage.success(`已同步 ${jobOptions.value.length} 个可沟通职位并更新本地目录`)
       }
     }
   } catch (err: any) {
