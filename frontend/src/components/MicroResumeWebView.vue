@@ -22,16 +22,6 @@
           <span class="pulse-dot"></span>
           {{ resumeData.activityLabel }}
         </span>
-        <a
-          v-if="resumeData.url"
-          :href="resumeData.url"
-          target="_blank"
-          class="direct-link-btn"
-          title="在浏览器中直接打开该候选人页面"
-        >
-          <el-icon><Link /></el-icon>
-          打开原网页
-        </a>
       </div>
     </div>
 
@@ -242,7 +232,6 @@ import {
   Location,
   Money,
   Calendar,
-  Link,
   Phone
 } from '@element-plus/icons-vue'
 
@@ -598,6 +587,7 @@ function parseMicroResume(content: string, fullContent?: string, propName?: stri
   color: var(--wb-muted, #64748b);
   border-left: 1px solid var(--wb-border, #cbd5e1);
   padding-left: 10px;
+  white-space: nowrap;
 }
 
 .banner-right {
@@ -651,23 +641,6 @@ function parseMicroResume(content: string, fullContent?: string, propName?: stri
     transform: scale(0.95);
     box-shadow: 0 0 0 0 rgba(16, 185, 129, 0);
   }
-}
-
-.direct-link-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  font-size: 12px;
-  color: var(--wb-primary, #2563eb);
-  text-decoration: none;
-  padding: 2px 8px;
-  border-radius: 6px;
-  border: 1px solid rgba(37, 99, 235, 0.2);
-  transition: all 0.2s;
-}
-
-.direct-link-btn:hover {
-  background: rgba(37, 99, 235, 0.08);
 }
 
 /* 候选人主卡片 Hero */
