@@ -258,6 +258,7 @@ func saveCandidateAIOutreachMessage(db *sql.DB, projectID string, keys []string,
 		return
 	}
 	now := time.Now().UTC().Format(time.RFC3339Nano)
+	_, _ = db.Exec(`INSERT OR IGNORE INTO projects(id,name,legacy_json,created_at,updated_at) VALUES(?,?,'{}',?,?)`, projectID, projectID, now, now)
 	seen := make(map[string]bool)
 	for _, k := range keys {
 		k = strings.TrimSpace(k)
@@ -433,6 +434,84 @@ func (a *App) PreviewTopTenOutreach(projectID string) (OutreachBatch, error) {
 // PreviewBatchOutreach generates a batch outreach preview for specified candidate IDs (or all project candidates if empty).
 // Candidates who are unanalyzed or have pending red lines can be included.
 // templateMode can be "template" (zero-AI instant template), "default", or "ai" (on-demand AI generation).
+func (a *App) ensureOutreachProjectCandidate(db *sql.DB, project *Project, resume *Resume, allowedIDs map[string]bool) (linkID string, sourcePlatform string, sourceID string, ok bool) {
+	if db == nil || project == nil || resume == nil {
+		return "", "", "", false
+	}
+	projectID := project.ID
+	var archivedAt string
+	queryLink := func(resID string) {
+		if resID == "" || linkID != "" {
+			return
+		}
+		_ = db.QueryRow(`SELECT pc.id, pc.archived_at, COALESCE(cs.platform, ''), COALESCE(cs.platform_candidate_id, '')
+			FROM project_candidates pc
+			JOIN resume_versions rv ON rv.candidate_id = pc.candidate_id
+			LEFT JOIN candidate_sources cs ON cs.id = rv.source_id
+			WHERE pc.project_id = ? AND rv.legacy_resume_id = ?
+			LIMIT 1`, projectID, resID).Scan(&linkID, &archivedAt, &sourcePlatform, &sourceID)
+		if linkID == "" {
+			_ = db.QueryRow(`SELECT pc.id, pc.archived_at, COALESCE(cs.platform, ''), COALESCE(cs.platform_candidate_id, '')
+				FROM project_candidates pc
+				JOIN project_candidate_resumes pcr ON pcr.project_candidate_id = pc.id
+				JOIN resume_versions rv ON rv.id = pcr.resume_version_id
+				LEFT JOIN candidate_sources cs ON cs.id = rv.source_id
+				WHERE pc.project_id = ? AND rv.legacy_resume_id = ?
+				LIMIT 1`, projectID, resID).Scan(&linkID, &archivedAt, &sourcePlatform, &sourceID)
+		}
+	}
+
+	queryLink(resume.ID)
+	for _, copyID := range resume.SnapshotCopyIDs {
+		queryLink(copyID)
+	}
+
+	if linkID == "" {
+		rCopy := *resume
+		rCopy.ProjectID = projectID
+		a.syncRecruitmentProject(project)
+		a.syncRecruitmentResume(&rCopy)
+		queryLink(resume.ID)
+	}
+
+	if linkID == "" {
+		// 终极兜底：直接确保 candidates 与 project_candidates 外键记录存在，绝不返回未入库的裸 resume.ID
+		now := time.Now().UTC().Format(time.RFC3339Nano)
+		candID := "legacy_candidate_" + resume.ID
+		name := conversationCandidateName(resume)
+		if strings.TrimSpace(name) == "" {
+			name = "候选人"
+		}
+		_, _ = db.Exec(`INSERT OR IGNORE INTO projects(id,name,department,recruiter,headcount,job_title,legacy_json,created_at,updated_at) VALUES(?,?,?,?,?,?,?, ?, ?)`,
+			project.ID, project.Name, project.Department, project.Recruiter, project.Headcount, project.JobConfig.Title, "{}", now, now)
+		_, _ = db.Exec(`INSERT OR IGNORE INTO candidates(id,display_name,created_at,updated_at) VALUES(?,?,?,?)`, candID, name, now, now)
+		fallbackLinkID := "legacy_link_" + projectID + "_" + resume.ID
+		_, _ = db.Exec(`INSERT OR IGNORE INTO project_candidates(id,project_id,candidate_id,stage,created_at,updated_at) VALUES(?,?,?,'new',?,?)`,
+			fallbackLinkID, projectID, candID, now, now)
+		_ = db.QueryRow(`SELECT id, archived_at FROM project_candidates WHERE project_id=? AND candidate_id=? LIMIT 1`, projectID, candID).Scan(&linkID, &archivedAt)
+	}
+
+	if linkID == "" {
+		return "", "", "", false
+	}
+
+	explicitlySelected := len(allowedIDs) > 0 && (allowedIDs[linkID] || allowedIDs[resume.ID] || (sourceID != "" && allowedIDs[sourceID]) || (resume.PlatformCandidateID != "" && allowedIDs[resume.PlatformCandidateID]))
+	if archivedAt != "" {
+		if explicitlySelected {
+			// HR 明确勾选了该候选人发起沟通，自动恢复其在项目中的活跃状态，防止后续 ConfirmAndRunOutreach 因 archived_at 拦截
+			_, _ = db.Exec(`UPDATE project_candidates SET archived_at='' WHERE id=?`, linkID)
+		} else {
+			return "", "", "", false
+		}
+	}
+
+	var exists int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM project_candidates WHERE id=?`, linkID).Scan(&exists); err != nil || exists == 0 {
+		return "", "", "", false
+	}
+	return linkID, sourcePlatform, sourceID, true
+}
+
 func (a *App) PreviewBatchOutreach(projectID string, candidateIDs []string, templateMode string) (OutreachBatch, error) {
 	batch := OutreachBatch{ProjectID: projectID, Status: "draft", Items: make([]OutreachItem, 0)}
 	project := a.GetProject(projectID)
@@ -443,6 +522,12 @@ func (a *App) PreviewBatchOutreach(projectID string, candidateIDs []string, temp
 	if err != nil {
 		return batch, err
 	}
+	// 确保当前项目已同步写入 SQLite projects 表，防止 outreach_batches 或 candidate_ai_outreach_messages 触发外键约束错误 (787)
+	a.syncRecruitmentProject(project)
+	nowInit := time.Now().UTC().Format(time.RFC3339Nano)
+	_, _ = db.Exec(`INSERT OR IGNORE INTO projects(id,name,department,recruiter,headcount,job_title,legacy_json,created_at,updated_at) VALUES(?,?,?,?,?,?,?, ?, ?)`,
+		project.ID, project.Name, project.Department, project.Recruiter, project.Headcount, project.JobConfig.Title, "{}", nowInit, nowInit)
+
 	batch.ProjectName = project.Name
 	batch.ProjectTitle = project.JobConfig.Title
 	batch.ID = recruitmentID("outreach")
@@ -494,16 +579,12 @@ func (a *App) PreviewBatchOutreach(projectID string, candidateIDs []string, temp
 		if resume.Analysis != nil && resume.Analysis.RedLineStatus == "failed" {
 			continue
 		}
-		var linkID, sourcePlatform, sourceID string
-		_ = db.QueryRow(`SELECT pc.id,cs.platform,cs.platform_candidate_id FROM project_candidates pc
-			JOIN resume_versions rv ON rv.candidate_id=pc.candidate_id
-			LEFT JOIN candidate_sources cs ON cs.id=rv.source_id
-			WHERE pc.project_id=? AND pc.archived_at='' AND rv.legacy_resume_id=?`, projectID, resume.ID).Scan(&linkID, &sourcePlatform, &sourceID)
-		if linkID == "" {
-			linkID = resume.ID
+		linkID, sourcePlatform, sourceID, ok := a.ensureOutreachProjectCandidate(db, project, resume, allowedIDs)
+		if !ok || linkID == "" {
+			continue
 		}
 		if len(allowedIDs) > 0 {
-			if !allowedIDs[linkID] && !allowedIDs[resume.ID] && !allowedIDs[sourceID] {
+			if !allowedIDs[linkID] && !allowedIDs[resume.ID] && !allowedIDs[sourceID] && !allowedIDs[resume.PlatformCandidateID] {
 				continue
 			}
 		}
