@@ -193,6 +193,9 @@
                         <el-dropdown-item command="sourcing">
                           <el-icon><Position /></el-icon>全渠道矩阵寻才
                         </el-dropdown-item>
+                        <el-dropdown-item command="filter51">
+                          <el-icon><SetUp /></el-icon>51job 人才管理自动筛选
+                        </el-dropdown-item>
                         <el-dropdown-item command="mapping51">
                           <el-icon><Link /></el-icon>关联 51job 平台职位
                         </el-dropdown-item>
@@ -334,14 +337,14 @@
           <div class="sourcing-filter-grid">
             <el-form-item label="年龄"><el-select v-model="sourcingFilters.age" clearable placeholder="不限" allow-create filterable><el-option v-for="v in ['22岁及以下','22-25岁','25-30岁','30-35岁','35-45岁','45岁及以上']" :key="v" :label="v" :value="v" /></el-select></el-form-item>
             <el-form-item label="性别"><el-select v-model="sourcingFilters.gender" clearable placeholder="不限"><el-option label="男" value="男" /><el-option label="女" value="女" /></el-select></el-form-item>
-            <el-form-item label="居住地"><el-input v-model="sourcingFilters.residence" clearable placeholder="如：上海；不从工作城市推断" /></el-form-item>
+            <el-form-item label="居住地"><el-cascader v-model="catalogSelections.residence" :options="residenceOptions" :props="catalogProps" filterable clearable collapse-tags collapse-tags-tooltip placeholder="选择现居地" @change="syncCatalogFilter('residence')" /></el-form-item>
             <el-form-item label="学校性质"><el-select v-model="sourcingFilters.school_type" clearable placeholder="不限" allow-create filterable><el-option v-for="v in ['全日制','985','211','双一流','留学经历','在校生']" :key="v" :label="v" :value="v" /></el-select></el-form-item>
-            <el-form-item label="求职状态"><el-input v-model="sourcingFilters.job_seeking_status" clearable placeholder="按 51job 页面状态填写" /></el-form-item>
-            <el-form-item label="期望行业"><el-input v-model="sourcingFilters.expected_industry" clearable placeholder="如：医疗器械" /></el-form-item>
-            <el-form-item label="期望职能"><el-input v-model="sourcingFilters.expected_function" clearable placeholder="如：机械设计" /></el-form-item>
+            <el-form-item label="求职状态"><el-select v-model="sourcingFilters.job_seeking_status" clearable placeholder="不限"><el-option v-for="v in jobStatusOptions" :key="v" :label="v" :value="v" /></el-select></el-form-item>
+            <el-form-item label="期望行业"><el-cascader v-model="catalogSelections.expected_industry" :options="industryOptions" :props="catalogProps" filterable clearable collapse-tags collapse-tags-tooltip placeholder="选择期望行业" @change="syncCatalogFilter('expected_industry')" /></el-form-item>
+            <el-form-item label="期望职能"><el-cascader v-model="catalogSelections.expected_function" :options="functionOptions" :props="catalogProps" filterable clearable collapse-tags collapse-tags-tooltip placeholder="选择期望职能" @change="syncCatalogFilter('expected_function')" /></el-form-item>
             <el-form-item label="期望月薪"><el-select v-model="sourcingFilters.expected_salary" clearable placeholder="不限" allow-create filterable><el-option v-for="v in ['8千','1万','1.5万','2万','2.5万','3万','4万','5万','6万','10万及以上']" :key="v" :label="v" :value="v" /></el-select></el-form-item>
-            <el-form-item label="从事行业"><el-input v-model="sourcingFilters.current_industry" clearable placeholder="如：医疗器械" /></el-form-item>
-            <el-form-item label="从事职能"><el-input v-model="sourcingFilters.current_function" clearable placeholder="如：项目管理" /></el-form-item>
+            <el-form-item label="从事行业"><el-cascader v-model="catalogSelections.current_industry" :options="industryOptions" :props="catalogProps" filterable clearable collapse-tags collapse-tags-tooltip placeholder="选择从事行业" @change="syncCatalogFilter('current_industry')" /></el-form-item>
+            <el-form-item label="从事职能"><el-cascader v-model="catalogSelections.current_function" :options="functionOptions" :props="catalogProps" filterable clearable collapse-tags collapse-tags-tooltip placeholder="选择从事职能" @change="syncCatalogFilter('current_function')" /></el-form-item>
             <el-form-item label="最近活跃时间"><el-select v-model="sourcingFilters.recent_active_time" clearable placeholder="不限"><el-option v-for="v in ['近1周','近2周','近1个月','近2个月','近6个月','近1年','1年及以上']" :key="v" :label="v" :value="v" /></el-select></el-form-item>
           </div>
         </div>
@@ -513,6 +516,19 @@
       @refresh="load"
       @update:model-value="val => { showSourcingDialog = val; if (!val) sourcingProject = null }"
     />
+
+    <!-- 51job 人才管理自动筛选弹窗 -->
+    <TalentManagementFilterDialog
+      v-if="talentFilterProject"
+      v-model="showTalentFilterDialog"
+      :project-id="talentFilterProject.id"
+      :project-name="talentFilterProject.name"
+      :job-title="talentFilterProject.job_config?.title || talentFilterProject.name"
+      :default-education="talentFilterProject.job_config?.education_level || ''"
+      :default-city="talentFilterProject.job_config?.city || ''"
+      @completed="load"
+      @update:model-value="val => { showTalentFilterDialog = val; if (!val) talentFilterProject = null }"
+    />
   </div>
 </template>
 
@@ -540,6 +556,8 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { useProjectStore, type Project } from '../composables/useProjectStore'
 import { useRecruitmentStore } from '../composables/useRecruitmentStore'
 import BossSearchDialog from '../components/BossSearchDialog.vue'
+import TalentManagementFilterDialog from '../components/TalentManagementFilterDialog.vue'
+import searchOptions from '../data/51job_search_options.json'
 
 interface JobStats {
   totalApplications: number
@@ -597,6 +615,8 @@ const isEditing = ref(false)
 const currentEditProjectId = ref<string | null>(null)
 const sourcingProject = ref<Project | null>(null)
 const showSourcingDialog = ref(false)
+const talentFilterProject = ref<Project | null>(null)
+const showTalentFilterDialog = ref(false)
 
 // 51job 关联
 const mapProject = ref<Project | null>(null)
@@ -624,6 +644,51 @@ const jobForm = reactive({
 })
 const emptySourcingFilters = () => ({ age: '', gender: '', residence: '', school_type: '', job_seeking_status: '', expected_industry: '', expected_function: '', expected_salary: '', current_industry: '', current_function: '', recent_active_time: '', extra_keywords: '' })
 const sourcingFilters = reactive(emptySourcingFilters())
+type CatalogFilterKey = 'residence' | 'expected_industry' | 'expected_function' | 'current_industry' | 'current_function'
+type CatalogNode = { label: string; children: CatalogNode[] }
+type CascaderNode = { label: string; value: string; children?: CascaderNode[] }
+const catalogKeys: CatalogFilterKey[] = ['residence', 'expected_industry', 'expected_function', 'current_industry', 'current_function']
+const catalogSelections = reactive<Record<CatalogFilterKey, string[]>>({ residence: [], expected_industry: [], expected_function: [], current_industry: [], current_function: [] })
+const catalogProps = { multiple: true, emitPath: false }
+const catalogPathSeparator = ' › '
+function toCascaderOptions(nodes: CatalogNode[], parents: string[] = []): CascaderNode[] {
+  return nodes.map(node => {
+    const path = [...parents, node.label]
+    const children = node.children?.length ? toCascaderOptions(node.children, path) : undefined
+    return { label: node.label, value: path.join(catalogPathSeparator), ...(children ? { children } : {}) }
+  })
+}
+const residenceOptions = toCascaderOptions(searchOptions.residence as CatalogNode[])
+const industryOptions = toCascaderOptions(searchOptions.industry as CatalogNode[])
+const functionOptions = toCascaderOptions(searchOptions.functions as CatalogNode[])
+const jobStatusOptions = searchOptions.jobStatuses.length
+  ? searchOptions.jobStatuses
+  : ['离职-周内到岗', '在职-月内到岗', '在职-观望机会']
+function optionsForCatalog(key: CatalogFilterKey): CascaderNode[] {
+  return key === 'residence' ? residenceOptions : key.endsWith('industry') ? industryOptions : functionOptions
+}
+function resolveCatalogValue(options: CascaderNode[], saved: string): string {
+  if (saved.includes(catalogPathSeparator)) return saved
+  for (const item of options) {
+    if (item.label === saved && !item.children?.length) return item.value
+    if (item.children?.length) {
+      if (item.label === saved) return resolveCatalogValue(item.children, item.children[0].label)
+      const found = resolveCatalogValue(item.children, saved)
+      if (found) return found
+    }
+  }
+  return ''
+}
+function restoreCatalogSelections() {
+  for (const key of catalogKeys) {
+    catalogSelections[key] = sourcingFilters[key]
+      .split(/[;；]/).map(value => value.trim()).filter(Boolean)
+      .map(value => resolveCatalogValue(optionsForCatalog(key), value)).filter(Boolean)
+  }
+}
+function syncCatalogFilter(key: CatalogFilterKey) {
+  sourcingFilters[key] = [...new Set(catalogSelections[key])].join('；')
+}
 
 function formatExpRequirement(jobConfig: any): string {
   if (jobConfig?.experience_text) return String(jobConfig.experience_text)
@@ -847,6 +912,7 @@ function openCreateModal() {
   jobForm.education_level = '本科'
   jobForm.job_description = ''
   Object.assign(sourcingFilters, emptySourcingFilters())
+  restoreCatalogSelections()
   skillsInput.value = '' // 清空默认值，杜绝硬编码预填前端技能
   interviewQuestionsInput.value = ''
   editModalVisible.value = true
@@ -878,6 +944,7 @@ function openEditModal(project: Project) {
   jobForm.education_level = project.job_config?.education_level || '本科'
   jobForm.job_description = project.job_config?.job_description || ''
   Object.assign(sourcingFilters, emptySourcingFilters(), project.job_config?.sourcing_filters || {})
+  restoreCatalogSelections()
 
   // 修复空数组短路 bug：若 core_criteria 为 [] 则正确读取 required_skills
   const existingSkills = (project.job_config?.core_criteria && project.job_config.core_criteria.length > 0)
@@ -1095,6 +1162,10 @@ async function openSourcing(project: Project) {
 async function handleActionCommand(cmd: string, project: Project) {
   if (cmd === 'sourcing') {
     openSourcing(project)
+  } else if (cmd === 'filter51') {
+    talentFilterProject.value = project
+    await nextTick()
+    showTalentFilterDialog.value = true
   } else if (cmd === 'rules') {
     ruleProject.value = project
   } else if (cmd === 'mapping51') {
@@ -1199,7 +1270,7 @@ onUnmounted(() => {
 .sourcing-filter-section h3 { margin: 0 0 5px; font-size: 15px; }
 .sourcing-filter-section p { margin: 0 0 15px; color: #64748b; font-size: 12px; }
 .sourcing-filter-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 14px; }
-.sourcing-filter-grid :deep(.el-select), .sourcing-filter-grid :deep(.el-input) { width: 100%; }
+.sourcing-filter-grid :deep(.el-select), .sourcing-filter-grid :deep(.el-input), .sourcing-filter-grid :deep(.el-cascader) { width: 100%; }
 .skill-suggestion-preview { width: 100%; margin-top: 10px; padding: 12px; border: 1px solid #c7d2fe; border-radius: 10px; background: #f8faff; }
 .skill-suggestion-heading { display: flex; justify-content: space-between; gap: 8px; margin-bottom: 9px; }
 .skill-suggestion-heading span { color: #64748b; font-size: 12px; }

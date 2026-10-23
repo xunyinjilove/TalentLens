@@ -37,7 +37,7 @@ import (
 )
 
 // 版本信息
-const AppVersion = "1.8.60"
+const AppVersion = "1.8.61"
 const analysisFormatRetryVersion = "model-json-repair-v1"
 const GitHubRepo = "xunyinjilove/TalentLens"
 
@@ -402,9 +402,11 @@ type App struct {
 	interviewMutex     sync.Mutex
 	contactMutex       sync.Mutex
 	translationMutex   sync.Mutex
-	outreachMutex      sync.Mutex
-	jobSyncMu          sync.Mutex
-	contactPending     map[string]pending51JobHiQuote
+	outreachMutex        sync.Mutex
+	jobSyncMu            sync.Mutex
+	talentFilterMu       sync.Mutex
+	talentFilterStopFile string
+	contactPending       map[string]pending51JobHiQuote
 	analysisMutex      sync.Mutex
 	activeAnalyses     map[string]bool
 	activeProjects     map[string]bool
@@ -1591,8 +1593,30 @@ func (a *App) GetProjectResumes(projectID string) []*Resume {
 	if p == nil {
 		return nil
 	}
+	// 人才库归档只移除了 SQL 中的岗位关联；旧测评仍从项目 JSON 的
+	// ResumeIDs 读取。读取时排除已归档关联，兼容修复前已删除的简历。
+	archivedResumeIDs := map[string]bool{}
+	if db := a.activeRecruitmentDB(); db != nil {
+		rows, queryErr := db.Query(`SELECT DISTINCT rv.legacy_resume_id
+			FROM project_candidates pc
+			JOIN project_candidate_resumes pcr ON pcr.project_candidate_id=pc.id
+			JOIN resume_versions rv ON rv.id=pcr.resume_version_id
+			WHERE pc.project_id=? AND pc.archived_at<>'' AND rv.legacy_resume_id<>''`, projectID)
+		if queryErr == nil {
+			for rows.Next() {
+				var id string
+				if rows.Scan(&id) == nil {
+					archivedResumeIDs[id] = true
+				}
+			}
+			rows.Close()
+		}
+	}
 	var resumes []*Resume
 	for _, rid := range p.ResumeIDs {
+		if archivedResumeIDs[rid] {
+			continue
+		}
 		path := filepath.Join(a.getDataDir(), "resumes", rid+".json")
 		data, err := readJSONFile(path)
 		if err != nil {
