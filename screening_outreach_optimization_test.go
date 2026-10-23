@@ -233,3 +233,142 @@ func TestCompanyTalentStoreAttachmentSHA256Deduplication(t *testing.T) {
 		t.Fatalf("读取记录与导入不一致: %+v", records[0])
 	}
 }
+
+func TestAIOutreachGreetingPersistenceAndReuse(t *testing.T) {
+	app := NewApp()
+	app.dataDirOverride = t.TempDir()
+	defer app.closeRecruitmentDB()
+
+	project := app.CreateProject("高级Go开发", "技术部", 1, "HR", "", &JobConfig{
+		Title:          "高级Go开发",
+		RequiredSkills: []string{"Go", "微服务"},
+	})
+
+	res1 := &Resume{
+		ID:             "res_ai_saved",
+		ProjectID:      project.ID,
+		FileName:       "陈八.pdf",
+		Status:         "done",
+		SourcePlatform: "51job",
+		URL:            "https://ehire.51job.com/candidate/detail?id=51_ai_saved",
+		Analysis: &AnalysisResult{
+			CandidateName: "陈八",
+			OverallScore:  91,
+			AbilityScore:  91,
+			RedLineStatus: "passed",
+		},
+	}
+	res2 := &Resume{
+		ID:             "res_ai_unsaved",
+		ProjectID:      project.ID,
+		FileName:       "周九.pdf",
+		Status:         "done",
+		SourcePlatform: "51job",
+		URL:            "https://ehire.51job.com/candidate/detail?id=51_ai_unsaved",
+		Analysis: &AnalysisResult{
+			CandidateName: "周九",
+			OverallScore:  86,
+			AbilityScore:  86,
+			RedLineStatus: "passed",
+		},
+	}
+	app.saveResume(res1)
+	app.saveResume(res2)
+	project.ResumeIDs = []string{res1.ID, res2.ID}
+	app.saveProject(project)
+
+	db, err := app.getRecruitmentDB()
+	if err != nil {
+		t.Fatalf("getRecruitmentDB 失败: %v", err)
+	}
+	customMsg := "您好陈八，看到您在Go微服务高并发架构上的实战成果非常契合我们的高级Go开发岗位，期待进一步交流！"
+	saveCandidateAIOutreachMessage(db, project.ID, []string{res1.ID, res1.URL}, customMsg, "Go微服务高并发")
+
+	// 1. 默认打开弹窗（templateMode="template"）时，已有 AI 定制记录的候选人自动优先恢复已存文案并标记 AICustomized=true
+	batchDefault, err := app.PreviewBatchOutreach(project.ID, []string{res1.ID, res2.ID}, "template")
+	if err != nil {
+		t.Fatalf("PreviewBatchOutreach(template) 失败: %v", err)
+	}
+	var item1, item2 *OutreachItem
+	for i := range batchDefault.Items {
+		if batchDefault.Items[i].ResumeID == res1.ID {
+			item1 = &batchDefault.Items[i]
+		}
+		if batchDefault.Items[i].ResumeID == res2.ID {
+			item2 = &batchDefault.Items[i]
+		}
+	}
+	if item1 == nil || !item1.AICustomized || item1.Message != customMsg {
+		t.Fatalf("已保存 AI 定制的候选人未能自动复用持久化招呼语: %+v", item1)
+	}
+	if item2 == nil || item2.AICustomized {
+		t.Fatalf("未定制候选人不应标记为 AICustomized: %+v", item2)
+	}
+
+	// 2. 主动点击切换到标准模板（force_template）时，临时展示模板文案，但不擦除数据库里的 AI 定制记录
+	batchForceTpl, err := app.PreviewBatchOutreach(project.ID, []string{res1.ID}, "force_template")
+	if err != nil {
+		t.Fatalf("PreviewBatchOutreach(force_template) 失败: %v", err)
+	}
+	if len(batchForceTpl.Items) != 1 || batchForceTpl.Items[0].Message == customMsg {
+		t.Fatalf("force_template 应返回标准模板文案，实际: %+v", batchForceTpl.Items)
+	}
+
+	// 3. 再次切换到 AI 深度定制（ai）时，已保存的候选人直接从持久化存储恢复，不重新生成覆盖
+	batchAI, err := app.PreviewBatchOutreach(project.ID, []string{res1.ID}, "ai")
+	if err != nil {
+		t.Fatalf("PreviewBatchOutreach(ai) 失败: %v", err)
+	}
+	if len(batchAI.Items) != 1 || !batchAI.Items[0].AICustomized || batchAI.Items[0].Message != customMsg {
+		t.Fatalf("再次进入 AI 模式未能复用之前保存的定制招呼语: %+v", batchAI.Items)
+	}
+
+	// 4. HR 手动编辑并保存单人招呼语后，下次进入依然持久化保留
+	editedMsg := customMsg + "（本周可约线上初聊）"
+	if err := app.SaveOutreachItemMessage(project.ID, batchAI.Items[0].ID, editedMsg); err != nil {
+		t.Fatalf("SaveOutreachItemMessage 失败: %v", err)
+	}
+	savedMsg, _, ok := getSavedCandidateAIOutreachMessage(db, project.ID, res1.ID, res1.URL)
+	if !ok || savedMsg != editedMsg {
+		t.Fatalf("手动编辑后的招呼语未同步持久化: ok=%v msg=%s", ok, savedMsg)
+	}
+}
+
+func TestSearchExtraKeywordsAndActivityLabelMapping(t *testing.T) {
+	// 验证职位名称 + 附加关键词组合且自动去重
+	combined, extra := buildEffectiveSearchKeyword("分子诊断试剂研发", "", "PCR 体外诊断, 分子诊断试剂研发  NGS")
+	if combined != "分子诊断试剂研发 PCR 体外诊断 NGS" || extra != "PCR 体外诊断 NGS" {
+		t.Fatalf("buildEffectiveSearchKeyword 结果不符: combined=%s extra=%s", combined, extra)
+	}
+	if eff, ext := buildEffectiveSearchKeyword("Java开发工程师", "Java开发工程师", ""); eff != "Java开发工程师" || ext != "" {
+		t.Fatalf("空附加关键词时应保持原职位名: eff=%s ext=%s", eff, ext)
+	}
+
+	// 验证 51job 7 档活跃度双向映射
+	expectedPairs := []struct {
+		days  int
+		label string
+	}{
+		{0, ""},
+		{7, "近1周"},
+		{14, "近2周"},
+		{30, "近1个月"},
+		{60, "近2个月"},
+		{180, "近6个月"},
+		{365, "近1年"},
+		{366, "1年及以上"},
+	}
+	for _, pair := range expectedPairs {
+		if got := normalizeActivityDays(pair.days); got != pair.days {
+			t.Fatalf("normalizeActivityDays(%d) = %d", pair.days, got)
+		}
+		if gotLabel := activityDaysTo51JobLabel(pair.days); gotLabel != pair.label {
+			t.Fatalf("activityDaysTo51JobLabel(%d) = %q, want %q", pair.days, gotLabel, pair.label)
+		}
+		if pair.label != "" {
+			if gotDays := activityLabelToDays(pair.label); gotDays != pair.days {
+				t.Fatalf("activityLabelToDays(%q) = %d, want %d", pair.label, gotDays, pair.days)
+			}
+		}
+	}
+}

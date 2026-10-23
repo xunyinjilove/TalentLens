@@ -74,7 +74,7 @@ for (let i = 0; i < args.length; i++) {
     options.autoAnalyze = false;
   } else if (args[i] === '--active-days' && args[i + 1]) {
     const days = parseInt(args[++i], 10);
-    options.activeDays = [0, 1, 3].includes(days) ? days : 0;
+    options.activeDays = [0, 1, 3, 7, 14, 30, 60, 180, 365, 366].includes(days) ? days : 0;
   } else if (args[i] === '--channel-strategy' && args[i + 1]) {
     options.channelStrategy = args[++i] === 'priority' ? 'priority' : 'balanced';
   } else if (args[i] === '--stop-file' && args[i + 1]) {
@@ -197,6 +197,29 @@ async function ensurePlatformPage(page, cfg) {
 
 const applied51JobPages = new WeakSet();
 
+function activeDaysTo51JobLabel(days) {
+  switch (Number(days) || 0) {
+    case 1:
+    case 3:
+    case 7:
+      return '近1周';
+    case 14:
+      return '近2周';
+    case 30:
+      return '近1个月';
+    case 60:
+      return '近2个月';
+    case 180:
+      return '近6个月';
+    case 365:
+      return '近1年';
+    case 366:
+      return '1年及以上';
+    default:
+      return '';
+  }
+}
+
 function normalize51JobOption(label, value) {
   const clean = String(value || '').replace(/\s+/g, '').trim();
   if (!clean) return '';
@@ -209,33 +232,59 @@ function normalize51JobOption(label, value) {
     if (/^10年(?:以上|及以上)$/.test(clean)) return '10年及以上';
     if (/^(?:应届毕业生|无经验)$/.test(clean)) return '无经验';
   }
+  if (label === '最近活跃时间') {
+    const mappedByDays = activeDaysTo51JobLabel(clean);
+    if (mappedByDays) return mappedByDays;
+    if (['近1周', '近2周', '近1个月', '近2个月', '近6个月', '近1年', '1年及以上', '不限'].includes(clean)) {
+      return clean;
+    }
+  }
   return clean;
 }
 
 async function select51JobPopoverOption(page, label, value) {
   const target = normalize51JobOption(label, value);
   if (!target) return false;
-  const popoverId = await page.evaluate(targetLabel => {
+  const activeTimeOptions = ['近1周', '近2周', '近1个月', '近2个月', '近6个月', '近1年', '1年及以上'];
+  const popoverId = await page.evaluate(({ targetLabel, activeOpts }) => {
     const button = Array.from(document.querySelectorAll('button.base-select-button'))
-      .find(item => (item.querySelector('.base-select-label')?.textContent || '').trim().startsWith(targetLabel));
+      .find(item => {
+        const text = (item.querySelector('.base-select-label')?.textContent || '').trim();
+        if (text.startsWith(targetLabel)) return true;
+        if (targetLabel === '最近活跃时间' && activeOpts.includes(text)) return true;
+        return false;
+      });
     if (!button) return '';
     const id = button.closest('[aria-describedby]')?.getAttribute('aria-describedby') || button.getAttribute('aria-describedby') || '';
     button.click();
     return id;
-  }, label);
+  }, { targetLabel: label, activeOpts: activeTimeOptions });
   if (!popoverId) return false;
   await new Promise(resolve => setTimeout(resolve, 130));
-  const selected = await page.evaluate(({ id, option }) => {
+  const selected = await page.evaluate(({ id, option, targetLabel }) => {
     const panel = document.getElementById(id);
     if (!panel) return false;
-    const item = Array.from(panel.querySelectorAll('.option-item-label'))
-      .find(node => (node.textContent || '').replace(/\s+/g, '') === option);
-    if (!item) return false;
-    (item.closest('.option-item') || item).click();
-    return true;
-  }, { id: popoverId, option: target });
+    const items = Array.from(panel.querySelectorAll('.option-item-label'));
+    const item = items.find(node => (node.textContent || '').replace(/\s+/g, '') === option);
+    if (item) {
+      (item.closest('.option-item') || item).click();
+      return true;
+    }
+    if (targetLabel === '最近活跃时间' && option === '不限') {
+      const active = items.find(node => {
+        const icon = node.querySelector('.active-item_icon');
+        return icon && getComputedStyle(icon).display !== 'none';
+      });
+      if (active) {
+        (active.closest('.option-item') || active).click();
+      }
+      return true;
+    }
+    return false;
+  }, { id: popoverId, option: target, targetLabel: label });
   if (!selected) return false;
   await new Promise(resolve => setTimeout(resolve, 120));
+  if (label === '最近活跃时间' && target === '不限') return true;
   return page.evaluate(({ id, option }) => {
     const reference = document.querySelector(`[aria-describedby="${id}"]`);
     const label = (reference?.textContent || '').replace(/\s+/g, '');
@@ -292,9 +341,10 @@ async function apply51JobFilters(page) {
   const saved = spec.filters || {};
   // A previous position may have left selections in the same browser tab.
   // Clear known single-choice controls before applying this position.
-  for (const label of ['工作年限', '年龄', '学历要求', '学校性质', '期望月薪']) {
+  for (const label of ['工作年限', '年龄', '学历要求', '学校性质', '期望月薪', '最近活跃时间']) {
     try { await select51JobPopoverOption(page, label, '不限'); } catch {}
   }
+  const recentActiveTime = saved.recent_active_time || activeDaysTo51JobLabel(options.activeDays);
   const requested = [
     ['工作年限', spec.experience, 'popover'],
     ['年龄', saved.age, 'popover'],
@@ -307,12 +357,15 @@ async function apply51JobFilters(page) {
     ['期望职能', saved.expected_function, '.candidate-expected-function-picker'],
     ['期望月薪', saved.expected_salary, 'popover'],
     ['从事行业', saved.current_industry, '.candidate-engage-industry-picker'],
-    ['从事职能', saved.current_function, '.candidate-engage-function-picker']
+    ['从事职能', saved.current_function, '.candidate-engage-function-picker'],
+    ['最近活跃时间', recentActiveTime, 'popover']
   ].filter(([, value]) => {
     const clean = String(value || '').replace(/\s+/g, '').trim();
     return clean && !['不限', '经验不限', '学历不限'].includes(clean);
   });
-      const statuses = [{ label: '职位名称', value: spec.title || options.keyword, status: '已应用' }];
+  const extraKw = String(spec.extra_keywords || saved.extra_keywords || '').trim();
+  const statuses = [{ label: '职位名称', value: spec.title || options.keyword, status: '已应用' }];
+  if (extraKw) statuses.push({ label: '附加关键词', value: extraKw, status: '已应用（组合检索）' });
   if (spec.work_city) statuses.push({ label: '工作城市', value: spec.work_city, status: '本地核对' });
   if (Array.isArray(spec.skills) && spec.skills.length) statuses.push({ label: '必备技能', value: spec.skills.join('、'), status: '已应用（技能分轮）' });
   for (const [label, value, control] of requested) {
@@ -324,11 +377,43 @@ async function apply51JobFilters(page) {
     } catch (error) {
       sendMsg('status', { platform: '51job', message: `51job「${label}」筛选未应用：${error.message}` });
     }
-    const localFallback = !applied && ['工作年限', '学历要求', '居住地'].includes(label);
+    const localFallback = !applied && ['工作年限', '学历要求', '居住地', '最近活跃时间'].includes(label);
     statuses.push({ label, value, status: applied ? '已应用' : (localFallback ? '本地核对' : '未应用') });
   }
   sendMsg('status', { platform: '51job', filterStatuses: statuses, message: `51job 职位条件核对完成：${statuses.filter(item => item.status.startsWith('已应用')).length} 项网页已应用，${statuses.filter(item => item.status === '本地核对').length} 项本地核对，${statuses.filter(item => item.status === '未应用').length} 项未应用` });
   return statuses;
+}
+
+function build51JobQuotaTasks(job51Filters, fallbackKeyword, currentBatchQuota) {
+  const spec = job51Filters || {};
+  const saved = spec.filters || {};
+  const title = String(spec.title || fallbackKeyword || '').trim();
+  const rawExtra = String(spec.extra_keywords || spec.extraKeywords || saved.extra_keywords || saved.extraKeywords || '').trim();
+  const extraTokens = rawExtra
+    .split(/[\s,，;；、\n]+/)
+    .map(item => item.trim())
+    .filter(item => item && item !== title);
+  const uniqueExtra = [...new Set(extraTokens)].join(' ');
+  const baseSearchTerm = [title, uniqueExtra].filter(Boolean).join(' ').replace(/\s+/g, ' ').trim();
+  const skills = [...new Set((spec.skills || []).map(item => String(item).trim()).filter(Boolean))].slice(0, 4);
+  const titleQuota = skills.length ? Math.max(1, Math.ceil(currentBatchQuota * 0.6)) : currentBatchQuota;
+  const remaining = currentBatchQuota - titleQuota;
+  const quotaTasks = [{
+    keyword: baseSearchTerm,
+    categoryName: uniqueExtra ? `职位+关键词：${uniqueExtra}` : '职位名称',
+    targetCount: titleQuota
+  }];
+  skills.forEach((skill, index) => {
+    const amount = Math.floor(remaining / skills.length) + (index < remaining % skills.length ? 1 : 0);
+    if (amount > 0) {
+      quotaTasks.push({
+        keyword: `${baseSearchTerm} ${skill}`.replace(/\s+/g, ' ').trim(),
+        categoryName: `必备技能：${skill}`,
+        targetCount: amount
+      });
+    }
+  });
+  return quotaTasks;
 }
 
 async function submit51jobSearch(page, keyword) {
@@ -889,12 +974,28 @@ async function extractCandidatesAcrossFrames(page, targetCount, keyword, platfor
         const foundRanks = Object.entries(educationRank).filter(([label]) => profileText.includes(label)).map(([, rank]) => rank);
         if (foundRanks.length && !foundRanks.some(rank => rank >= requiredRank)) continue;
       }
-      const activityLabel = (text.match(/刚刚活跃|今日活跃|今天活跃|24小时内活跃|3日内活跃|三日内活跃|半年前活跃/) || [])[0] || '';
-      const activeDays = Number(activeFilters.activeDays) || 0;
+      const activityLabel = (text.match(/刚刚活跃|今日活跃|今天活跃|24小时内活跃|3日内活跃|三日内活跃|近1周(?:活跃)?|本周活跃|7日内活跃|1周内活跃|一周内活跃|近2周(?:活跃)?|2周内活跃|两周内活跃|半月内活跃|14日内活跃|近1个月(?:活跃)?|本月活跃|1个月内活跃|一个月内活跃|30日内活跃|近2个月(?:活跃)?|2个月内活跃|两个月内活跃|60日内活跃|近3个月(?:活跃)?|3个月内活跃|三个月内活跃|近6个月(?:活跃)?|6个月内活跃|半年内活跃|近半年(?:活跃)?|半年前活跃|近1年(?:活跃)?|1年内活跃|一年内活跃|1年及以上(?:活跃)?|1年以上(?:活跃)?|一年以上(?:活跃)?|一年前活跃/) || [])[0] || '';
+      const activeTimeMap = { '近1周': 7, '近2周': 14, '近1个月': 30, '近2个月': 60, '近6个月': 180, '近1年': 365, '1年及以上': 366 };
+      const activeDays = Number(activeFilters.activeDays) || activeTimeMap[String(activeFilters.recentActiveTime || '').trim()] || 0;
       if (activeDays > 0) {
-        const freshToday = /刚刚活跃|今日活跃|今天活跃|24小时内活跃/.test(activityLabel);
-        const freshThreeDays = freshToday || /3日内活跃|三日内活跃/.test(activityLabel);
-        if (activeDays === 1 ? !freshToday : !freshThreeDays) continue;
+        let activityRankDays = 0;
+        if (/刚刚活跃|今日活跃|今天活跃|24小时内活跃/.test(activityLabel)) activityRankDays = 1;
+        else if (/3日内活跃|三日内活跃/.test(activityLabel)) activityRankDays = 3;
+        else if (/近1周|本周活跃|7日内活跃|1周内活跃|一周内活跃/.test(activityLabel)) activityRankDays = 7;
+        else if (/近2周|2周内活跃|两周内活跃|半月内活跃|14日内活跃/.test(activityLabel)) activityRankDays = 14;
+        else if (/近1个月|本月活跃|1个月内活跃|一个月内活跃|30日内活跃/.test(activityLabel)) activityRankDays = 30;
+        else if (/近2个月|2个月内活跃|两个月内活跃|60日内活跃/.test(activityLabel)) activityRankDays = 60;
+        else if (/近3个月|3个月内活跃|三个月内活跃|近6个月|6个月内活跃|半年内活跃|近半年/.test(activityLabel)) activityRankDays = 180;
+        else if (/半年前活跃|近1年|1年内活跃|一年内活跃/.test(activityLabel)) activityRankDays = 365;
+        else if (/1年及以上|1年以上|一年以上|一年前活跃/.test(activityLabel)) activityRankDays = 999;
+
+        if (pName === '前程无忧' && activityRankDays === 0) {
+          // 51job 列表卡片未显式披露活跃时间时，信赖网页端「最近活跃时间」筛选，避免误筛
+        } else if (activeDays === 366) {
+          if (activityRankDays < 365) continue;
+        } else {
+          if (activityRankDays === 0 || activityRankDays > activeDays) continue;
+        }
       }
 
       // 提取姓名（兼容 51job .firstline .name, span.name 等）
@@ -1901,15 +2002,7 @@ async function autoNavigateAndSearch(page, platformKey, cfg, searchKeyword) {
           }
         ];
     if (platformKey === '51job' && options.job51Filters) {
-      const title = String(options.job51Filters.title || options.keyword).trim();
-      const skills = [...new Set((options.job51Filters.skills || []).map(item => String(item).trim()).filter(Boolean))].slice(0, 4);
-      const titleQuota = skills.length ? Math.max(1, Math.ceil(currentBatchQuota * 0.6)) : currentBatchQuota;
-      const remaining = currentBatchQuota - titleQuota;
-      quotaTasks = [{ keyword: title, categoryName: '职位名称', targetCount: titleQuota }];
-      skills.forEach((skill, index) => {
-        const amount = Math.floor(remaining / skills.length) + (index < remaining % skills.length ? 1 : 0);
-        if (amount > 0) quotaTasks.push({ keyword: `${title} ${skill}`, categoryName: `必备技能：${skill}`, targetCount: amount });
-      });
+      quotaTasks = build51JobQuotaTasks(options.job51Filters, options.keyword, currentBatchQuota);
     }
 
     // 按当前子批次的配额矩阵依次执行多维度词条轮转检索
@@ -1977,7 +2070,7 @@ async function autoNavigateAndSearch(page, platformKey, cfg, searchKeyword) {
             cfg.name,
             Array.from(projectExcludedNames),
             Array.from(projectExcludedUrls),
-            { city: platformKey === '51job' ? options.job51Filters?.filters?.residence || '' : options.city, workCity: platformKey === '51job' ? options.job51Filters?.work_city || '' : '', exp: options.exp, edu: options.edu, activeDays: options.activeDays }
+            { city: platformKey === '51job' ? options.job51Filters?.filters?.residence || '' : options.city, workCity: platformKey === '51job' ? options.job51Filters?.work_city || '' : '', exp: options.exp, edu: options.edu, activeDays: options.activeDays, recentActiveTime: platformKey === '51job' ? options.job51Filters?.filters?.recent_active_time || '' : '' }
           );
           scraped = selectFreshCandidates(scraped, remainingForTask, projectExcludedUrls, seenCandidateKeys,
             platformKey === '51job' ? deferred51jobKeys : undefined);
@@ -2516,6 +2609,6 @@ if (require.main === module) {
   });
 }
 
-module.exports = { allocateQuota, planChannelQuota, smoothScroll, keepPageActiveInBackground, setBrowserWindowState, preserveBrowserWindow, connectToExistingBrowser, launchPlatformBrowser, openDedicatedSearchPage, createBackgroundPage, capture51jobDetailUrl, extract51JobResumeId, isComplete51JobDetail, isBrowserStartPage, browserLaunchArgs, closeUnusedStartPages, isPlatformPageUrl, ensurePlatformPage, normalize51JobOption, apply51JobFilters, submit51jobSearch, detectCaptcha, extractCandidatesAcrossFrames, selectFreshCandidates, advanceSearchResults, searchRetryDelay, waitForSearchRetry, main };
+module.exports = { allocateQuota, planChannelQuota, smoothScroll, keepPageActiveInBackground, setBrowserWindowState, preserveBrowserWindow, connectToExistingBrowser, launchPlatformBrowser, openDedicatedSearchPage, createBackgroundPage, capture51jobDetailUrl, extract51JobResumeId, isComplete51JobDetail, isBrowserStartPage, browserLaunchArgs, closeUnusedStartPages, isPlatformPageUrl, ensurePlatformPage, activeDaysTo51JobLabel, normalize51JobOption, select51JobPopoverOption, apply51JobFilters, build51JobQuotaTasks, submit51jobSearch, detectCaptcha, extractCandidatesAcrossFrames, selectFreshCandidates, advanceSearchResults, searchRetryDelay, waitForSearchRetry, main };
 module.exports.claimResumeSnapshot = claimResumeSnapshot;
 module.exports.searchRetryMessage = searchRetryMessage;

@@ -144,6 +144,14 @@ CREATE TABLE IF NOT EXISTS outreach_authorizations (
   reserved_points INTEGER NOT NULL DEFAULT 0, status TEXT NOT NULL,
   message TEXT NOT NULL DEFAULT '', confirmed_at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS candidate_ai_outreach_messages (
+  project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  candidate_key TEXT NOT NULL,
+  message TEXT NOT NULL,
+  evidence TEXT NOT NULL DEFAULT '',
+  updated_at TEXT NOT NULL,
+  PRIMARY KEY (project_id, candidate_key)
+);
 CREATE TABLE IF NOT EXISTS follow_up_events (
   id TEXT PRIMARY KEY, project_candidate_id TEXT NOT NULL REFERENCES project_candidates(id),
   event_type TEXT NOT NULL, from_stage TEXT NOT NULL DEFAULT '',
@@ -399,6 +407,7 @@ func (a *App) deleteRecruitmentProject(projectID string) error {
 		`DELETE FROM outreach_items WHERE project_candidate_id IN (SELECT id FROM project_candidates WHERE project_id = ?)`,
 		`DELETE FROM outreach_items WHERE batch_id IN (SELECT id FROM outreach_batches WHERE project_id = ?)`,
 		`DELETE FROM outreach_batches WHERE project_id = ?`,
+		`DELETE FROM candidate_ai_outreach_messages WHERE project_id = ?`,
 		`DELETE FROM analysis_jobs WHERE project_candidate_id IN (SELECT id FROM project_candidates WHERE project_id = ?)`,
 		`DELETE FROM evaluations WHERE project_candidate_id IN (SELECT id FROM project_candidates WHERE project_id = ?)`,
 		`DELETE FROM project_candidate_resumes WHERE project_candidate_id IN (SELECT id FROM project_candidates WHERE project_id = ?)`,
@@ -435,6 +444,7 @@ func (a *App) clearRecruitmentProjectResumes(projectID string) error {
 		`DELETE FROM outreach_items WHERE project_candidate_id IN (SELECT id FROM project_candidates WHERE project_id = ?)`,
 		`DELETE FROM outreach_items WHERE batch_id IN (SELECT id FROM outreach_batches WHERE project_id = ?)`,
 		`DELETE FROM outreach_batches WHERE project_id = ?`,
+		`DELETE FROM candidate_ai_outreach_messages WHERE project_id = ?`,
 		`DELETE FROM analysis_jobs WHERE project_candidate_id IN (SELECT id FROM project_candidates WHERE project_id = ?)`,
 		`DELETE FROM evaluations WHERE project_candidate_id IN (SELECT id FROM project_candidates WHERE project_id = ?)`,
 		`DELETE FROM project_candidate_resumes WHERE project_candidate_id IN (SELECT id FROM project_candidates WHERE project_id = ?)`,

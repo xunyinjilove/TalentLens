@@ -29,6 +29,7 @@ type OutreachItem struct {
 	Status              string `json:"status"`
 	Result              string `json:"result"`
 	ReservedPoints      int    `json:"reservedPoints,omitempty"`
+	AICustomized        bool   `json:"aiCustomized,omitempty"`
 }
 
 type OutreachBatch struct {
@@ -252,6 +253,79 @@ func (a *App) generateAIOutreachGreeting(resume *Resume, jobTitle string, projec
 	return fallbackGreeting, evidence
 }
 
+func saveCandidateAIOutreachMessage(db *sql.DB, projectID string, keys []string, message string, evidence string) {
+	if db == nil || strings.TrimSpace(projectID) == "" || strings.TrimSpace(message) == "" {
+		return
+	}
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	seen := make(map[string]bool)
+	for _, k := range keys {
+		k = strings.TrimSpace(k)
+		if k == "" || seen[k] {
+			continue
+		}
+		seen[k] = true
+		_, _ = db.Exec(`INSERT INTO candidate_ai_outreach_messages(project_id, candidate_key, message, evidence, updated_at)
+			VALUES(?, ?, ?, ?, ?)
+			ON CONFLICT(project_id, candidate_key) DO UPDATE SET
+			message=excluded.message,
+			evidence=CASE WHEN excluded.evidence<>'' THEN excluded.evidence ELSE candidate_ai_outreach_messages.evidence END,
+			updated_at=excluded.updated_at`,
+			projectID, k, strings.TrimSpace(message), strings.TrimSpace(evidence), now)
+	}
+}
+
+func getSavedCandidateAIOutreachMessage(db *sql.DB, projectID string, keys ...string) (string, string, bool) {
+	if db == nil || strings.TrimSpace(projectID) == "" {
+		return "", "", false
+	}
+	for _, k := range keys {
+		k = strings.TrimSpace(k)
+		if k == "" {
+			continue
+		}
+		var msg, evi string
+		err := db.QueryRow(`SELECT message, evidence FROM candidate_ai_outreach_messages WHERE project_id=? AND candidate_key=? LIMIT 1`, projectID, k).Scan(&msg, &evi)
+		if err == nil && strings.TrimSpace(msg) != "" {
+			return strings.TrimSpace(msg), strings.TrimSpace(evi), true
+		}
+	}
+	return "", "", false
+}
+
+// SaveOutreachItemMessage 保存 HR 在打招呼弹窗中手动调整的定制文案，下次进入直接复用
+func (a *App) SaveOutreachItemMessage(projectID string, itemID string, message string) error {
+	cleanMsg := strings.TrimSpace(message)
+	if cleanMsg == "" {
+		return fmt.Errorf("招呼语不能为空")
+	}
+	db, err := a.getRecruitmentDB()
+	if err != nil {
+		return err
+	}
+	var linkID, platformCandID, resumeID, rawMeta string
+	_ = db.QueryRow(`SELECT oi.project_candidate_id, oi.platform_candidate_id, COALESCE(rv.legacy_resume_id, ''), oi.result_json
+		FROM outreach_items oi
+		LEFT JOIN project_candidates pc ON pc.id = oi.project_candidate_id
+		LEFT JOIN resume_versions rv ON rv.candidate_id = pc.candidate_id
+		WHERE oi.id = ? LIMIT 1`, itemID).Scan(&linkID, &platformCandID, &resumeID, &rawMeta)
+
+	var meta OutreachItem
+	if rawMeta != "" && json.Unmarshal([]byte(rawMeta), &meta) == nil {
+		meta.Message = cleanMsg
+		meta.AICustomized = true
+		if resumeID == "" {
+			resumeID = meta.ResumeID
+		}
+		if encoded, err := json.Marshal(meta); err == nil {
+			rawMeta = string(encoded)
+		}
+	}
+	_, _ = db.Exec(`UPDATE outreach_items SET message = ?, result_json = CASE WHEN ? <> '' THEN ? ELSE result_json END WHERE id = ?`, cleanMsg, rawMeta, rawMeta, itemID)
+	saveCandidateAIOutreachMessage(db, projectID, []string{linkID, resumeID, platformCandID, itemID}, cleanMsg, meta.Evidence)
+	return nil
+}
+
 // GenerateCandidateAIOutreachMessage 单人调用接入的 AI 模型重新深度定制润色招呼文案
 func (a *App) GenerateCandidateAIOutreachMessage(projectID string, itemID string) (string, error) {
 	project := a.GetProject(projectID)
@@ -263,13 +337,19 @@ func (a *App) GenerateCandidateAIOutreachMessage(projectID string, itemID string
 		return "", err
 	}
 
-	var resumeID string
-	err = db.QueryRow(`SELECT rv.legacy_resume_id FROM outreach_items oi
-		JOIN project_candidates pc ON pc.id = oi.project_candidate_id
-		JOIN resume_versions rv ON rv.candidate_id = pc.candidate_id
-		WHERE oi.id = ? LIMIT 1`, itemID).Scan(&resumeID)
+	var resumeID, linkID, platformCandID, rawMeta string
+	err = db.QueryRow(`SELECT COALESCE(rv.legacy_resume_id, ''), oi.project_candidate_id, oi.platform_candidate_id, oi.result_json
+		FROM outreach_items oi
+		LEFT JOIN project_candidates pc ON pc.id = oi.project_candidate_id
+		LEFT JOIN resume_versions rv ON rv.candidate_id = pc.candidate_id
+		WHERE oi.id = ? LIMIT 1`, itemID).Scan(&resumeID, &linkID, &platformCandID, &rawMeta)
 	if err != nil || resumeID == "" {
-		resumeID = itemID
+		var meta OutreachItem
+		if rawMeta != "" && json.Unmarshal([]byte(rawMeta), &meta) == nil && meta.ResumeID != "" {
+			resumeID = meta.ResumeID
+		} else {
+			resumeID = itemID
+		}
 	}
 
 	resumes := a.GetProjectResumes(projectID)
@@ -284,12 +364,24 @@ func (a *App) GenerateCandidateAIOutreachMessage(projectID string, itemID string
 		return "", fmt.Errorf("候选人简历记录不存在")
 	}
 
-	msg, _ := a.generateAIOutreachGreeting(targetResume, project.JobConfig.Title, project.Name)
+	msg, evi := a.generateAIOutreachGreeting(targetResume, project.JobConfig.Title, project.Name)
 	if msg == "" {
 		return "", fmt.Errorf("生成打招呼文案失败")
 	}
 
-	_, _ = db.Exec(`UPDATE outreach_items SET message = ? WHERE id = ?`, msg, itemID)
+	var meta OutreachItem
+	if rawMeta != "" && json.Unmarshal([]byte(rawMeta), &meta) == nil {
+		meta.Message = msg
+		if evi != "" {
+			meta.Evidence = evi
+		}
+		meta.AICustomized = true
+		if encoded, mErr := json.Marshal(meta); mErr == nil {
+			rawMeta = string(encoded)
+		}
+	}
+	_, _ = db.Exec(`UPDATE outreach_items SET message = ?, result_json = CASE WHEN ? <> '' THEN ? ELSE result_json END WHERE id = ?`, msg, rawMeta, rawMeta, itemID)
+	saveCandidateAIOutreachMessage(db, projectID, []string{linkID, targetResume.ID, platformCandID, targetResume.PlatformCandidateID}, msg, evi)
 
 	return msg, nil
 }
@@ -322,9 +414,12 @@ func (a *App) GenerateCandidateGreetingMessage(projectID string, resumeID string
 		return "", fmt.Errorf("候选人简历记录不存在")
 	}
 
-	msg, _ := a.generateAIOutreachGreeting(targetResume, jobTitle, projectName)
+	msg, evi := a.generateAIOutreachGreeting(targetResume, jobTitle, projectName)
 	if msg == "" {
 		return "", fmt.Errorf("生成打招呼文案失败")
+	}
+	if db, err := a.getRecruitmentDB(); err == nil {
+		saveCandidateAIOutreachMessage(db, projectID, []string{targetResume.ID, targetResume.PlatformCandidateID}, msg, evi)
 	}
 
 	return msg, nil
@@ -466,12 +561,51 @@ func (a *App) PreviewBatchOutreach(projectID string, candidateIDs []string, temp
 
 	items := make([]OutreachItem, len(targets))
 	if templateMode == "ai" {
+		type generatedAIItem struct {
+			idx     int
+			keys    []string
+			msg     string
+			evi     string
+			freshAI bool
+		}
+		generated := make([]generatedAIItem, len(targets))
 		var wg sync.WaitGroup
 		for i, t := range targets {
+			savedMsg, savedEvi, found := getSavedCandidateAIOutreachMessage(db, projectID, t.linkID, t.resume.ID, t.sourceID)
+			if found && savedMsg != "" {
+				if savedEvi == "" {
+					_, savedEvi = buildTemplateOutreachMessage(t.resume, jobTitle)
+				}
+				items[i] = OutreachItem{
+					ID:                  recruitmentID("outreach_item"),
+					ResumeID:            t.resume.ID,
+					ProjectCandidateID:  t.linkID,
+					CandidateName:       t.name,
+					Platform:            t.sourcePlatform,
+					PlatformCandidateID: t.sourceID,
+					PlatformJobID:       t.jobID,
+					ProfileURL:          t.resume.URL,
+					Message:             savedMsg,
+					Evidence:            savedEvi,
+					RedLineStatus:       t.redLineStatus,
+					AbilityScore:        t.abilityScore,
+					Rank:                i + 1,
+					Status:              "draft",
+					AICustomized:        true,
+				}
+				continue
+			}
 			wg.Add(1)
 			go func(idx int, target targetItem) {
 				defer wg.Done()
 				msg, evi := a.generateAIOutreachGreeting(target.resume, jobTitle, project.Name)
+				generated[idx] = generatedAIItem{
+					idx:     idx,
+					keys:    []string{target.linkID, target.resume.ID, target.sourceID},
+					msg:     msg,
+					evi:     evi,
+					freshAI: msg != "",
+				}
 				items[idx] = OutreachItem{
 					ID:                  recruitmentID("outreach_item"),
 					ResumeID:            target.resume.ID,
@@ -487,14 +621,30 @@ func (a *App) PreviewBatchOutreach(projectID string, candidateIDs []string, temp
 					AbilityScore:        target.abilityScore,
 					Rank:                idx + 1,
 					Status:              "draft",
+					AICustomized:        true,
 				}
 			}(i, t)
 		}
 		wg.Wait()
+		for _, g := range generated {
+			if g.freshAI {
+				saveCandidateAIOutreachMessage(db, projectID, g.keys, g.msg, g.evi)
+			}
+		}
 	} else {
-		// 零 AI 消耗的高性能企业标准邀请模板
+		// 零 AI 消耗的高性能企业标准邀请模板；若此前该候选人已用 AI 定制过（且非强制切回纯模板），直接复用已保存的定制文案
 		for i, target := range targets {
 			msg, evi := buildTemplateOutreachMessage(target.resume, jobTitle)
+			aiCustomized := false
+			if templateMode != "force_template" {
+				if savedMsg, savedEvi, found := getSavedCandidateAIOutreachMessage(db, projectID, target.linkID, target.resume.ID, target.sourceID); found && savedMsg != "" {
+					msg = savedMsg
+					if savedEvi != "" {
+						evi = savedEvi
+					}
+					aiCustomized = true
+				}
+			}
 			items[i] = OutreachItem{
 				ID:                  recruitmentID("outreach_item"),
 				ResumeID:            target.resume.ID,
@@ -510,6 +660,7 @@ func (a *App) PreviewBatchOutreach(projectID string, candidateIDs []string, temp
 				AbilityScore:        target.abilityScore,
 				Rank:                i + 1,
 				Status:              "draft",
+				AICustomized:        aiCustomized,
 			}
 		}
 	}

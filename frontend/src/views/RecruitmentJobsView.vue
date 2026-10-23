@@ -334,6 +334,8 @@
             <el-form-item label="期望月薪"><el-select v-model="sourcingFilters.expected_salary" clearable placeholder="不限" allow-create filterable><el-option v-for="v in ['8千','1万','1.5万','2万','2.5万','3万','4万','5万','6万','10万及以上']" :key="v" :label="v" :value="v" /></el-select></el-form-item>
             <el-form-item label="从事行业"><el-input v-model="sourcingFilters.current_industry" clearable placeholder="如：医疗器械" /></el-form-item>
             <el-form-item label="从事职能"><el-input v-model="sourcingFilters.current_function" clearable placeholder="如：项目管理" /></el-form-item>
+            <el-form-item label="最近活跃时间"><el-select v-model="sourcingFilters.recent_active_time" clearable placeholder="不限"><el-option v-for="v in ['近1周','近2周','近1个月','近2个月','近6个月','近1年','1年及以上']" :key="v" :label="v" :value="v" /></el-select></el-form-item>
+            <el-form-item label="附加检索关键词"><el-input v-model="sourcingFilters.extra_keywords" clearable placeholder="如：医疗器械 IVD（与职位名空格组合检索）" /></el-form-item>
           </div>
         </div>
 
@@ -613,7 +615,7 @@ const jobForm = reactive({
   education_level: '本科',
   job_description: ''
 })
-const emptySourcingFilters = () => ({ age: '', gender: '', residence: '', school_type: '', job_seeking_status: '', expected_industry: '', expected_function: '', expected_salary: '', current_industry: '', current_function: '' })
+const emptySourcingFilters = () => ({ age: '', gender: '', residence: '', school_type: '', job_seeking_status: '', expected_industry: '', expected_function: '', expected_salary: '', current_industry: '', current_function: '', recent_active_time: '', extra_keywords: '' })
 const sourcingFilters = reactive(emptySourcingFilters())
 
 function formatExpRequirement(jobConfig: any): string {

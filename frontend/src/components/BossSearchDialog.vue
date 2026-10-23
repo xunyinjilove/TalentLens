@@ -109,6 +109,17 @@
           </div>
         </div>
 
+        <div class="form-row" style="margin-top: 6px;">
+          <div class="form-item flex-2">
+            <label class="form-label">附加检索关键词（可选，与职位名空格拼接组合检索）</label>
+            <el-input
+              v-model="form.extraKeywords"
+              clearable
+              placeholder="如：医疗器械 IVD（多个词用空格或逗号分隔，与职位名称组合收窄检索）"
+            />
+          </div>
+        </div>
+
         <div v-if="selectedPlatformCodes.includes('51job')" class="saved-filter-list">
           <strong>51job 职位筛选条件</strong><span>来自职位管理，修改请先保存职位；其他渠道暂沿原搜索逻辑。无法在网页确认的条件不会被视为已应用。</span>
           <div class="saved-filter-items">
@@ -223,9 +234,20 @@
             <el-radio-group v-model="form.channelStrategy"><el-radio label="balanced">均衡补缺</el-radio><el-radio label="priority">按平台列表顺序优先</el-radio></el-radio-group>
           </div>
           <div class="form-item flex-1">
-            <label class="form-label">平台活跃度</label>
-            <el-select v-model="form.activeDays" style="width: 100%"><el-option label="不限（保留未披露）" :value="0" /><el-option label="仅今日/刚刚活跃" :value="1" /><el-option label="仅 3 日内活跃" :value="3" /></el-select>
-            <span class="reservoir-hint">选近期活跃时，未显示活跃标签的卡片不会被推断为符合。</span>
+            <label class="form-label">最近活跃时间（平台活跃度）</label>
+            <el-select v-model="form.activeDays" style="width: 100%">
+              <el-option label="不限（保留未披露）" :value="0" />
+              <el-option label="近1周" :value="7" />
+              <el-option label="近2周" :value="14" />
+              <el-option label="近1个月" :value="30" />
+              <el-option label="近2个月" :value="60" />
+              <el-option label="近6个月" :value="180" />
+              <el-option label="近1年" :value="365" />
+              <el-option label="1年及以上" :value="366" />
+              <el-option label="仅今日/刚刚活跃" :value="1" />
+              <el-option label="仅 3 日内活跃" :value="3" />
+            </el-select>
+            <span class="reservoir-hint">同步 51job「其他筛选 → 最近活跃时间」并支持本地卡片核对。</span>
           </div>
         </div>
         <div class="form-row" style="margin-top: 8px;">
@@ -511,12 +533,17 @@ async function selectKeywordStrategy() {
 
 function buildKeywordPlan() {
   if (form.keywordStrategy === 'precise') return []
-  return activeQuotaList.value.map(item => ({
-    keyword: item.keyword.trim(),
-    category: item.category,
-    category_name: item.category_name,
-    ratio: item.ratio
-  }))
+  const extra = normalizedExtraKeywords.value
+  return activeQuotaList.value.map(item => {
+    const base = item.keyword.trim()
+    const combined = extra && !base.includes(extra) ? `${base} ${extra}` : base
+    return {
+      keyword: combined,
+      category: item.category,
+      category_name: item.category_name,
+      ratio: item.ratio
+    }
+  })
 }
 
 async function handleGenerateSynonyms() {
@@ -784,15 +811,75 @@ const selectedPlatformCodes = computed(() => {
   return platformList.filter(p => p.selected).map(p => p.code)
 })
 const filterStatuses = ref<Array<{ label: string; value: string; status: string }>>([])
+
+function activityLabelToDays(label?: string): number {
+  switch ((label || '').trim()) {
+    case '近1周': return 7
+    case '近2周': return 14
+    case '近1个月': return 30
+    case '近2个月': return 60
+    case '近6个月': return 180
+    case '近1年': return 365
+    case '1年及以上': return 366
+    default: return 0
+  }
+}
+
+function activityDaysToLabel(days: number): string {
+  switch (days) {
+    case 1: return '仅今日/刚刚活跃'
+    case 3: return '仅3日内活跃'
+    case 7: return '近1周'
+    case 14: return '近2周'
+    case 30: return '近1个月'
+    case 60: return '近2个月'
+    case 180: return '近6个月'
+    case 365: return '近1年'
+    case 366: return '1年及以上'
+    default: return ''
+  }
+}
+
+const form = reactive({
+  keyword: '',
+  extraKeywords: '',
+  city: '上海',
+  countPerPlatform: 30,
+  autoAnalyze: false,
+  keywordStrategy: 'precise',
+  channelStrategy: 'balanced',
+  activeDays: 0
+})
+
+const normalizedExtraKeywords = computed(() => {
+  const baseTitle = (form.keyword || '').trim()
+  const tokens = String(form.extraKeywords || '')
+    .split(/[\s,，;；、\n]+/)
+    .map(t => t.trim())
+    .filter(t => t && t !== baseTitle)
+  return Array.from(new Set(tokens)).join(' ')
+})
+
+const effectiveSearchKeyword = computed(() => {
+  return [form.keyword.trim(), normalizedExtraKeywords.value].filter(Boolean).join(' ').trim()
+})
+
 const displayed51JobFilters = computed(() => {
   if (filterStatuses.value.length) return filterStatuses.value
   const config = props.jobConfig || projectStore.projects.find(item => item.id === props.projectId)?.job_config || {}
   const filterLabels: Record<string, string> = { age: '年龄', gender: '性别', residence: '居住地', school_type: '学校性质', job_seeking_status: '求职状态', expected_industry: '期望行业', expected_function: '期望职能', expected_salary: '期望月薪', current_industry: '从事行业', current_function: '从事职能' }
   const items = [{ label: '职位名称', value: config.title || props.jobTitle || '', status: '已应用' }]
+  if (normalizedExtraKeywords.value) {
+    items.push({ label: '附加关键词', value: normalizedExtraKeywords.value, status: '已应用（组合检索）' })
+  }
   if (config.city) items.push({ label: '工作城市', value: config.city, status: '本地核对' })
   if (config.experience_text || config.experience_years) items.push({ label: '工作年限', value: config.experience_text || `${config.experience_years}年`, status: '网页应用 / 本地核对' })
   if (config.education_level && config.education_level !== '不限') items.push({ label: '学历要求', value: config.education_level, status: '网页应用 / 本地核对' })
   if (config.required_skills?.length) items.push({ label: '必备技能', value: config.required_skills.join('、'), status: '已应用（技能分轮）' })
+  const activeLabel = activityDaysToLabel(form.activeDays) || config.sourcing_filters?.recent_active_time?.trim() || ''
+  if (activeLabel) {
+    items.push({ label: '最近活跃时间', value: activeLabel, status: '网页应用 / 本地核对' })
+  }
   for (const [key, value] of Object.entries(config.sourcing_filters || {})) {
     if (value?.trim() && filterLabels[key]) {
       const status = key === 'residence' ? '网页应用 / 本地核对' : '待网页核对'
@@ -805,16 +892,6 @@ const displayed51JobFilters = computed(() => {
 function togglePlatform(p: any) {
   p.selected = !p.selected
 }
-
-const form = reactive({
-  keyword: '',
-  city: '上海',
-  countPerPlatform: 30,
-  autoAnalyze: false,
-  keywordStrategy: 'precise',
-  channelStrategy: 'balanced',
-  activeDays: 0
-})
 
 const expectedTotalCount = computed(() => {
   return form.countPerPlatform
@@ -840,6 +917,8 @@ watch(() => props.modelValue, (val) => {
     // 每次打开弹窗根据当前选中的职位刷新默认关键词与岗位城市
     const saved = props.jobConfig || projectStore.projects.find(item => item.id === props.projectId)?.job_config
     form.keyword = saved?.title || props.jobTitle || ''
+    form.extraKeywords = saved?.sourcing_filters?.extra_keywords || ''
+    form.activeDays = activityLabelToDays(saved?.sourcing_filters?.recent_active_time)
     if (saved?.city || props.city) {
       form.city = (saved?.city || props.city || '').trim()
     }
@@ -950,12 +1029,15 @@ async function handleStartSearch() {
   filterStatuses.value = []
   currentStatusText.value = '正在启动矩阵式检索引擎...'
 
+  const searchKw = effectiveSearchKeyword.value || form.keyword.trim()
+  const activeDesc = activityDaysToLabel(form.activeDays) || '不限'
+
   if (WailsApp?.StartSearchWithPolicy) {
     const matrixPayload = buildKeywordPlan()
-    addLog('status', `全渠道总目标 ${form.countPerPlatform} 人；关键词方案 ${form.keywordStrategy}；渠道 ${form.channelStrategy}；活跃度 ${form.activeDays || '不限'} 天。`)
+    addLog('status', `全渠道总目标 ${form.countPerPlatform} 人；检索词「${searchKw}」；关键词方案 ${form.keywordStrategy}；渠道 ${form.channelStrategy}；活跃度 ${activeDesc}。`)
     try {
       const started = await WailsApp.StartSearchWithPolicy(
-        props.projectId, form.keyword.trim(), form.city,
+        props.projectId, searchKw, form.city,
           props.expYears ?? 0, props.eduLevel || '不限', form.countPerPlatform,
         plats, JSON.stringify(matrixPayload), form.autoAnalyze, form.activeDays, form.channelStrategy
       )
@@ -981,7 +1063,7 @@ async function handleStartSearch() {
       try {
         await WailsApp.StartQuotaMatrixSearch(
           props.projectId,
-          form.keyword.trim(),
+          searchKw,
           form.city,
           props.expYears ?? 0,
           props.eduLevel || '不限',
@@ -998,13 +1080,13 @@ async function handleStartSearch() {
     }
   }
 
-  addLog('status', `🚀 启动多平台聚合寻才：[${form.city}] 岗位「${form.keyword}」，调度平台：${plats.join('、')}，单平台目标 ${form.countPerPlatform} 人`)
+  addLog('status', `🚀 启动多平台聚合寻才：[${form.city}] 岗位「${searchKw}」，调度平台：${plats.join('、')}，单平台目标 ${form.countPerPlatform} 人`)
 
   if (WailsApp && WailsApp.StartMultiPlatformSearch) {
     try {
       await WailsApp.StartMultiPlatformSearch(
         props.projectId,
-        form.keyword.trim(),
+        searchKw,
         form.city,
           props.expYears ?? 0,
           props.eduLevel || '不限',
@@ -1020,7 +1102,7 @@ async function handleStartSearch() {
     try {
       await WailsApp.StartBossSearch(
         props.projectId,
-        form.keyword.trim(),
+        searchKw,
         form.city,
           props.expYears ?? 0,
           props.eduLevel || '不限',
