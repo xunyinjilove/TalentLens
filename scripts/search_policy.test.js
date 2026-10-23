@@ -59,10 +59,9 @@ test('51job 7-tier recent active time filter and extra keywords task builder', a
     extra_keywords: 'PCR 微流控',
     skills: ['引物设计', '冻干工艺']
   }, '', 15);
-  assert.equal(tasks.length, 3);
+  assert.equal(tasks.length, 1);
   assert.equal(tasks[0].keyword, '体外诊断研发工程师 PCR 微流控');
-  assert.equal(tasks[1].keyword, '体外诊断研发工程师 PCR 微流控 引物设计');
-  assert.equal(tasks[2].keyword, '体外诊断研发工程师 PCR 微流控 冻干工艺');
+  assert.equal(tasks[0].targetCount, 15);
 
   const makeCard = (label) => ({
     offsetParent: {}, getClientRects: () => [1],

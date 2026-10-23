@@ -870,7 +870,6 @@ const displayed51JobFilters = computed(() => {
   if (config.city) items.push({ label: '工作城市', value: config.city, status: '本地核对' })
   if (config.experience_text || config.experience_years) items.push({ label: '工作年限', value: config.experience_text || `${config.experience_years}年`, status: '网页应用 / 本地核对' })
   if (config.education_level && config.education_level !== '不限') items.push({ label: '学历要求', value: config.education_level, status: '网页应用 / 本地核对' })
-  if (config.required_skills?.length) items.push({ label: '必备技能', value: config.required_skills.join('、'), status: '已应用（技能分轮）' })
   const activeLabel = activityDaysToLabel(form.activeDays) || config.sourcing_filters?.recent_active_time?.trim() || ''
   if (activeLabel) {
     items.push({ label: '最近活跃时间', value: activeLabel, status: '网页应用 / 本地核对' })
