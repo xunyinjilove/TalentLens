@@ -871,13 +871,14 @@ const displayed51JobFilters = computed(() => {
   if (config.experience_text || config.experience_years) items.push({ label: '工作年限', value: config.experience_text || `${config.experience_years}年`, status: '网页应用 / 本地核对' })
   if (config.education_level && config.education_level !== '不限') items.push({ label: '学历要求', value: config.education_level, status: '网页应用 / 本地核对' })
   const activeLabel = activityDaysToLabel(form.activeDays) || config.sourcing_filters?.recent_active_time?.trim() || ''
-  if (activeLabel) {
+  if (activeLabel && activeLabel !== '不限') {
     items.push({ label: '最近活跃时间', value: activeLabel, status: '网页应用 / 本地核对' })
   }
   for (const [key, value] of Object.entries(config.sourcing_filters || {})) {
-    if (value?.trim() && filterLabels[key]) {
+    const cleanVal = value?.trim() || ''
+    if (cleanVal && cleanVal !== '不限' && filterLabels[key]) {
       const status = key === 'residence' ? '网页应用 / 本地核对' : '待网页核对'
-      items.push({ label: filterLabels[key], value: value.trim(), status })
+      items.push({ label: filterLabels[key], value: cleanVal, status })
     }
   }
   return items

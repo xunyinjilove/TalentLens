@@ -15,6 +15,7 @@ test('51job explicit gender and age filters exclude contradictory and undisclose
   assert.equal(agent.matches51JobDemographics({ demographicText: '男 · 年龄未透露 · 上海' }, filters), false);
   assert.equal(agent.matches51JobDemographics({ demographicText: '32岁 · 上海' }, filters), false);
   assert.equal(agent.matches51JobDemographics({ demographicText: '女 · 29岁' }, {}), true);
+  assert.equal(agent.matches51JobDemographics({ demographicText: '女 · 29岁' }, { gender: '不限', age: '不限' }), true);
 });
 
 test('quota preserves total and zero weight', () => {
@@ -268,6 +269,24 @@ test('browser minimization targets a page window and releases its CDP session', 
     args: { windowId: 17, bounds: { windowState: 'minimized' } }
   });
   assert.equal(detached, true);
+});
+
+test('maximized browser window normalizes before minimizing so Chromium CDP succeeds', async () => {
+  const commands = [];
+  const session = {
+    send: async (command, args) => {
+      commands.push({ command, args });
+      if (command === 'Browser.getWindowForTarget') return { windowId: 19, bounds: { windowState: 'maximized' } };
+      return {};
+    },
+    detach: async () => {}
+  };
+  const page = { target: () => ({ createCDPSession: async () => session }) };
+  assert.equal(await agent.setBrowserWindowState(page, 'minimized'), true);
+  assert.deepEqual(commands.slice(1), [
+    { command: 'Browser.setWindowBounds', args: { windowId: 19, bounds: { windowState: 'normal' } } },
+    { command: 'Browser.setWindowBounds', args: { windowId: 19, bounds: { windowState: 'minimized' } } }
+  ]);
 });
 
 test('manual candidate viewing prevents the search worker from minimizing that browser', async () => {

@@ -245,23 +245,30 @@ function normalize51JobOption(label, value) {
 async function select51JobPopoverOption(page, label, value) {
   const target = normalize51JobOption(label, value);
   if (!target) return false;
-  const activeTimeOptions = ['近1周', '近2周', '近1个月', '近2个月', '近6个月', '近1年', '1年及以上'];
-  const popoverId = await page.evaluate(({ targetLabel, activeOpts }) => {
+  const knownLabelOptions = {
+    '最近活跃时间': ['近1周', '近2周', '近1个月', '近2个月', '近6个月', '近1年', '1年及以上'],
+    '性别': ['男', '女'],
+    '年龄': ['22岁及以下', '22-25岁', '25-30岁', '30-35岁', '35-45岁', '45岁及以上'],
+    '学校性质': ['全日制', '985', '211', '双一流', '留学经历', '在校生'],
+    '求职状态': ['离职-周内到岗', '在职-月内到岗', '在职-观望机会', '离职-随时到岗', '在职-考虑机会', '在职-暂不考虑']
+  };
+  const popoverId = await page.evaluate(({ targetLabel, knownOpts }) => {
+    const opts = knownOpts[targetLabel] || [];
     const button = Array.from(document.querySelectorAll('button.base-select-button'))
       .find(item => {
         const text = (item.querySelector('.base-select-label')?.textContent || '').trim();
         if (text.startsWith(targetLabel)) return true;
-        if (targetLabel === '最近活跃时间' && activeOpts.includes(text)) return true;
+        if (opts.includes(text)) return true;
         return false;
       });
     if (!button) return '';
     const id = button.closest('[aria-describedby]')?.getAttribute('aria-describedby') || button.getAttribute('aria-describedby') || '';
     button.click();
     return id;
-  }, { targetLabel: label, activeOpts: activeTimeOptions });
+  }, { targetLabel: label, knownOpts: knownLabelOptions });
   if (!popoverId) return false;
   await new Promise(resolve => setTimeout(resolve, 130));
-  const selected = await page.evaluate(({ id, option, targetLabel }) => {
+  const selected = await page.evaluate(({ id, option }) => {
     const panel = document.getElementById(id);
     if (!panel) return false;
     const items = Array.from(panel.querySelectorAll('.option-item-label'));
@@ -270,7 +277,7 @@ async function select51JobPopoverOption(page, label, value) {
       (item.closest('.option-item') || item).click();
       return true;
     }
-    if (targetLabel === '最近活跃时间' && option === '不限') {
+    if (option === '不限') {
       const active = items.find(node => {
         const icon = node.querySelector('.active-item_icon');
         return icon && getComputedStyle(icon).display !== 'none';
@@ -281,10 +288,10 @@ async function select51JobPopoverOption(page, label, value) {
       return true;
     }
     return false;
-  }, { id: popoverId, option: target, targetLabel: label });
+  }, { id: popoverId, option: target });
   if (!selected) return false;
   await new Promise(resolve => setTimeout(resolve, 120));
-  if (label === '最近活跃时间' && target === '不限') return true;
+  if (target === '不限') return true;
   return page.evaluate(({ id, option }) => {
     const reference = document.querySelector(`[aria-describedby="${id}"]`);
     const label = (reference?.textContent || '').replace(/\s+/g, '');
@@ -375,7 +382,7 @@ async function apply51JobFilters(page) {
   const saved = spec.filters || {};
   // A previous position may have left selections in the same browser tab.
   // Clear known single-choice controls before applying this position.
-  for (const label of ['工作年限', '年龄', '学历要求', '学校性质', '期望月薪', '最近活跃时间']) {
+  for (const label of ['工作年限', '年龄', '性别', '学历要求', '学校性质', '求职状态', '期望月薪', '最近活跃时间']) {
     try { await select51JobPopoverOption(page, label, '不限'); } catch {}
   }
   const recentActiveTime = saved.recent_active_time || activeDaysTo51JobLabel(options.activeDays);
@@ -747,9 +754,21 @@ async function setBrowserWindowState(browserOrPage, state = 'minimized', manualC
         }
       }
       session = await target.createCDPSession();
-      const { windowId } = await session.send('Browser.getWindowForTarget');
+      const { windowId, bounds } = await session.send('Browser.getWindowForTarget');
       if (windowId !== undefined) {
-        await session.send('Browser.setWindowBounds', { windowId, bounds: { windowState: state } });
+        if (state === 'minimized' && bounds && (bounds.windowState === 'maximized' || bounds.windowState === 'fullscreen')) {
+          await session.send('Browser.setWindowBounds', { windowId, bounds: { windowState: 'normal' } }).catch(() => {});
+        }
+        try {
+          await session.send('Browser.setWindowBounds', { windowId, bounds: { windowState: state } });
+        } catch (boundErr) {
+          if (state === 'minimized') {
+            await session.send('Browser.setWindowBounds', { windowId, bounds: { windowState: 'normal' } }).catch(() => {});
+            await session.send('Browser.setWindowBounds', { windowId, bounds: { windowState: state } });
+          } else {
+            throw boundErr;
+          }
+        }
         return true;
       }
     } catch (e) {
@@ -948,7 +967,7 @@ function matches51JobDemographics(candidate, filters = {}) {
     .join(' · ')
     .replace(/\s+/g, ' ');
   const requestedGender = String(filters.gender || '').trim();
-  if (requestedGender) {
+  if (requestedGender && requestedGender !== '不限') {
     let gender = text.match(/(?:^|[\s·|,，;；])([男女])(?=$|[\s·|,，;；])/)?.[1] ||
       text.match(/(?:性别[：:]?\s*)(男|女)/)?.[1] || '';
     if (!gender) {
@@ -958,7 +977,7 @@ function matches51JobDemographics(candidate, filters = {}) {
     if (!gender || gender !== requestedGender) return false;
   }
   const requestedAge = String(filters.age || '').trim().replace(/[—–~～至]/g, '-');
-  if (requestedAge) {
+  if (requestedAge && requestedAge !== '不限') {
     const age = Number(text.match(/(?:^|[^\d])(\d{1,2})\s*岁/)?.[1]);
     if (!age || age < 16 || age > 80) return false;
     const numbers = [...requestedAge.matchAll(/\d+/g)].map(item => Number(item[0]));
@@ -1591,7 +1610,6 @@ async function launchPlatformBrowser(cfg, browserPath, profileDir, dependencies 
     sendMsg('status', { platform: cfg.code, message: `【${cfg.name}】原浏览器连接繁忙，尝试独立检索窗口。` });
   }
   if (existing) {
-    preserveBrowserWindow(existing);
     sendMsg('status', { platform: cfg.code, message: `♻️ 已复用【${cfg.name}】已打开的浏览器窗口` });
     return { browser: existing, reused: true };
   }
@@ -1620,11 +1638,10 @@ async function launchPlatformBrowser(cfg, browserPath, profileDir, dependencies 
   const fallbackProfile = `${profileDir}_automation`;
   const fallbackExisting = await connect(fallbackCfg);
   if (fallbackExisting) {
-    preserveBrowserWindow(fallbackExisting);
     return { browser: fallbackExisting, reused: true };
   }
   sendMsg('status', { platform: cfg.code, message: `【${cfg.name}】原浏览器配置已被占用，正在打开独立检索窗口；原网页保持打开。首次使用请在新窗口登录。` });
-  const fallbackChild = start(browserPath, browserLaunchArgs(fallbackCfg, fallbackProfile, true),
+  const fallbackChild = start(browserPath, browserLaunchArgs(fallbackCfg, fallbackProfile, options.testLoginPlatform === cfg.code),
     { detached: true, stdio: 'ignore', windowsHide: true });
   fallbackChild.unref();
   for (let i = 0; i < 20; i++) {
@@ -1667,9 +1684,6 @@ async function scrapePlatform(platformKey, browserPath, targetCount, keywordPlan
   let dedicatedSearchPage = null;
   // 断开自动化连接后，后台浏览器仍保留给 HR 使用，Node 进程才能正常退出。
   try {
-  // 等待浏览器进程就绪
-  await new Promise(r => setTimeout(r, 1500));
-
   // 检索始终使用新标签，避免启动与连接的竞态误导航 HR 原有的页面。
   const domainHint = cfg.code === '51job' ? '51job.com' : cfg.code;
   const isLoginTest = options.testLoginPlatform === cfg.code;
@@ -1678,6 +1692,7 @@ async function scrapePlatform(platformKey, browserPath, targetCount, keywordPlan
   if (!isLoginTest) {
     page = await openDedicatedSearchPage(browser, cfg);
     dedicatedSearchPage = page;
+    await setBrowserWindowState(page, 'minimized');
   } else {
     const existingPlatformPage = pages.find(p => {
       const u = p.url() || '';
@@ -1685,6 +1700,9 @@ async function scrapePlatform(platformKey, browserPath, targetCount, keywordPlan
     });
     page = existingPlatformPage || await openDedicatedSearchPage(browser, cfg);
   }
+
+  // 等待浏览器进程就绪
+  await new Promise(r => setTimeout(r, 800));
 
   if (options.testLoginPlatform !== cfg.code) {
     backgroundSession = await keepPageActiveInBackground(page);
@@ -2001,6 +2019,9 @@ async function autoNavigateAndSearch(page, platformKey, cfg, searchKeyword) {
           await new Promise(r => setTimeout(r, 2000));
         }
       } catch (e) {}
+    }
+    if (!isLoginTest) {
+      await setBrowserWindowState(page, 'minimized');
     }
     return true;
   } catch (err) {

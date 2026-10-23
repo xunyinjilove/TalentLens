@@ -178,7 +178,8 @@
 
                 <div v-if="form.enableGenderFilter" class="tm-field">
                   <label>性别要求（根据头像角标 ♂/♀ 或称谓识别）</label>
-                  <el-select v-model="form.allowedGender" placeholder="请选择" style="width: 100%" :disabled="running">
+                  <el-select v-model="form.allowedGender" clearable placeholder="不限" style="width: 100%" :disabled="running">
+                    <el-option label="不限" value="" />
                     <el-option label="男" value="男" />
                     <el-option label="女" value="女" />
                   </el-select>
