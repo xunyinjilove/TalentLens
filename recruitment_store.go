@@ -496,6 +496,11 @@ func (a *App) syncRecruitmentResume(resume *Resume) {
 	if db == nil || resume == nil {
 		return
 	}
+	if resume.ProjectID != "" {
+		if proj := a.GetProject(resume.ProjectID); proj != nil {
+			a.syncRecruitmentProject(proj)
+		}
+	}
 	raw, err := json.Marshal(resume)
 	if err != nil {
 		return
@@ -506,6 +511,10 @@ func (a *App) syncRecruitmentResume(resume *Resume) {
 	}
 	defer tx.Rollback()
 	versionID := "legacy_resume_" + resume.ID
+	var existingVersionID string
+	if err := tx.QueryRow(`SELECT id FROM resume_versions WHERE legacy_resume_id=? LIMIT 1`, resume.ID).Scan(&existingVersionID); err == nil && existingVersionID != "" {
+		versionID = existingVersionID
+	}
 	stamp := resume.CreatedAt.Format(time.RFC3339Nano)
 	now := time.Now().UTC().Format(time.RFC3339Nano)
 	candidateID, sourceID, identityErr := upsertRecruitmentCandidate(tx, resume, stamp, now)
@@ -517,17 +526,22 @@ func (a *App) syncRecruitmentResume(resume *Resume) {
 	if _, err = tx.Exec(`INSERT INTO resume_versions
 		(id,candidate_id,source_id,legacy_resume_id,file_path,file_name,content,content_sha256,raw_json,created_at)
 		VALUES(?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET
+		candidate_id=excluded.candidate_id,source_id=excluded.source_id,legacy_resume_id=excluded.legacy_resume_id,
 		file_path=excluded.file_path,file_name=excluded.file_name,content=excluded.content,
 		content_sha256=excluded.content_sha256,raw_json=excluded.raw_json`,
 		versionID, candidateID, sourceID, resume.ID, resume.FilePath, resume.FileName,
 		resume.Content, hex.EncodeToString(hash[:]), string(raw), stamp); err != nil {
+		fmt.Fprintf(os.Stderr, "[RecruitmentStore] resume_versions sync failed: %v\n", err)
 		return
 	}
 	if resume.ProjectID != "" {
+		_, _ = tx.Exec(`INSERT OR IGNORE INTO projects(id,name,legacy_json,created_at,updated_at) VALUES(?,?,'{}',?,?)`,
+			resume.ProjectID, resume.ProjectID, stamp, now)
 		linkID := "legacy_link_" + resume.ProjectID + "_" + resume.ID
 		if _, err = tx.Exec(`INSERT OR IGNORE INTO project_candidates
 			(id,project_id,candidate_id,stage,created_at,updated_at)
 			VALUES(?,?,?,?,?,?)`, linkID, resume.ProjectID, candidateID, "new", stamp, now); err != nil {
+			fmt.Fprintf(os.Stderr, "[RecruitmentStore] project_candidates sync failed: %v\n", err)
 			return
 		}
 		if err = tx.QueryRow(`SELECT id FROM project_candidates WHERE project_id=? AND candidate_id=?`, resume.ProjectID, candidateID).Scan(&linkID); err != nil {

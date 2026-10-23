@@ -372,3 +372,46 @@ func TestSearchExtraKeywordsAndActivityLabelMapping(t *testing.T) {
 		}
 	}
 }
+
+func TestPreviewBatchOutreachForeignKeySelfHealing(t *testing.T) {
+	app := NewApp()
+	app.dataDirOverride = t.TempDir()
+	defer app.closeRecruitmentDB()
+
+	// 1. 先初始化 SQLite（此时 migration_meta 已标记 legacy_json_v1=complete），然后关闭连接模拟重启应用后尚未触发 SQLite 的状态
+	if _, err := app.getRecruitmentDB(); err != nil {
+		t.Fatalf("初始化数据库失败: %v", err)
+	}
+	app.closeRecruitmentDB()
+
+	// 2. 在 recruitmentDB == nil 时创建新项目与简历（仅落盘到 JSON，SQLite 中尚无 projects 和 project_candidates 记录）
+	project := app.CreateProject("大客户销售经理", "销售部", 1, "HR", "", &JobConfig{
+		Title:          "大客户销售经理",
+		RequiredSkills: []string{"体外诊断", "直销"},
+	})
+	res1 := &Resume{
+		ID:                  "51job_1792725305405_0_0",
+		ProjectID:           project.ID,
+		FileName:            "【前程无忧】高先生_大客户销售经理.txt",
+		Status:              "pending",
+		SourcePlatform:      "51job",
+		PlatformCandidateID: "905922586",
+		URL:                 "https://ehire.51job.com/Revision/talent/resume/detail?contentType=1&resumeId=905922586",
+		Content:             "姓名 / 称谓：高先生\n工作经历：负责市场开发与大客户维护",
+	}
+	app.saveResume(res1)
+	project.ResumeIDs = []string{res1.ID}
+	app.saveProject(project)
+
+	// 3. 调用 PreviewBatchOutreach，验证自动自愈补齐 projects 与 project_candidates 外键，绝不触发 FOREIGN KEY constraint failed (787)
+	batch, err := app.PreviewBatchOutreach(project.ID, nil, "template")
+	if err != nil {
+		t.Fatalf("PreviewBatchOutreach 不应触发外键约束错误: %v", err)
+	}
+	if len(batch.Items) != 1 {
+		t.Fatalf("应包含 1 位候选人，实际: %d", len(batch.Items))
+	}
+	if batch.Items[0].ProjectCandidateID == res1.ID {
+		t.Fatalf("ProjectCandidateID 应为有效的 project_candidates.id，而非裸 resume.ID: %s", batch.Items[0].ProjectCandidateID)
+	}
+}
