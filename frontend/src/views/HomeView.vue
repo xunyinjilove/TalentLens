@@ -249,13 +249,13 @@
 
                   <!-- 右上角：综合评分 -->
                   <div v-if="resumeStore.selectedResume.status === 'done' && resumeStore.selectedResume.analysis" class="hero-score-section">
-                    <div class="hero-score-box" :class="resumeStore.selectedResume.analysis.rankEligible && !resumeStore.selectedResume.analysis.radarStale ? getScoreClass(resumeStore.selectedResume.score) : ''">
-                      <strong class="hero-score-num">{{ resumeStore.selectedResume.analysis.rankEligible && !resumeStore.selectedResume.analysis.radarStale ? (animatedDetailScore || resumeStore.selectedResume.score) : (resumeStore.selectedResume.analysis.abilityScore ?? resumeStore.selectedResume.score ?? '—') }}</strong>
-                      <span class="hero-score-label">{{ resumeStore.selectedResume.analysis.radarStale ? '待复核 · 旧分参考' : resumeStore.selectedResume.analysis.rankEligible ? '岗位依据分' : `暂评分 · 覆盖 ${Math.round(radarCoverageRatio * 100)}%` }}</span>
+                    <div class="hero-score-box" :class="!resumeStore.selectedResume.analysis.radarStale ? getScoreClass(resumeStore.selectedResume.score) : ''">
+                      <strong class="hero-score-num">{{ !resumeStore.selectedResume.analysis.radarStale ? (animatedDetailScore || resumeStore.selectedResume.score) : (resumeStore.selectedResume.analysis.abilityScore ?? resumeStore.selectedResume.score ?? '—') }}</strong>
+                      <span class="hero-score-label">{{ resumeStore.selectedResume.analysis.radarStale ? '待复核 · 旧分参考' : radarCoverageRatio < 1 ? `岗位评分 · 覆盖 ${Math.round(radarCoverageRatio * 100)}%` : '岗位依据分' }}</span>
                     </div>
                     <div class="hero-decision-badge-wrap">
-                      <span class="hero-rec-badge" :class="resumeStore.selectedResume.analysis.rankEligible && !resumeStore.selectedResume.analysis.radarStale ? resumeStore.selectedResume.analysis.recommendation : ''">
-                        {{ resumeStore.selectedResume.analysis.radarStale ? `待复核 · 原结论：${$t(`analysis.recommendations.${resumeStore.selectedResume.analysis.recommendation || 'consider'}`)}` : resumeStore.selectedResume.analysis.rankEligible ? $t(`analysis.recommendations.${resumeStore.selectedResume.analysis.recommendation || 'consider'}`) : radarScoreBounds ? `区间 ${radarScoreBounds}` : '证据待补' }}
+                      <span class="hero-rec-badge" :class="!resumeStore.selectedResume.analysis.radarStale ? resumeStore.selectedResume.analysis.recommendation : ''">
+                        {{ resumeStore.selectedResume.analysis.radarStale ? `待复核 · 原结论：${$t(`analysis.recommendations.${resumeStore.selectedResume.analysis.recommendation || 'consider'}`)}` : $t(`analysis.recommendations.${resumeStore.selectedResume.analysis.recommendation || 'consider'}`) }}
                       </span>
                     </div>
                   </div>
@@ -342,7 +342,7 @@
                   <el-icon><Histogram /></el-icon>
                   <span>能力维度拆解</span>
                   <span class="subtab-badge info">
-                    {{ resumeStore.selectedResume.analysis.rankEligible && !resumeStore.selectedResume.analysis.radarStale ? `岗位 ${resumeStore.selectedResume.analysis.abilityScore} 分` : '待核实' }}
+                    {{ !resumeStore.selectedResume.analysis.radarStale ? `岗位 ${resumeStore.selectedResume.analysis.abilityScore ?? resumeStore.selectedResume.score} 分` : '待复核' }}
                   </span>
                 </button>
 
@@ -482,13 +482,13 @@
                       <div class="radar-meta-row">
                         <span class="coverage-pill" :class="{ 'is-eligible': isRankEligible }">
                           已知指标覆盖率: <strong>{{ (radarCoverageRatio * 100).toFixed(1) }}%</strong>
-                          <span v-if="isRankEligible" class="eligible-badge">（达排名门槛 ≥80%）</span>
-                          <span v-else class="ineligible-badge">（待核实，不参与正式排名）</span>
+                          <span v-if="radarCoverageRatio >= 0.8" class="eligible-badge">（达核实门槛 ≥80%）</span>
+                          <span v-else class="eligible-badge">（含待核查项评分，已计入总分与排名）</span>
                         </span>
                         <span class="bounds-text" v-if="radarScoreBounds">全维度得分区间: {{ radarScoreBounds }}</span>
                         <span v-if="resumeStore.selectedResume.analysis.holisticMatchScore" class="bounds-text">综合匹配参考：{{ resumeStore.selectedResume.analysis.holisticMatchScore }} 分</span>
                       </div>
-                      <p v-if="!isRankEligible && !resumeStore.selectedResume.analysis.radarStale && missingRadarMetrics.length" class="score-explanation">待核实指标：{{ missingRadarMetrics.join('、') }}</p>
+                      <p v-if="!resumeStore.selectedResume.analysis.radarStale && missingRadarMetrics.length" class="score-explanation">待核查指标：{{ missingRadarMetrics.join('、') }}</p>
                     </div>
 
                     <div class="competency-split-layout">
@@ -519,7 +519,7 @@
                           <div class="criterion-name-col">
                             <span class="criterion-name">{{ item.criterion }}</span>
                             <span class="criterion-level-badge" :class="item.isUnknown ? 'level-unknown' : ('level-' + item.level)">
-                              {{ item.isUnknown ? '未提及 (待核查)' : (item.level + '/4 · ' + (['明确未达标', '相关线索', '参与', '独立完成', '主导并可复盘'][item.level] || '待核实')) }}
+                              {{ item.isUnknown ? `${item.level}/4 · ${item.level > 0 ? '背景线索 (待核查)' : '简历未提及 (待核查)'}` : (item.level + '/4 · ' + (['明确未达标', '相关线索', '参与', '独立完成', '主导并可复盘'][item.level] || '已核实')) }}
                             </span>
                           </div>
                           <div v-if="item.evidence" class="criterion-evidence-col">
@@ -1131,9 +1131,8 @@ const radarCoverageRatio = computed(() => {
 
 const isRankEligible = computed(() => {
   const a = resumeStore.selectedResume?.analysis
-  if (a?.radarStale) return false
-  if (a && typeof a.rankEligible === 'boolean') return a.rankEligible
-  return radarCoverageRatio.value >= 0.8
+  if (!a || a.radarStale) return false
+  return true
 })
 
 const radarScoreBounds = computed(() => {
@@ -1167,7 +1166,7 @@ const radarIndicators = computed(() => {
 })
 
 const radarCandidateValues = computed(() => {
-  return radarDisplayChecks.value.map(c => c.isUnknown ? null : c.level)
+  return radarDisplayChecks.value.map(c => c.level)
 })
 
 // 左右面板拖拽调整宽度 (Splitter Resizer)
@@ -2153,7 +2152,7 @@ const sortedResumes = computed(() => {
     if (a.status === 'done' && b.status !== 'done') return -1
     if (a.status !== 'done' && b.status === 'done') return 1
     if (a.status === 'done' && b.status === 'done') {
-      if (!!a.analysis?.rankEligible !== !!b.analysis?.rankEligible) return a.analysis?.rankEligible ? -1 : 1
+      if (!!a.analysis?.radarStale !== !!b.analysis?.radarStale) return a.analysis?.radarStale ? 1 : -1
       return (b.score || 0) - (a.score || 0)
     }
     if (a.status === 'analyzing' && b.status === 'pending') return -1
@@ -2165,7 +2164,7 @@ const sortedResumes = computed(() => {
 // 排名按综合得分降序排列
 const rankedResumes = computed(() => {
   return resumeStore.resumes
-    .filter(r => r.status === 'done' && r.analysis?.rankEligible && !r.analysis?.radarStale)
+    .filter(r => r.status === 'done' && r.analysis && !r.analysis.radarStale)
     .sort((a, b) => (b.score || 0) - (a.score || 0))
 })
 

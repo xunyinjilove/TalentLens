@@ -51,17 +51,33 @@ func locateEvidence(text, evidence string) string {
 func validateCompetencyEvidence(checks []CoreCriterionCheck, resume *Resume) {
 	for i := range checks {
 		check := &checks[i]
+		if check.Level < 0 || check.Level > 4 {
+			check.Level = 0
+		}
+		rawEv := strings.TrimSpace(check.Evidence)
 		evidence := locateEvidence(resume.Content, check.Evidence)
 		if evidence == "" {
 			evidence = locateEvidence(resume.AttachmentContent, check.Evidence)
 		}
-		if check.Level < 0 || check.Level > 4 || evidence == "" {
+		if rawEv != "" && evidence != "" {
+			check.Evidence = evidence
+			check.EvidenceStatus = "known"
+		} else if rawEv != "" && evidence == "" {
+			// 模型引用了简历中不存在的伪造原文，重置为 0 分待核查
 			check.Level, check.Evidence = 0, ""
 			check.EvidenceStatus = "unknown"
 			check.Assessment = "未找到可定位的简历原文，待补全材料或面试核实"
 		} else {
-			check.Evidence = evidence
-			check.EvidenceStatus = "known"
+			// 简历未直接提及原文引用，保留模型结合行业/公司/岗位背景给出的 0~4 分评估，标记 unknown 待核查
+			check.Evidence = ""
+			check.EvidenceStatus = "unknown"
+			if strings.TrimSpace(check.Assessment) == "" {
+				if check.Level > 0 {
+					check.Assessment = "简历未直接提及，已结合行业/公司背景评估得分，待面试核实"
+				} else {
+					check.Assessment = "简历未提及相关技能或背景线索，待面试核实"
+				}
+			}
 		}
 	}
 }
@@ -205,12 +221,12 @@ func (a *App) analyzeCompetencies(resume *Resume, job *JobConfig, cfg *AIConfig)
 	if len([]rune(material)) > 28000 {
 		material = string([]rune(material)[:28000])
 	}
-	prompt := fmt.Sprintf(`你是招聘能力证据分析助手。只根据简历原文分析工作、项目和学习经历，不替 HR 作准入结论。
+	prompt := fmt.Sprintf(`你是招聘能力证据分析助手。根据简历内容分析工作、项目和学习经历，不替 HR 作准入结论。
 输出合法 JSON，包含 core_criterion_checks 和 experience_competencies 两个数组。
 core_criterion_checks 必须逐项对应岗位评分卡，criterion 原样复制。experience_competencies 从真实经历提炼 3–6 个补充能力维度；材料不足则少填或留空，不为凑数编造。
 每项结构：{"criterion":"能力名称","level":1,"evidence":"原文中的连续引用","assessment":"基于该段经历的判断和待核实之处"}。
-等级：0有原文明确证明未达到最低要求、1有相关经历线索、2参与、3独立完成、4主导且有可复盘成果。仅有职位名称最多给1级；不能从算法工程师职位推断会Python、PyTorch等未出现的技能。不得用年限推断主导能力。无原文依据的岗位评分项标记 unknown，level 字段暂填0但不可计为已知。
-evidence 必须逐字引用材料中的连续片段，不能自行总结、拼接或补写；不要输出代码块。
+等级（每项均须给出 0–4 分）：0完全无关或明确未达最低要求、1有行业/公司/相关经历背景线索、2参与实践、3独立完成、4主导且有可复盘成果。
+若简历有直接原文依据，evidence 必须逐字引用材料中的连续片段（不能自行总结、拼接或补写）；若简历未直接提及某项指标，evidence 填空字符串 ""，但仍须结合候选人所在行业、公司业务与职位经历背景综合评估给出 0–4 分（完全无关打 0 分，有相关行业/公司背景线索打 1–2 分），并在 assessment 中说明背景评估依据与面试待核实点；不要输出代码块。
 
 ---
 

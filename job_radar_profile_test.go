@@ -38,11 +38,11 @@ func TestBatchRadarFixesExistingMetricsAndRanksOnlyWithEnoughEvidence(t *testing
 	if !result.RankEligible || result.ScoreBasis != "rubric" || result.RadarCoverage < 0.8 {
 		t.Fatalf("five of six known axes should yield an official score: %+v", result)
 	}
-	checks[1].EvidenceStatus, checks[1].Evidence = "unknown", ""
+	checks[1].EvidenceStatus, checks[1].Evidence, checks[1].Level = "unknown", "", 1
 	result = &AnalysisResult{CoreCriterionChecks: checks}
 	a.applyJobDecision(result, &fixed.JobConfig, nil)
-	if result.RankEligible || result.ScoreBasis != "provisional" || result.RadarCoverage >= 0.8 {
-		t.Fatalf("four of six known axes must remain provisional: %+v", result)
+	if !result.RankEligible || result.ScoreBasis != "provisional" || result.RadarCoverage >= 0.8 {
+		t.Fatalf("four of six known axes should remain rank-eligible with provisional basis: %+v", result)
 	}
 	again, err := a.ensureBatchJobRadar(p.ID, nil)
 	if err != nil || again.JobConfig.RadarProfileVersion != 1 {

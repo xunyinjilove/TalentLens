@@ -99,14 +99,14 @@ const props = defineProps<{
   profileConfirmed?: boolean
 }>()
 
-const isOfficialScore = computed(() => !!props.resume.analysis?.rankEligible && !props.resume.analysis?.radarStale)
-const isProvisionalScore = computed(() => !props.resume.analysis?.radarStale && ((props.resume.analysis?.radarCoverage || 0) > 0 || typeof props.resume.analysis?.abilityScore === 'number'))
+const isOfficialScore = computed(() => !props.resume.analysis?.radarStale)
 const resultCaptionText = computed(() => {
-  if (isOfficialScore.value) return '岗位依据分'
   if (props.resume.analysis?.radarStale) return `待复核 · 旧分 ${props.resume.analysis?.abilityScore ?? props.resume.score ?? '—'}`
-  if (isProvisionalScore.value) return `暂评 ${props.resume.analysis?.abilityScore ?? props.resume.score ?? '—'} · 覆盖 ${Math.round((props.resume.analysis?.radarCoverage || 0) * 100)}%`
-  if (!props.profileConfirmed) return '岗位指标待固定'
-  return '原文证据待补'
+  const cov = props.resume.analysis?.radarCoverage
+  if (typeof cov === 'number' && cov < 1) {
+    return `岗位评分 · 覆盖 ${Math.round(cov * 100)}%`
+  }
+  return '岗位依据分'
 })
 
 const failureSummary = computed(() => {
