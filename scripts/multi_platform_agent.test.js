@@ -518,6 +518,12 @@ test('search skips cards without verifiable filters', async () => {
     querySelector: selector => selector.includes('.firstline .name') ? { innerText: '王女士' } : null,
     querySelectorAll: () => [], getAttribute: () => null
   };
+  const unknownCityCard = {
+    offsetParent: {}, getClientRects: () => [1],
+    innerText: '李女士 28岁 本科 4年经验 临床项目经理，负责临床项目交付',
+    querySelector: selector => selector.includes('.firstline .name') ? { innerText: '李女士' } : null,
+    querySelectorAll: () => [], getAttribute: () => null
+  };
   global.document = { querySelectorAll: () => [card] };
   const page = { evaluate: async (fn, ...args) => fn(...args), frames: () => [] };
   const good = await agent.extractCandidatesAcrossFrames(page, 10, '临床项目经理', 'test', [], [], { city: '上海', exp: '3年', edu: '本科' });
@@ -528,6 +534,9 @@ test('search skips cards without verifiable filters', async () => {
   assert.equal(unrestricted.length, 1);
   assert.equal(badCity.length, 0);
   assert.equal(badExp.length, 0);
+  global.document = { querySelectorAll: () => [unknownCityCard] };
+  const unknownNotMisfiltered = await agent.extractCandidatesAcrossFrames(page, 10, '临床项目经理', '前程无忧', [], [], { city: '北京', workCity: '上海', exp: '3年', edu: '本科' });
+  assert.equal(unknownNotMisfiltered.length, 1);
   delete global.document;
 });
 

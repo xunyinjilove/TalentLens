@@ -11,10 +11,13 @@ export interface TalentCandidate {
   name: string
   source: string
   resumeId: string
+  resumeFileName: string
   profileUrl: string
   analysisStatus: string
   abilityScore: number
   matchScore: number
+  rankEligible: boolean
+  radarStale: boolean
   currentRole: string
   education?: string
   workYears?: string
@@ -25,6 +28,8 @@ export interface TalentCandidate {
   owner: string
   nextActionAt: string
   createdAt: string
+  lastFollowUpAt: string
+  hiredAt: string
 }
 
 export interface RecruitmentDashboard {
@@ -32,7 +37,32 @@ export interface RecruitmentDashboard {
   candidatesThisWeek: number
   pendingFollowUps: number
   upcomingInterviews: number
+  pendingInterviewArrangements: number
+  hiresThisMonth: number
   stageCounts: Record<string, number>
+}
+
+export interface TodayTodo {
+  id: string
+  title: string
+  completed: boolean
+  createdAt: string
+  completedAt: string
+}
+
+export interface RecruitmentActivity {
+  id: string
+  projectCandidateId: string
+  projectId: string
+  candidateName: string
+  projectName: string
+  kind: 'followup' | 'interview'
+  eventType: string
+  toStage: string
+  note: string
+  occurredAt: string
+  startsAt: string
+  method: string
 }
 
 export interface RecruitmentInterview {
@@ -73,7 +103,7 @@ export const stageLabels: Record<string, string> = {
 
 const emptyDashboard = (): RecruitmentDashboard => ({
   openProjects: 0, candidatesThisWeek: 0, pendingFollowUps: 0,
-  upcomingInterviews: 0, stageCounts: {}
+  upcomingInterviews: 0, pendingInterviewArrangements: 0, hiresThisMonth: 0, stageCounts: {}
 })
 
 async function recruitmentAPI(): Promise<any> {
@@ -90,6 +120,8 @@ export const useRecruitmentStore = defineStore('recruitment', () => {
   const taskCenterOpen = ref(false)
   const dismissedSourcingTaskIds = new Set<string>()
   const dashboard = ref<RecruitmentDashboard>(emptyDashboard())
+  const todayTodos = ref<TodayTodo[]>([])
+  const recentActivities = ref<RecruitmentActivity[]>([])
   const loading = ref(false)
   const error = ref('')
   let subscribed = false
@@ -115,6 +147,42 @@ export const useRecruitmentStore = defineStore('recruitment', () => {
     } catch (err: any) {
       error.value = err?.message || String(err)
     }
+  }
+
+  async function loadTodayTodos() {
+    try {
+      const api: any = await recruitmentAPI()
+      todayTodos.value = await api.ListTodayTodos() || []
+    } catch (err: any) {
+      error.value = err?.message || String(err)
+    }
+  }
+
+  async function loadRecentActivities() {
+    try {
+      const api: any = await recruitmentAPI()
+      recentActivities.value = await api.ListRecentRecruitmentActivities(8) || []
+    } catch (err: any) {
+      error.value = err?.message || String(err)
+    }
+  }
+
+  async function addTodayTodo(title: string) {
+    const api: any = await recruitmentAPI()
+    await api.AddTodayTodo(title)
+    await loadTodayTodos()
+  }
+
+  async function setTodayTodoCompleted(id: string, completed: boolean) {
+    const api: any = await recruitmentAPI()
+    await api.SetTodayTodoCompleted(id, completed)
+    await loadTodayTodos()
+  }
+
+  async function deleteTodayTodo(id: string) {
+    const api: any = await recruitmentAPI()
+    await api.DeleteTodayTodo(id)
+    await loadTodayTodos()
   }
 
   async function loadInterviews(projectId = '') {
@@ -166,7 +234,7 @@ export const useRecruitmentStore = defineStore('recruitment', () => {
   async function updateFollowUp(item: TalentCandidate, stage: string, owner: string, nextActionAt: string, note: string) {
     const api: any = await recruitmentAPI()
     await api.UpdateCandidateFollowUp(item.projectCandidateId, stage, owner, nextActionAt, note, 'HR')
-    await Promise.all([loadCandidates(), loadDashboard()])
+    await Promise.all([loadCandidates(), loadDashboard(), loadRecentActivities()])
   }
 
   async function batchUpdateStage(projectCandidateIds: string[], stage: string, note = '') {
@@ -178,19 +246,19 @@ export const useRecruitmentStore = defineStore('recruitment', () => {
         await api.UpdateCandidateFollowUp(id, stage, '', '', note, 'HR')
       }
     }
-    await Promise.all([loadCandidates(), loadDashboard()])
+    await Promise.all([loadCandidates(), loadDashboard(), loadRecentActivities()])
   }
 
   async function saveInterview(item: RecruitmentInterview) {
     const api: any = await recruitmentAPI()
     await api.SaveRecruitmentInterview(item)
-    await Promise.all([loadInterviews(), loadDashboard()])
+    await Promise.all([loadInterviews(), loadDashboard(), loadRecentActivities()])
   }
 
   async function cancelInterview(id: string) {
     const api: any = await recruitmentAPI()
     await api.CancelRecruitmentInterview(id)
-    await Promise.all([loadInterviews(), loadDashboard()])
+    await Promise.all([loadInterviews(), loadDashboard(), loadRecentActivities()])
   }
 
   async function moveCandidate(projectCandidateId: string, targetProjectId: string) {
@@ -237,8 +305,9 @@ export const useRecruitmentStore = defineStore('recruitment', () => {
     }
   }
 
-  return { candidates, interviews, dashboard, sourcingTasks, taskCenterOpen, loading, error, loadCandidates,
-    loadDashboard, loadInterviews, loadSourcingTasks, resumeSourcingTask, stopSourcingTask,
+  return { candidates, interviews, dashboard, todayTodos, recentActivities, sourcingTasks, taskCenterOpen, loading, error, loadCandidates,
+    loadDashboard, loadTodayTodos, loadRecentActivities, addTodayTodo, setTodayTodoCompleted, deleteTodayTodo,
+    loadInterviews, loadSourcingTasks, resumeSourcingTask, stopSourcingTask,
     deleteSourcingTask, clearFinishedSourcingTasks,
     updateFollowUp, batchUpdateStage, saveInterview, cancelInterview, moveCandidate, archiveCandidates, initEvents }
 })

@@ -55,11 +55,13 @@ func validateCompetencyEvidence(checks []CoreCriterionCheck, resume *Resume) {
 		if evidence == "" {
 			evidence = locateEvidence(resume.AttachmentContent, check.Evidence)
 		}
-		if check.Level < 0 || check.Level > 4 || (check.Level > 0 && evidence == "") {
+		if check.Level < 0 || check.Level > 4 || evidence == "" {
 			check.Level, check.Evidence = 0, ""
+			check.EvidenceStatus = "unknown"
 			check.Assessment = "未找到可定位的简历原文，待补全材料或面试核实"
 		} else {
 			check.Evidence = evidence
+			check.EvidenceStatus = "known"
 		}
 	}
 }
@@ -161,16 +163,7 @@ func normalizeCompetencies(details *AnalysisResult, resume *Resume, job *JobConf
 				break
 			}
 		}
-		// 2. 模糊子串双向包含匹配
-		if matched == nil {
-			for i := range allChecks {
-				c := strings.TrimSpace(allChecks[i].Criterion)
-				if c != "" && (strings.Contains(c, m) || strings.Contains(m, c)) {
-					matched = &allChecks[i]
-					break
-				}
-			}
-		}
+		// 不用模糊子串把旧画像证据借给新维度。
 		if matched != nil {
 			lvl := matched.Level
 			if lvl < 0 {
@@ -183,17 +176,19 @@ func normalizeCompetencies(details *AnalysisResult, resume *Resume, job *JobConf
 				assessment = "简历未体现相关技能经历或客观依据"
 			}
 			checks = append(checks, CoreCriterionCheck{
-				Criterion:  m,
-				Level:      lvl,
-				Evidence:   matched.Evidence,
-				Assessment: assessment,
+				Criterion:      m,
+				Level:          lvl,
+				Evidence:       matched.Evidence,
+				Assessment:     assessment,
+				EvidenceStatus: matched.EvidenceStatus,
 			})
 		} else {
 			checks = append(checks, CoreCriterionCheck{
-				Criterion:  m,
-				Level:      0,
-				Evidence:   "",
-				Assessment: "简历未体现相关技能经历或客观依据",
+				Criterion:      m,
+				Level:          0,
+				Evidence:       "",
+				Assessment:     "简历未体现相关技能经历或客观依据",
+				EvidenceStatus: "unknown",
 			})
 		}
 	}
@@ -214,7 +209,7 @@ func (a *App) analyzeCompetencies(resume *Resume, job *JobConfig, cfg *AIConfig)
 输出合法 JSON，包含 core_criterion_checks 和 experience_competencies 两个数组。
 core_criterion_checks 必须逐项对应岗位评分卡，criterion 原样复制。experience_competencies 从真实经历提炼 3–6 个补充能力维度；材料不足则少填或留空，不为凑数编造。
 每项结构：{"criterion":"能力名称","level":1,"evidence":"原文中的连续引用","assessment":"基于该段经历的判断和待核实之处"}。
-等级：0未体现、1有相关经历线索、2参与、3独立完成、4主导且有可复盘成果。仅有职位名称最多给1级；不能从算法工程师职位推断会Python、PyTorch等未出现的技能。不得用年限推断主导能力。无原文依据的岗位评分项给0并说明缺少什么。
+等级：0有原文明确证明未达到最低要求、1有相关经历线索、2参与、3独立完成、4主导且有可复盘成果。仅有职位名称最多给1级；不能从算法工程师职位推断会Python、PyTorch等未出现的技能。不得用年限推断主导能力。无原文依据的岗位评分项标记 unknown，level 字段暂填0但不可计为已知。
 evidence 必须逐字引用材料中的连续片段，不能自行总结、拼接或补写；不要输出代码块。
 
 ---
@@ -238,7 +233,8 @@ evidence 必须逐字引用材料中的连续片段，不能自行总结、拼�
 func (a *App) completeInitialCompetencies(result *AnalysisResult, resume *Resume, job *JobConfig, cfg *AIConfig) {
 	hadInput := len(result.CoreCriterionChecks) > 0 || len(result.ExperienceCompetencies) > 0
 	normalizeCompetencies(result, resume, job)
-	if hadInput && len(result.ExperienceCompetencies) >= 3 {
+	minimumChecks := min(3, len(getUnifiedJobMetrics(job)))
+	if hadInput && minimumChecks > 0 && len(result.ExperienceCompetencies) >= minimumChecks {
 		return
 	}
 	if a.ctx != nil {

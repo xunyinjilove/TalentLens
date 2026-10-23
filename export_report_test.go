@@ -11,7 +11,7 @@ func TestResolveCandidateRadarScore(t *testing.T) {
 	analysis := &AnalysisResult{
 		CoreCriterionChecks: []CoreCriterionCheck{
 			{Criterion: "Vue3", Level: 3, Evidence: "熟练使用Vue3"},
-			{Criterion: "TypeScript", Level: 5, Evidence: "精通TS"}, // 超出上限应被截断为 4
+			{Criterion: "TypeScript", Level: 5, Evidence: "精通TS"}, // 非法等级不得进入正式证据
 			{Criterion: "前端工程化与性能优化", Level: 2, Evidence: "负责Webpack构建"},
 		},
 		ExperienceCompetencies: []CoreCriterionCheck{
@@ -31,28 +31,28 @@ func TestResolveCandidateRadarScore(t *testing.T) {
 		t.Fatalf("vue3 大小写模糊匹配预期 3，实际: %d", lvl)
 	}
 
-	// 3. 截断保护 (>4)
+	// 3. 非法等级不得算作已知
 	lvl, ok = resolveCandidateRadarScore(analysis, "TypeScript")
-	if !ok || lvl != 4 {
-		t.Fatalf("TypeScript 截断预期 4，实际: %d", lvl)
+	if ok || lvl != 0 {
+		t.Fatalf("TypeScript 非法等级应待核实，实际: %d", lvl)
 	}
 
-	// 4. 双向模糊匹配（以“性能优化”匹配“前端工程化与性能优化”）
+	// 4. 不能把相近指标的旧证据借给新指标
 	lvl, ok = resolveCandidateRadarScore(analysis, "性能优化")
-	if !ok || lvl != 2 {
-		t.Fatalf("性能优化 模糊匹配预期 2，实际: %d", lvl)
+	if ok || lvl != 0 {
+		t.Fatalf("性能优化不能模糊借用，实际: %d", lvl)
 	}
 
-	// 5. 截断保护 (<0)
+	// 5. 没有证据的低等级是未知
 	lvl, ok = resolveCandidateRadarScore(analysis, "团队协作与沟通")
-	if !ok || lvl != 0 {
-		t.Fatalf("团队协作与沟通 截断预期 0，实际: %d", lvl)
+	if ok || lvl != 0 {
+		t.Fatalf("团队协作与沟通应待核实，实际: %d", lvl)
 	}
 
-	// 6. 未提及技能指标返回 0
+	// 6. 未提及技能指标为未知
 	lvl, ok = resolveCandidateRadarScore(analysis, "Go后端开发")
-	if !ok || lvl != 0 {
-		t.Fatalf("未提及技能预期 0，实际: %d", lvl)
+	if ok || lvl != 0 {
+		t.Fatalf("未提及技能应待核实，实际: %d", lvl)
 	}
 
 	// 7. 空分析结果返回 false
@@ -212,12 +212,12 @@ func TestExportProjectReportWithRadarMetrics(t *testing.T) {
 	if rowLi[vueIdx] != "1" {
 		t.Fatalf("李四 Vue3 得分预期 1，实际: %s", rowLi[vueIdx])
 	}
-	// TypeScript 未提及，预期为 0
-	if rowLi[tsIdx] != "0" {
-		t.Fatalf("李四 TypeScript 得分预期 0，实际: %s", rowLi[tsIdx])
+	// 未提及是未知，不是能力 0 分。
+	if rowLi[tsIdx] != "待核实" {
+		t.Fatalf("李四 TypeScript 应待核实，实际: %s", rowLi[tsIdx])
 	}
-	if rowLi[perfIdx] != "0" {
-		t.Fatalf("李四 前端性能优化 得分预期 0，实际: %s", rowLi[perfIdx])
+	if rowLi[perfIdx] != "待核实" {
+		t.Fatalf("李四 前端性能优化 应待核实，实际: %s", rowLi[perfIdx])
 	}
 
 	// 验证王五（未分析简历，第 4 行，rows[3]）

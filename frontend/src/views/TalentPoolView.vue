@@ -331,14 +331,14 @@
                 <div class="candidate-target-role">目标：{{ item.jobTitle || item.projectName }}</div>
               </div>
               <div class="candidate-score-wrap">
-                <div v-if="item.analysisStatus === 'done' && (item.abilityScore > 0 || item.matchScore > 0)"
-                  class="candidate-match-ring" :style="{ '--match': `${item.abilityScore || item.matchScore}%` }"
-                  role="img" :aria-label="`综合评分 ${item.abilityScore || item.matchScore} 分`"
-                  :title="`综合评分：${item.abilityScore || item.matchScore} 分`">
-                  <span>{{ item.abilityScore || item.matchScore }}</span>
+                <div v-if="item.rankEligible"
+                  class="candidate-match-ring" :style="{ '--match': `${item.abilityScore}%` }"
+                  role="img" :aria-label="`岗位依据分 ${item.abilityScore} 分`"
+                  :title="`岗位依据分：${item.abilityScore} 分`">
+                  <span>{{ item.abilityScore }}</span>
                 </div>
-                <div v-else class="candidate-match-pending">待评</div>
-                <small>综合评分</small>
+                <div v-else class="candidate-match-pending">{{ item.radarStale ? '待复核' : '待核实' }}</div>
+                <small>岗位依据分</small>
               </div>
             </div>
 
@@ -363,7 +363,7 @@
             </div>
 
             <div class="wb-candidate-foot">
-              <span class="candidate-created-time">入库 {{ formatDate(item.createdAt) }}<span v-if="item.analysisStatus === 'done' && (item.abilityScore > 0 || item.matchScore > 0)"> · 综合评分 {{ item.abilityScore || item.matchScore }}</span></span>
+              <span class="candidate-created-time">入库 {{ formatDate(item.createdAt) }}<span v-if="item.rankEligible"> · 岗位依据分 {{ item.abilityScore }}</span><span v-else-if="item.matchScore"> · 综合匹配参考 {{ item.matchScore }}</span></span>
               <div class="candidate-actions">
                 <el-button class="candidate-primary-action" size="small" type="primary" plain @click="navigateToEvaluation(item)">查看测评</el-button>
                 <el-button class="candidate-secondary-action" size="small" type="primary" @click="openInterviewInvite(item)">
@@ -441,16 +441,16 @@
               </template>
             </el-table-column>
 
-            <el-table-column label="综合评分" width="110" align="center">
+            <el-table-column label="岗位依据分" width="110" align="center">
               <template #default="{ row }">
                 <span
-                  v-if="row.analysisStatus === 'done' && (row.abilityScore > 0 || row.matchScore > 0)"
+                  v-if="row.rankEligible"
                   class="score-badge"
-                  :class="scoreLevelClass(row.abilityScore || row.matchScore)"
+                  :class="scoreLevelClass(row.abilityScore)"
                 >
-                  {{ row.abilityScore || row.matchScore }} 分
+                  {{ row.abilityScore }} 分
                 </span>
-                <span v-else class="score-badge pending">待评</span>
+                <span v-else class="score-badge pending">{{ row.radarStale ? '待复核' : '待核实' }}</span>
               </template>
             </el-table-column>
 
@@ -560,7 +560,7 @@
             </div>
             <div class="invite-sub-text">
               <span>应聘分库：<strong>{{ inviteCandidate.jobTitle || inviteCandidate.projectName }}</strong></span>
-              <span v-if="(inviteCandidate.abilityScore || inviteCandidate.matchScore) > 0"> · 综合评分：<strong>{{ inviteCandidate.abilityScore || inviteCandidate.matchScore }}分</strong></span>
+              <span v-if="inviteCandidate.rankEligible"> · 岗位依据分：<strong>{{ inviteCandidate.abilityScore }}分</strong></span><span v-else-if="inviteCandidate.matchScore"> · 综合匹配参考：<strong>{{ inviteCandidate.matchScore }}分</strong></span>
             </div>
           </div>
           <el-button
@@ -1212,9 +1212,9 @@ const filtered = computed(() => recruitment.candidates.filter(item =>
 ).sort((a, b) => {
   const recent = (b.createdAt || '').localeCompare(a.createdAt || '')
   if (sortOrder.value === 'newest') return recent || a.projectCandidateId.localeCompare(b.projectCandidateId)
-  if (a.analysisStatus !== b.analysisStatus) return a.analysisStatus === 'done' ? -1 : b.analysisStatus === 'done' ? 1 : 0
-  const scoreA = a.abilityScore || a.matchScore || 0
-  const scoreB = b.abilityScore || b.matchScore || 0
+  if (a.rankEligible !== b.rankEligible) return a.rankEligible ? -1 : 1
+  const scoreA = a.rankEligible ? a.abilityScore : 0
+  const scoreB = b.rankEligible ? b.abilityScore : 0
   const score = sortOrder.value === 'score_desc'
     ? scoreB - scoreA
     : scoreA - scoreB

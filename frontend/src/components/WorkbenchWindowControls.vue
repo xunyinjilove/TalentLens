@@ -1,6 +1,5 @@
 <template>
   <div class="workbench-window-controls" data-wails-no-drag>
-    <WindowSizeMenu />
     <button title="最小化" @click="invoke('WindowMinimize')">─</button>
     <button title="最大化或还原" @click="invoke('WindowMaximize')">□</button>
     <button title="关闭" class="close" @click="invoke('WindowClose')">×</button>
@@ -8,8 +7,6 @@
 </template>
 
 <script setup lang="ts">
-import WindowSizeMenu from './WindowSizeMenu.vue'
-
 async function invoke(method: string) {
   try {
     const api: any = await import('../../wailsjs/go/main/App')

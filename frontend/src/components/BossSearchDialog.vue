@@ -99,13 +99,22 @@
                 <span>{{ isQuotaMatrixActive ? '收起配额调度矩阵' : '⚡ AI 智能拓词与配额调度 (突破茧房)' }}</span>
               </button>
             </div>
-            <el-input v-model="form.keyword" placeholder="输入搜索关键词，如：临床项目经理" />
+            <el-input v-model="form.keyword" disabled placeholder="以职位管理中保存的名称检索" />
           </div>
           <div class="form-item flex-1">
             <label class="form-label">目标城市</label>
-            <el-select v-model="form.city" filterable allow-create default-first-option style="width: 100%">
+            <el-select v-model="form.city" disabled style="width: 100%">
               <el-option v-for="c in cityOptions" :key="c" :label="c" :value="c" />
             </el-select>
+          </div>
+        </div>
+
+        <div v-if="selectedPlatformCodes.includes('51job')" class="saved-filter-list">
+          <strong>51job 职位筛选条件</strong><span>来自职位管理，修改请先保存职位；其他渠道暂沿原搜索逻辑。无法在网页确认的条件不会被视为已应用。</span>
+          <div class="saved-filter-items">
+            <span v-for="item in displayed51JobFilters" :key="item.label" class="saved-filter-item">
+              {{ item.label }}：{{ item.value }} <em>{{ item.status }}</em>
+            </span>
           </div>
         </div>
 
@@ -127,9 +136,6 @@
                 @click="handleGenerateSynonyms"
               >
                 <el-icon><Refresh /></el-icon> AI 重新拓词
-              </el-button>
-              <el-button size="small" @click="addCustomSynonym">
-                <el-icon><Plus /></el-icon> 添加维度词
               </el-button>
               <el-button size="small" @click="distributeEqually">
                 <el-icon><ScaleToOriginal /></el-icon> 均摊比例
@@ -175,7 +181,8 @@
                   v-model="item.keyword"
                   size="small"
                   placeholder="分流词条"
-                  :disabled="!item.selected"
+                  readonly
+                  disabled
                 />
                 <span class="synonym-desc" :title="item.description">{{ item.description }}</span>
               </div>
@@ -401,6 +408,7 @@
 import { ref, reactive, computed, watch, nextTick, onMounted, onUnmounted } from 'vue'
 import { ElMessage } from 'element-plus'
 import { useRecruitmentStore } from '../composables/useRecruitmentStore'
+import { useProjectStore } from '../composables/useProjectStore'
 import {
   Search,
   User,
@@ -431,9 +439,11 @@ const props = defineProps<{
   eduLevel?: string
   isContinue?: boolean  // true=继续寻才模式，自动跳过已有候选人
   city?: string
+  jobConfig?: { title?: string; city?: string; experience_text?: string; experience_years?: number; education_level?: string; required_skills?: string[]; sourcing_filters?: Record<string, string> }
 }>()
 
 const recruitmentStore = useRecruitmentStore()
+const projectStore = useProjectStore()
 const checkingActiveSearch = ref(false)
 
 async function showActiveSearch(): Promise<boolean> {
@@ -773,6 +783,24 @@ const platformList = reactive([
 const selectedPlatformCodes = computed(() => {
   return platformList.filter(p => p.selected).map(p => p.code)
 })
+const filterStatuses = ref<Array<{ label: string; value: string; status: string }>>([])
+const displayed51JobFilters = computed(() => {
+  if (filterStatuses.value.length) return filterStatuses.value
+  const config = props.jobConfig || projectStore.projects.find(item => item.id === props.projectId)?.job_config || {}
+  const filterLabels: Record<string, string> = { age: '年龄', gender: '性别', residence: '居住地', school_type: '学校性质', job_seeking_status: '求职状态', expected_industry: '期望行业', expected_function: '期望职能', expected_salary: '期望月薪', current_industry: '从事行业', current_function: '从事职能' }
+  const items = [{ label: '职位名称', value: config.title || props.jobTitle || '', status: '已应用' }]
+  if (config.city) items.push({ label: '工作城市', value: config.city, status: '本地核对' })
+  if (config.experience_text || config.experience_years) items.push({ label: '工作年限', value: config.experience_text || `${config.experience_years}年`, status: '网页应用 / 本地核对' })
+  if (config.education_level && config.education_level !== '不限') items.push({ label: '学历要求', value: config.education_level, status: '网页应用 / 本地核对' })
+  if (config.required_skills?.length) items.push({ label: '必备技能', value: config.required_skills.join('、'), status: '已应用（技能分轮）' })
+  for (const [key, value] of Object.entries(config.sourcing_filters || {})) {
+    if (value?.trim() && filterLabels[key]) {
+      const status = key === 'residence' ? '网页应用 / 本地核对' : '待网页核对'
+      items.push({ label: filterLabels[key], value: value.trim(), status })
+    }
+  }
+  return items
+})
 
 function togglePlatform(p: any) {
   p.selected = !p.selected
@@ -807,12 +835,15 @@ watch(() => props.modelValue, (val) => {
     doneTriggered = false
     captchaAlert.active = false
     searchLogs.value = []
+    filterStatuses.value = []
 
     // 每次打开弹窗根据当前选中的职位刷新默认关键词与岗位城市
-    form.keyword = props.jobTitle || form.keyword || '临床项目经理'
-    if (props.city && props.city.trim()) {
-      form.city = props.city.trim()
+    const saved = props.jobConfig || projectStore.projects.find(item => item.id === props.projectId)?.job_config
+    form.keyword = saved?.title || props.jobTitle || ''
+    if (saved?.city || props.city) {
+      form.city = (saved?.city || props.city || '').trim()
     }
+    void projectStore.loadProjects()
 
     if (props.isContinue) {
       currentStatusText.value = '继续寻才模式 — 请选择/确认招聘平台后启动'
@@ -916,6 +947,7 @@ async function handleStartSearch() {
   captchaAlert.active = false
   searchLogs.value = []
   pending51jobDetails.value = []
+  filterStatuses.value = []
   currentStatusText.value = '正在启动矩阵式检索引擎...'
 
   if (WailsApp?.StartSearchWithPolicy) {
@@ -1057,6 +1089,7 @@ onMounted(async () => {
   const handleStatus = (evt: any) => {
     if (evt) {
       if (evt.platform) activePlatformCode.value = evt.platform
+      if (evt.platform === '51job' && Array.isArray(evt.filterStatuses)) filterStatuses.value = evt.filterStatuses
       if (evt.pendingDetail?.key && !pending51jobDetails.value.some(item => item.key === evt.pendingDetail.key)) {
         pending51jobDetails.value.push({ key: String(evt.pendingDetail.key), name: String(evt.pendingDetail.name || '候选人') })
       }
@@ -1173,6 +1206,12 @@ onUnmounted(() => {
 </script>
 
 <style scoped lang="scss">
+.saved-filter-list { margin: 13px 0 5px; padding: 12px; border: 1px solid #dbeafe; border-radius: 10px; background: #f8fbff; font-size: 12px; }
+.saved-filter-list > strong { margin-right: 8px; color: #1e40af; }
+.saved-filter-list > span { color: #64748b; }
+.saved-filter-items { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 10px; }
+.saved-filter-item { padding: 4px 7px; border-radius: 6px; background: white; color: #334155; }
+.saved-filter-item em { margin-left: 4px; font-style: normal; color: #2563eb; }
 @import '../styles/macos-theme.scss';
 
 .boss-dialog-content {

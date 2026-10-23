@@ -21,10 +21,13 @@ type TalentCandidate struct {
 	Name               string   `json:"name"`
 	Source             string   `json:"source"`
 	ResumeID           string   `json:"resumeId"`
+	ResumeFileName     string   `json:"resumeFileName"`
 	ProfileURL         string   `json:"profileUrl"`
 	AnalysisStatus     string   `json:"analysisStatus"`
 	AbilityScore       int      `json:"abilityScore"`
 	MatchScore         int      `json:"matchScore"`
+	RankEligible       bool     `json:"rankEligible"`
+	RadarStale         bool     `json:"radarStale"`
 	CurrentRole        string   `json:"currentRole"`
 	Education          string   `json:"education"`
 	WorkYears          string   `json:"workYears"`
@@ -35,6 +38,8 @@ type TalentCandidate struct {
 	Owner              string   `json:"owner"`
 	NextActionAt       string   `json:"nextActionAt"`
 	CreatedAt          string   `json:"createdAt"`
+	LastFollowUpAt     string   `json:"lastFollowUpAt"`
+	HiredAt            string   `json:"hiredAt"`
 }
 
 type FollowUpRecord struct {
@@ -62,11 +67,36 @@ type RecruitmentInterview struct {
 }
 
 type RecruitmentDashboard struct {
-	OpenProjects       int            `json:"openProjects"`
-	CandidatesThisWeek int            `json:"candidatesThisWeek"`
-	PendingFollowUps   int            `json:"pendingFollowUps"`
-	UpcomingInterviews int            `json:"upcomingInterviews"`
-	StageCounts        map[string]int `json:"stageCounts"`
+	OpenProjects                 int            `json:"openProjects"`
+	CandidatesThisWeek           int            `json:"candidatesThisWeek"`
+	PendingFollowUps             int            `json:"pendingFollowUps"`
+	UpcomingInterviews           int            `json:"upcomingInterviews"`
+	PendingInterviewArrangements int            `json:"pendingInterviewArrangements"`
+	HiresThisMonth               int            `json:"hiresThisMonth"`
+	StageCounts                  map[string]int `json:"stageCounts"`
+}
+
+type TodayTodo struct {
+	ID          string `json:"id"`
+	Title       string `json:"title"`
+	Completed   bool   `json:"completed"`
+	CreatedAt   string `json:"createdAt"`
+	CompletedAt string `json:"completedAt"`
+}
+
+type RecruitmentActivity struct {
+	ID                 string `json:"id"`
+	ProjectCandidateID string `json:"projectCandidateId"`
+	ProjectID          string `json:"projectId"`
+	CandidateName      string `json:"candidateName"`
+	ProjectName        string `json:"projectName"`
+	Kind               string `json:"kind"`
+	EventType          string `json:"eventType"`
+	ToStage            string `json:"toStage"`
+	Note               string `json:"note"`
+	OccurredAt         string `json:"occurredAt"`
+	StartsAt           string `json:"startsAt"`
+	Method             string `json:"method"`
 }
 
 var recruitmentStages = map[string]bool{
@@ -92,10 +122,14 @@ func (a *App) ListTalentCandidates(projectID string) ([]TalentCandidate, error) 
 		return nil, err
 	}
 	rows, err := db.Query(`SELECT c.id,pc.id,p.id,p.name,p.job_title,c.display_name,
-		COALESCE(rv.legacy_resume_id,''),COALESCE(rv.raw_json,''),
+		COALESCE(rv.legacy_resume_id,''),COALESCE(rv.file_name,''),COALESCE(rv.raw_json,''),
 		COALESCE(ev.status,''),COALESCE(ev.ability_score,0),COALESCE(ev.analysis_json,''),
 		COALESCE(ev.redline_status,''),COALESCE(ev.confirmed_bonus_count,0),
-		pc.stage,pc.owner,pc.next_action_at,pc.created_at
+		pc.stage,pc.owner,pc.next_action_at,pc.created_at,
+		MAX(CASE WHEN pc.updated_at>pc.created_at THEN pc.updated_at ELSE '' END,
+			COALESCE((SELECT MAX(f.created_at) FROM follow_up_events f WHERE f.project_candidate_id=pc.id),'')),
+		COALESCE((SELECT MIN(f.created_at) FROM follow_up_events f WHERE f.project_candidate_id=pc.id AND f.event_type='stage_change' AND f.to_stage='hired'),
+			CASE WHEN pc.stage='hired' THEN pc.updated_at ELSE '' END)
 		FROM project_candidates pc JOIN candidates c ON c.id=pc.candidate_id
 		JOIN projects p ON p.id=pc.project_id
 		LEFT JOIN resume_versions rv ON rv.id=(SELECT pcr.resume_version_id FROM project_candidate_resumes pcr
@@ -112,16 +146,18 @@ func (a *App) ListTalentCandidates(projectID string) ([]TalentCandidate, error) 
 	for rows.Next() {
 		var item TalentCandidate
 		var raw, analysisJSON string
+		var sourceResume Resume
 		if err := rows.Scan(&item.ID, &item.ProjectCandidateID, &item.ProjectID,
-			&item.ProjectName, &item.JobTitle, &item.Name, &item.ResumeID, &raw,
+			&item.ProjectName, &item.JobTitle, &item.Name, &item.ResumeID, &item.ResumeFileName, &raw,
 			&item.AnalysisStatus, &item.AbilityScore, &analysisJSON, &item.RedLineStatus,
 			&item.ConfirmedBonus, &item.Stage, &item.Owner, &item.NextActionAt,
-			&item.CreatedAt); err != nil {
+			&item.CreatedAt, &item.LastFollowUpAt, &item.HiredAt); err != nil {
 			return nil, err
 		}
 		if raw != "" {
 			var resume Resume
 			if json.Unmarshal([]byte(raw), &resume) == nil {
+				sourceResume = resume
 				item.ProfileURL = resume.URL
 				item.Source = recruitmentSourceFromURL(resume.URL)
 				if item.AnalysisStatus == "" {
@@ -147,6 +183,16 @@ func (a *App) ListTalentCandidates(projectID string) ([]TalentCandidate, error) 
 			var analysis AnalysisResult
 			if json.Unmarshal([]byte(analysisJSON), &analysis) == nil {
 				item.MatchScore = holisticMatchScore(&analysis)
+				if project := a.GetProject(item.ProjectID); project != nil && sourceResume.ID != "" {
+					sourceResume.Analysis = &analysis
+					sourceResume.Score = item.AbilityScore
+					a.prepareResumeDecision(&sourceResume, &project.JobConfig)
+					item.RankEligible = sourceResume.Analysis.RankEligible && !sourceResume.Analysis.RadarStale
+					item.RadarStale = sourceResume.Analysis.RadarStale
+					if item.RankEligible {
+						item.AbilityScore = sourceResume.Analysis.AbilityScore
+					}
+				}
 				if role := strings.TrimSpace(analysis.CurrentRole); role != "" {
 					item.CurrentRole = role
 				}
@@ -205,17 +251,34 @@ func (a *App) GetRecruitmentDashboard() (RecruitmentDashboard, error) {
 	if err != nil {
 		return result, err
 	}
-	weekStart := time.Now().AddDate(0, 0, -7).Format(time.RFC3339Nano)
-	now := time.Now().Format(time.RFC3339Nano)
+	weekStart := time.Now().AddDate(0, 0, -7).UTC().Format(time.RFC3339Nano)
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	localNow := time.Now()
+	monthStart := time.Date(localNow.Year(), localNow.Month(), 1, 0, 0, 0, 0, localNow.Location()).UTC().Format(time.RFC3339Nano)
+	nextMonth := time.Date(localNow.Year(), localNow.Month()+1, 1, 0, 0, 0, 0, localNow.Location()).UTC().Format(time.RFC3339Nano)
 	queries := []struct {
 		query string
 		args  []interface{}
 		into  *int
 	}{
 		{"SELECT COUNT(*) FROM projects", nil, &result.OpenProjects},
-		{"SELECT COUNT(*) FROM candidates WHERE created_at>=?", []interface{}{weekStart}, &result.CandidatesThisWeek},
+		{`SELECT COUNT(*) FROM (
+			SELECT pc.candidate_id FROM project_candidates pc
+			WHERE EXISTS (SELECT 1 FROM project_candidates active
+				WHERE active.candidate_id=pc.candidate_id AND active.archived_at='')
+			GROUP BY pc.candidate_id HAVING MIN(pc.created_at)>=?
+		)`, []interface{}{weekStart}, &result.CandidatesThisWeek},
 		{"SELECT COUNT(*) FROM project_candidates WHERE archived_at='' AND next_action_at<>'' AND next_action_at<=? AND stage NOT IN ('hired','rejected')", []interface{}{now}, &result.PendingFollowUps},
 		{"SELECT COUNT(*) FROM interviews WHERE starts_at>=? AND status='scheduled'", []interface{}{now}, &result.UpcomingInterviews},
+		{`SELECT COUNT(*) FROM project_candidates pc WHERE pc.archived_at='' AND pc.stage IN ('first_interview','second_interview')
+			AND NOT EXISTS (SELECT 1 FROM interviews i WHERE i.project_candidate_id=pc.id AND i.status='scheduled' AND i.starts_at>=?)`, []interface{}{now}, &result.PendingInterviewArrangements},
+		{`SELECT COUNT(*) FROM project_candidates pc LEFT JOIN
+			(SELECT project_candidate_id, MIN(created_at) AS hired_at FROM follow_up_events
+			 WHERE event_type='stage_change' AND to_stage='hired' GROUP BY project_candidate_id) first_hire
+			 ON first_hire.project_candidate_id=pc.id
+			 WHERE pc.archived_at='' AND pc.stage='hired'
+			 AND COALESCE(first_hire.hired_at,pc.updated_at)>=?
+			 AND COALESCE(first_hire.hired_at,pc.updated_at)<?`, []interface{}{monthStart, nextMonth}, &result.HiresThisMonth},
 	}
 	for _, q := range queries {
 		if err := db.QueryRow(q.query, q.args...).Scan(q.into); err != nil {
@@ -236,6 +299,126 @@ func (a *App) GetRecruitmentDashboard() (RecruitmentDashboard, error) {
 		result.StageCounts[stage] = count
 	}
 	return result, rows.Err()
+}
+
+// ListRecentRecruitmentActivities combines interview changes and follow-up records.
+func (a *App) ListRecentRecruitmentActivities(limit int) ([]RecruitmentActivity, error) {
+	if limit <= 0 || limit > 50 {
+		limit = 8
+	}
+	db, err := a.getRecruitmentDB()
+	if err != nil {
+		return nil, err
+	}
+	rows, err := db.Query(`SELECT f.id,pc.id,p.id,c.display_name,p.name,'followup' AS kind,
+		f.event_type,f.to_stage,f.note,f.created_at AS occurred_at,'' AS starts_at,'' AS method
+		FROM follow_up_events f
+		JOIN project_candidates pc ON pc.id=f.project_candidate_id
+		JOIN candidates c ON c.id=pc.candidate_id JOIN projects p ON p.id=pc.project_id
+		WHERE pc.archived_at=''
+		UNION ALL
+		SELECT i.id,pc.id,p.id,c.display_name,p.name,'interview' AS kind,
+		CASE WHEN i.status='scheduled' AND i.updated_at<>i.created_at THEN 'rescheduled' ELSE i.status END,
+		'',i.note,i.updated_at AS occurred_at,i.starts_at,i.method
+		FROM interviews i
+		JOIN project_candidates pc ON pc.id=i.project_candidate_id
+		JOIN candidates c ON c.id=pc.candidate_id JOIN projects p ON p.id=pc.project_id
+		WHERE pc.archived_at=''
+		ORDER BY occurred_at DESC LIMIT ?`, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	result := make([]RecruitmentActivity, 0)
+	for rows.Next() {
+		var item RecruitmentActivity
+		if err := rows.Scan(&item.ID, &item.ProjectCandidateID, &item.ProjectID,
+			&item.CandidateName, &item.ProjectName, &item.Kind, &item.EventType,
+			&item.ToStage, &item.Note, &item.OccurredAt, &item.StartsAt, &item.Method); err != nil {
+			return nil, err
+		}
+		result = append(result, item)
+	}
+	return result, rows.Err()
+}
+
+// ListTodayTodos keeps unfinished tasks visible across days and shows today's completed tasks.
+func (a *App) ListTodayTodos() ([]TodayTodo, error) {
+	db, err := a.getRecruitmentDB()
+	if err != nil {
+		return nil, err
+	}
+	now := time.Now()
+	todayStart := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location()).UTC().Format(time.RFC3339Nano)
+	rows, err := db.Query(`SELECT id,title,created_at,completed_at FROM today_todos
+		WHERE completed_at='' OR completed_at>=?
+		ORDER BY CASE WHEN completed_at='' THEN 0 ELSE 1 END, created_at DESC, id DESC`, todayStart)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	result := make([]TodayTodo, 0)
+	for rows.Next() {
+		var item TodayTodo
+		if err := rows.Scan(&item.ID, &item.Title, &item.CreatedAt, &item.CompletedAt); err != nil {
+			return nil, err
+		}
+		item.Completed = item.CompletedAt != ""
+		result = append(result, item)
+	}
+	return result, rows.Err()
+}
+
+func (a *App) AddTodayTodo(title string) (TodayTodo, error) {
+	title = strings.TrimSpace(title)
+	if title == "" || len([]rune(title)) > 200 {
+		return TodayTodo{}, fmt.Errorf("待办内容需为 1–200 个字")
+	}
+	db, err := a.getRecruitmentDB()
+	if err != nil {
+		return TodayTodo{}, err
+	}
+	item := TodayTodo{ID: recruitmentID("todo"), Title: title, CreatedAt: time.Now().UTC().Format(time.RFC3339Nano)}
+	_, err = db.Exec("INSERT INTO today_todos(id,title,created_at) VALUES(?,?,?)", item.ID, item.Title, item.CreatedAt)
+	return item, err
+}
+
+func (a *App) SetTodayTodoCompleted(id string, completed bool) error {
+	db, err := a.getRecruitmentDB()
+	if err != nil {
+		return err
+	}
+	completedAt := ""
+	if completed {
+		completedAt = time.Now().UTC().Format(time.RFC3339Nano)
+	}
+	result, err := db.Exec("UPDATE today_todos SET completed_at=? WHERE id=?", completedAt, id)
+	if err != nil {
+		return err
+	}
+	if count, err := result.RowsAffected(); err != nil {
+		return err
+	} else if count == 0 {
+		return sql.ErrNoRows
+	}
+	return nil
+}
+
+func (a *App) DeleteTodayTodo(id string) error {
+	db, err := a.getRecruitmentDB()
+	if err != nil {
+		return err
+	}
+	result, err := db.Exec("DELETE FROM today_todos WHERE id=?", id)
+	if err != nil {
+		return err
+	}
+	if count, err := result.RowsAffected(); err != nil {
+		return err
+	} else if count == 0 {
+		return sql.ErrNoRows
+	}
+	return nil
 }
 
 // ArchiveTalentCandidates removes project links from the active talent pool

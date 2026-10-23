@@ -6,11 +6,11 @@ func TestJobDecisionDoesNotDependOnBonusOrRedLine(t *testing.T) {
 	a := NewApp()
 	a.dataDirOverride = t.TempDir()
 	job := &JobConfig{RequiredSkills: []string{"测试用例设计"}}
-	result := &AnalysisResult{CoreMatch: 80}
+	result := &AnalysisResult{CoreMatch: 80, CoreCriterionChecks: []CoreCriterionCheck{{Criterion: "测试用例设计", Level: 3, Evidence: "负责测试用例设计"}}}
 	resume := &Resume{ID: "bonus_review", Content: "负责测试用例设计"}
 	a.applyJobDecision(result, job, resume)
-	if result.OverallScore != 80 {
-		t.Fatalf("ability score must be 80: %+v", result)
+	if result.OverallScore != 75 {
+		t.Fatalf("岗位依据分应只由已验证证据计算: %+v", result)
 	}
 }
 
@@ -25,13 +25,13 @@ func TestScorecardUsesAnchoredLevels(t *testing.T) {
 	}
 	result.CoreCriterionChecks[0].Evidence = "简历不存在的事实"
 	a.applyJobDecision(result, &JobConfig{CoreCriteria: []string{"测试设计", "缺陷分析"}}, &Resume{Content: "主导测试设计方案，参与缺陷分析报告"})
-	if result.AbilityScore != 25 {
-		t.Fatalf("unverifiable evidence must not raise scorecard level: %+v", result)
+	if result.AbilityScore != 50 || result.RankEligible {
+		t.Fatalf("不可定位证据应转为未知，覆盖不足时不排名: %+v", result)
 	}
 	partial := &AnalysisResult{CoreMatch: 99, CoreCriterionChecks: []CoreCriterionCheck{{Criterion: "测试设计", Level: 4, Evidence: "测试设计方案"}}}
 	a.applyJobDecision(partial, &JobConfig{CoreCriteria: []string{"测试设计", "缺陷分析"}}, &Resume{Content: "测试设计方案"})
-	if partial.AbilityScore != 50 {
-		t.Fatalf("missing scorecard criterion must count as zero: %+v", partial)
+	if partial.AbilityScore != 100 || partial.RankEligible {
+		t.Fatalf("缺失维度不应被当成低分或正式排名: %+v", partial)
 	}
 }
 
@@ -53,8 +53,8 @@ func TestMissingRubricRowsUseDisclosedProvisionalEstimate(t *testing.T) {
 		{Criterion: "测试设计", Level: 1, Evidence: "测试设计经历"},
 	}}
 	scoreCandidate(result, []string{"测试设计", "自动化", "性能测试", "质量管理"})
-	if result.AbilityScore != 85 || result.ScoreBasis != "provisional" {
-		t.Fatalf("missing rubric rows must not become evidence-backed zeroes: %+v", result)
+	if result.AbilityScore != 25 || result.ScoreBasis != "provisional" || result.RankEligible {
+		t.Fatalf("缺失评分项只能暂估，不能按宏观匹配分排名: %+v", result)
 	}
 }
 
@@ -92,8 +92,38 @@ func TestMissingRubricEvidenceDoesNotTurnStrongMatchIntoZero(t *testing.T) {
 	}
 	result := &AnalysisResult{SkillMatch: 92, ExperienceMatch: 95, CoreCriterionChecks: checks}
 	a.applyJobDecision(result, job, &Resume{Content: "多年临床项目管理及质量控制经历"})
-	if result.AbilityScore < 80 || result.ScoreBasis != "provisional" {
-		t.Fatalf("missing AI citations must produce a disclosed provisional score, not zero: %+v", result)
+	if result.AbilityScore != 0 || result.ScoreBasis != "provisional" || result.RankEligible || result.RadarCoverage != 0 {
+		t.Fatalf("没有可定位引用应待核实，不可由综合匹配分补位: %+v", result)
+	}
+}
+
+func TestRadarKnownCoverageControlsOfficialScore(t *testing.T) {
+	criteria := []string{"客户需求", "方案设计", "谈判", "回款", "协作"}
+	result := &AnalysisResult{SkillMatch: 99, ExperienceMatch: 99, EducationMatch: 99}
+	for i, name := range criteria {
+		check := CoreCriterionCheck{Criterion: name, Level: 3, Evidence: "可定位原文", EvidenceStatus: "known"}
+		if i == 4 {
+			check = CoreCriterionCheck{Criterion: name, Level: 0, EvidenceStatus: "unknown", Assessment: "未找到原文"}
+		}
+		result.CoreCriterionChecks = append(result.CoreCriterionChecks, check)
+	}
+	scoreCandidate(result, criteria, 99)
+	if !result.RankEligible || result.RadarCoverage != .8 || result.AbilityScore != 75 || result.HolisticMatchScore != 99 {
+		t.Fatalf("80%% coverage and radar score should determine formal ranking: %+v", result)
+	}
+	result.CoreCriterionChecks[3].Evidence = ""
+	result.CoreCriterionChecks[3].EvidenceStatus = "unknown"
+	scoreCandidate(result, criteria, 99)
+	if result.RankEligible || result.RadarCoverage != .6 {
+		t.Fatalf("60%% coverage must leave formal ranking: %+v", result)
+	}
+}
+
+func TestOldRadarProfileCannotBeReinterpretedAsNewMetrics(t *testing.T) {
+	old := &AnalysisResult{CoreCriterionChecks: []CoreCriterionCheck{{Criterion: "原指标A", Level: 3, Evidence: "原文"}, {Criterion: "原指标B", Level: 4, Evidence: "原文"}}}
+	metrics := []string{"新指标A", "新指标B"}
+	if analysisMatchesRadar(old, metrics, jobMetricsHash(metrics)) {
+		t.Fatal("old evaluation must be stale")
 	}
 }
 
@@ -135,4 +165,3 @@ func TestReAnalyzeScoreStabilityGuard(t *testing.T) {
 		t.Fatalf("re-analysis leap from 50 to 78 must be constrained to 55, got %d", scoreInt)
 	}
 }
-

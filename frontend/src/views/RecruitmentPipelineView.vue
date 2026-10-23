@@ -12,13 +12,14 @@
         <span class="wb-muted">点击候选人卡片，更新阶段与下一步</span>
       </div>
       <el-alert v-if="recruitment.error" :title="recruitment.error" type="warning" :closable="false" style="margin-bottom:16px" />
-      <div class="wb-kanban">
-        <section v-for="stage in stages" :key="stage" class="wb-kanban-col">
+      <el-alert v-if="route.query.hiredMonth === 'current'" title="仅显示本月首次进入入职阶段的人选" type="info" :closable="false" style="margin-bottom:16px"><template #default><el-button link type="primary" @click="router.replace({ path: '/pipeline', query: { stage: 'hired' } })">查看全部入职人选</el-button></template></el-alert>
+      <div ref="kanbanEl" class="wb-kanban">
+        <section v-for="stage in stages" :key="stage" class="wb-kanban-col" :data-stage="stage">
           <div class="wb-kanban-head"><span>{{ stageLabels[stage] }}</span><span class="wb-pill">{{ inStage(stage).length }}</span></div>
           <div v-for="item in inStage(stage)" :key="item.projectCandidateId" class="wb-kanban-card" role="button" tabindex="0" @click="edit(item)" @keydown.enter="edit(item)">
             <div style="display:flex;gap:9px;align-items:center"><span class="wb-avatar" style="width:31px;height:31px">{{ getCandidateSurname(item) }}</span><strong>{{ item.name }}</strong></div>
             <div class="wb-muted" style="font-size:12px;margin:8px 0">{{ item.jobTitle || item.projectName }}</div>
-            <div style="display:flex;justify-content:space-between;align-items:center"><span class="wb-pill">{{ item.analysisStatus === 'done' ? `能力 ${item.abilityScore}` : '待评估' }}</span><span class="wb-muted" style="font-size:11px">{{ item.owner || '未分配' }}</span></div>
+            <div style="display:flex;justify-content:space-between;align-items:center"><span class="wb-pill">{{ item.rankEligible ? `岗位 ${item.abilityScore}` : item.radarStale ? '待复核' : '待核实' }}</span><span class="wb-muted" style="font-size:11px">{{ item.owner || '未分配' }}</span></div>
             <div v-if="item.nextActionAt" class="wb-muted" style="font-size:11px;margin-top:8px">下次：{{ formatDate(item.nextActionAt) }}</div>
           </div>
           <div v-if="!inStage(stage).length" class="wb-muted" style="font-size:12px;padding:8px 4px">暂无人选</div>
@@ -51,7 +52,7 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted, reactive, ref, watch } from 'vue'
+import { nextTick, onMounted, reactive, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import { useRoute, useRouter } from 'vue-router'
 import { useProjectStore } from '../composables/useProjectStore'
@@ -64,6 +65,8 @@ const router = useRouter()
 const projects = useProjectStore()
 const recruitment = useRecruitmentStore()
 const projectId = ref(String(route.query.project || ''))
+const kanbanEl = ref<HTMLElement | null>(null)
+let openedCandidateId = ''
 const dialogOpen = ref(false)
 const editing = ref<TalentCandidate | null>(null)
 const saving = ref(false)
@@ -73,9 +76,35 @@ const communicationChannel = ref('platform')
 const communicationText = ref('')
 
 watch(() => route.query.project, value => { projectId.value = String(value || '') })
+watch(() => route.query.candidate, () => { void openLinkedCandidate() })
+watch(() => route.query.stage, () => { void scrollToLinkedStage() })
 function syncRoute() { void router.replace({ path: '/pipeline', query: projectId.value ? { project: projectId.value } : {} }) }
-function inStage(stage: string) { return recruitment.candidates.filter(item => item.stage === stage && (!projectId.value || item.projectId === projectId.value)) }
+function inStage(stage: string) {
+  return recruitment.candidates.filter(item => {
+    if (item.stage !== stage || (projectId.value && item.projectId !== projectId.value)) return false
+    if (stage !== 'hired' || route.query.hiredMonth !== 'current') return true
+    const hiredAt = new Date(item.hiredAt)
+    const now = new Date()
+    return hiredAt.getFullYear() === now.getFullYear() && hiredAt.getMonth() === now.getMonth()
+  })
+}
 function formatDate(value: string) { return value ? new Date(value).toLocaleString('zh-CN') : '' }
+async function openLinkedCandidate() {
+  const id = String(route.query.candidate || '')
+  if (!id || id === openedCandidateId) return
+  const item = recruitment.candidates.find(candidate => candidate.projectCandidateId === id && (!projectId.value || candidate.projectId === projectId.value))
+  if (!item) return
+  openedCandidateId = id
+  await edit(item)
+}
+async function scrollToLinkedStage() {
+  const stage = String(route.query.stage || '')
+  if (!stages.includes(stage)) return
+  await nextTick()
+  const column = Array.from(kanbanEl.value?.querySelectorAll<HTMLElement>('[data-stage]') || [])
+    .find(element => element.dataset.stage === stage)
+  column?.scrollIntoView({ block: 'nearest', inline: 'start' })
+}
 async function edit(item: TalentCandidate) {
   editing.value = item
   form.stage = item.stage
@@ -115,7 +144,10 @@ async function saveCommunication() {
     ElMessage.success('沟通记录已保存')
   } catch (err:any) { ElMessage.error(err?.message || String(err)) }
 }
-onMounted(() => { void projects.loadProjects(); void recruitment.loadCandidates() })
+onMounted(async () => {
+  await Promise.all([projects.loadProjects(), recruitment.loadCandidates()])
+  await Promise.all([openLinkedCandidate(), scrollToLinkedStage()])
+})
 </script>
 
 <style scoped>

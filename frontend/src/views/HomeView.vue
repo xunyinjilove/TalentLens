@@ -78,10 +78,6 @@
                         <el-icon><UploadFilled /></el-icon>
                         <span>导入本地简历（PDF/Word/图片）</span>
                       </el-dropdown-item>
-                      <el-dropdown-item command="reanalyze" :disabled="resumeStore.isAnalyzing || !hasReanalyzableResumes">
-                        <el-icon><RefreshRight /></el-icon>
-                        <span>{{ $t('home.reAnalyzeAll') }}</span>
-                      </el-dropdown-item>
                       <el-dropdown-item command="export" :disabled="resumeStore.doneCount === 0">
                         <el-icon><Download /></el-icon>
                         <span>{{ $t('home.exportReport') }}</span>
@@ -101,7 +97,7 @@
               </div>
             </div>
 
-            <!-- 第二行：三项核心操作按钮（矩阵寻才、继续寻才、开始分析/已完成）(Q1, Q3) -->
+            <!-- 第二行：三项核心操作按钮（矩阵寻才、继续寻才、批量分析） -->
             <div class="resume-toolbar-actions">
               <button
                 class="action-btn boss-btn"
@@ -122,17 +118,16 @@
               </button>
               <button
                 class="action-btn primary analysis-action"
-                :class="{ 'is-all-done': resumeStore.analysisReadyCount === 0 && !resumeStore.isAnalyzing && resumeStore.resumes.length > 0 }"
                 @click="handleStartAnalysis"
-                :disabled="resumeStore.isAnalyzing || resumeStore.analysisReadyCount === 0 || resumeStore.resumes.length === 0"
-                :title="resumeStore.analysisReadyCount === 0 && resumeStore.resumes.length > 0 ? '所有简历已全部分析完毕。如需重新分析，请从右上角「更多」菜单选择「全部重新分析」' : ''"
+                :disabled="resumeStore.isAnalyzing || resumeStore.resumes.length === 0"
+                :title="resumeStore.analysisReadyCount === 0 && resumeStore.doneCount > 0 ? '重新分析当前职位分库的全部已完成简历' : ''"
               >
                 <el-icon v-if="resumeStore.isAnalyzing" class="spin"><Loading /></el-icon>
                 <el-icon v-else-if="resumeStore.analysisReadyCount > 0"><VideoPlay /></el-icon>
-                <el-icon v-else><CircleCheck /></el-icon>
+                <el-icon v-else><RefreshRight /></el-icon>
                 <span v-if="resumeStore.isAnalyzing">{{ $t('home.analyzing') }}</span>
                 <span v-else-if="resumeStore.analysisReadyCount > 0">分析 ({{ resumeStore.analysisReadyCount }})</span>
-                <span v-else>已完成</span>
+                <span v-else>重新分析全部 ({{ resumeStore.doneCount }})</span>
               </button>
             </div>
           </div>
@@ -144,8 +139,8 @@
               :resume="resume"
               :sequence="index + 1"
               :selected="resumeStore.selectedId === resume.id"
+              :profile-confirmed="hasFixedRadarProfile"
               @click="resumeStore.selectResume(resume.id)"
-              @re-analyze="handleReAnalyze"
               @delete="resumeStore.deleteResume"
             />
             <div v-if="resumeStore.resumes.length === 0" class="empty-dropzone-box">
@@ -250,13 +245,13 @@
 
                   <!-- 右上角：综合评分 -->
                   <div v-if="resumeStore.selectedResume.status === 'done' && resumeStore.selectedResume.analysis" class="hero-score-section">
-                    <div class="hero-score-box" :class="getScoreClass(resumeStore.selectedResume.score)">
-                      <strong class="hero-score-num">{{ animatedDetailScore || resumeStore.selectedResume.score }}</strong>
-                      <span class="hero-score-label">综合评分</span>
+                    <div class="hero-score-box" :class="resumeStore.selectedResume.analysis.rankEligible && !resumeStore.selectedResume.analysis.radarStale ? getScoreClass(resumeStore.selectedResume.score) : ''">
+                      <strong class="hero-score-num">{{ resumeStore.selectedResume.analysis.rankEligible && !resumeStore.selectedResume.analysis.radarStale ? (animatedDetailScore || resumeStore.selectedResume.score) : (resumeStore.selectedResume.analysis.abilityScore ?? resumeStore.selectedResume.score ?? '—') }}</strong>
+                      <span class="hero-score-label">{{ resumeStore.selectedResume.analysis.radarStale ? '待复核 · 旧分参考' : resumeStore.selectedResume.analysis.rankEligible ? '岗位依据分' : `暂评分 · 覆盖 ${Math.round(radarCoverageRatio * 100)}%` }}</span>
                     </div>
                     <div class="hero-decision-badge-wrap">
-                      <span class="hero-rec-badge" :class="resumeStore.selectedResume.analysis.recommendation">
-                        {{ $t(`analysis.recommendations.${resumeStore.selectedResume.analysis.recommendation || 'consider'}`) }}
+                      <span class="hero-rec-badge" :class="resumeStore.selectedResume.analysis.rankEligible && !resumeStore.selectedResume.analysis.radarStale ? resumeStore.selectedResume.analysis.recommendation : ''">
+                        {{ resumeStore.selectedResume.analysis.radarStale ? `待复核 · 原结论：${$t(`analysis.recommendations.${resumeStore.selectedResume.analysis.recommendation || 'consider'}`)}` : resumeStore.selectedResume.analysis.rankEligible ? $t(`analysis.recommendations.${resumeStore.selectedResume.analysis.recommendation || 'consider'}`) : radarScoreBounds ? `区间 ${radarScoreBounds}` : '证据待补' }}
                       </span>
                     </div>
                   </div>
@@ -343,7 +338,7 @@
                   <el-icon><Histogram /></el-icon>
                   <span>能力维度拆解</span>
                   <span class="subtab-badge info">
-                    核心 {{ resumeStore.selectedResume.analysis.abilityScore ?? resumeStore.selectedResume.score }}分
+                    {{ resumeStore.selectedResume.analysis.rankEligible && !resumeStore.selectedResume.analysis.radarStale ? `岗位 ${resumeStore.selectedResume.analysis.abilityScore} 分` : '待核实' }}
                   </span>
                 </button>
 
@@ -478,14 +473,18 @@
 
                     <div class="radar-header-summary">
                       <p class="score-explanation">基于当前岗位配置的【技能要求与核心能力】构建统一雷达坐标，所有候选人以相同标准横向对比评估。</p>
-                      <div class="radar-meta-row" v-if="radarCoverageRatio > 0">
+                      <el-button size="small" type="primary" plain :loading="isGeneratingMetrics" @click="openRadarDraft">{{ unifiedJobMetrics.length < 5 ? 'AI 补充岗位雷达指标' : '核对岗位雷达指标' }}</el-button>
+                      <el-alert v-if="resumeStore.selectedResume.analysis.radarStale" title="岗位指标已变更：此份旧测评待复核，旧分仅供参考，不参与正式排名。" type="warning" :closable="false" style="margin:12px 0" />
+                      <div class="radar-meta-row">
                         <span class="coverage-pill" :class="{ 'is-eligible': isRankEligible }">
                           已知指标覆盖率: <strong>{{ (radarCoverageRatio * 100).toFixed(1) }}%</strong>
                           <span v-if="isRankEligible" class="eligible-badge">（达排名门槛 ≥80%）</span>
-                          <span v-else class="ineligible-badge">（覆盖不足80%，建议核查）</span>
+                          <span v-else class="ineligible-badge">（待核实，不参与正式排名）</span>
                         </span>
                         <span class="bounds-text" v-if="radarScoreBounds">全维度得分区间: {{ radarScoreBounds }}</span>
+                        <span v-if="resumeStore.selectedResume.analysis.holisticMatchScore" class="bounds-text">综合匹配参考：{{ resumeStore.selectedResume.analysis.holisticMatchScore }} 分</span>
                       </div>
+                      <p v-if="!isRankEligible && !resumeStore.selectedResume.analysis.radarStale && missingRadarMetrics.length" class="score-explanation">待核实指标：{{ missingRadarMetrics.join('、') }}</p>
                     </div>
 
                     <div class="competency-split-layout">
@@ -500,8 +499,7 @@
                           @select="handleSelectRadarIndex"
                         />
                         <div v-else class="radar-generating-box">
-                          <el-icon class="is-loading"><Loading /></el-icon>
-                          <span>AI 正在为该岗位自动构建统一技能指标雷达...</span>
+                          <span>{{ radarDisplayChecks.length > 0 ? `当前岗位按 ${radarDisplayChecks.length} 项指标评分；雷达图至少需要 3 项。` : '当前岗位尚无技能指标，点击分析后将自动生成。' }}</span>
                         </div>
                       </div>
 
@@ -642,9 +640,6 @@
                   {{ resumeStore.selectedResume.errorMessage }}
                 </div>
                 <div class="error-actions">
-                  <el-button size="small" type="danger" plain @click="resumeStore.reAnalyze(resumeStore.selectedResume.id)">
-                    <el-icon><RefreshRight /></el-icon> 重新分析
-                  </el-button>
                   <el-button size="small" @click="handleCopyError(resumeStore.selectedResume)">
                     <el-icon><DocumentCopy /></el-icon> 复制错误信息
                   </el-button>
@@ -863,6 +858,13 @@
       @refresh="handleRefreshProject"
     />
     <AIInterviewDialog v-model="showInterviewDialog" :resume-id="resumeStore.selectedResume?.id || ''" />
+    <el-dialog v-model="radarDraftOpen" title="确认岗位统一技能指标" width="min(680px,92vw)">
+      <p>这组指标将固定用于当前岗位。确认后，指标不一致的旧测评会标为待复核。</p>
+      <el-alert v-if="radarDraftOrigin" :title="radarDraftOrigin === 'ai_inferred' ? 'AI 推定草稿，请核对岗位相关性' : radarDraftOrigin === 'template_inferred' ? '职业模板草稿，请核对岗位相关性' : '现有岗位指标'" type="info" :closable="false" />
+      <p v-if="radarDraftNote">{{ radarDraftNote }}</p>
+      <el-input v-model="radarDraftText" type="textarea" :rows="8" placeholder="每行一项岗位技能指标，1 至 8 项" />
+      <template #footer><el-button @click="radarDraftOpen=false">取消</el-button><el-button type="primary" :loading="isApplyingRadar" @click="applyRadarDraft">确认并启用</el-button></template>
+    </el-dialog>
     <el-dialog v-model="replyDialogOpen" title="51job 候选人回复" width="min(640px,92vw)">
       <p>{{ replyResult.message }}</p>
       <p v-if="!replyResult.replies?.length">当前已加载会话中暂无文字回复。</p>
@@ -1003,30 +1005,48 @@ interface RadarCheckItem {
 }
 
 const isGeneratingMetrics = ref(false)
+const radarDraftOpen = ref(false)
+const radarDraftText = ref('')
+const radarDraftOrigin = ref('')
+const radarDraftNote = ref('')
+const radarDraftSourceHash = ref('')
+const isApplyingRadar = ref(false)
 
-// 自动检测并由 AI 生成/补齐岗位统一技能画像与核心能力
-async function checkAndAutoGenerateMetrics() {
-  const pId = projectId.value
-  if (!pId || isGeneratingMetrics.value) return
-  const curP = projectStore.currentProject
-  if (!curP) return
-  const set = new Set<string>()
-  ;(curP.job_config?.required_skills || []).forEach(s => s && set.add(s.trim()))
-  ;(curP.job_config?.core_criteria || []).forEach(c => c && set.add(c.trim()))
-  if (set.size < 3) {
-    isGeneratingMetrics.value = true
-    try {
-      await projectStore.ensureProjectJobMetrics(pId)
-    } finally {
-      isGeneratingMetrics.value = false
-    }
-  }
+async function openRadarDraft() {
+  if (!projectId.value || isGeneratingMetrics.value) return
+  isGeneratingMetrics.value = true
+  try {
+    const api: any = await import('../../wailsjs/go/main/App')
+    const draft = await api.PreviewProjectJobRadar(projectId.value)
+    radarDraftText.value = (draft.metrics || []).join('\n')
+    radarDraftOrigin.value = draft.origin || ''
+    radarDraftNote.value = draft.note || ''
+    radarDraftSourceHash.value = draft.sourceHash || ''
+    radarDraftOpen.value = true
+  } catch (err: any) { ElMessage.error(err?.message || String(err)) }
+  finally { isGeneratingMetrics.value = false }
+}
+
+async function applyRadarDraft() {
+  const metrics = [...new Set(radarDraftText.value.split(/\r?\n/).map(s => s.trim()).filter(Boolean))]
+  if (metrics.length < 1 || metrics.length > 8) { ElMessage.warning('请确认 1 至 8 项相关指标'); return }
+  isApplyingRadar.value = true
+  try {
+    const api: any = await import('../../wailsjs/go/main/App')
+    await api.ApplyProjectJobRadar({ projectId: projectId.value, sourceHash: radarDraftSourceHash.value, metrics, origin: radarDraftOrigin.value, note: radarDraftNote.value })
+    await projectStore.refreshProject(projectId.value)
+    await resumeStore.loadProjectResumes(projectId.value)
+    radarDraftOpen.value = false
+    ElMessage.success('岗位雷达指标已保存；旧测评如不一致将等待 HR 复核')
+  } catch (err: any) { ElMessage.error(err?.message || String(err)) }
+  finally { isApplyingRadar.value = false }
 }
 
 // 基于当前岗位配置的【技能要求 + 核心能力】构建统一雷达指标
 const unifiedJobMetrics = computed<string[]>(() => {
   const jobCfg = projectStore.currentProject?.job_config
   const set = new Set<string>()
+  if (jobCfg?.radar_metrics?.length) return jobCfg.radar_metrics
   if (jobCfg?.required_skills && Array.isArray(jobCfg.required_skills)) {
     for (const s of jobCfg.required_skills) {
       const trimmed = (s || '').trim()
@@ -1039,22 +1059,17 @@ const unifiedJobMetrics = computed<string[]>(() => {
       if (trimmed) set.add(trimmed)
     }
   }
-  // 若当前指标仍少于 3 项，智能补齐通用保底指标，确保雷达图绝不出现少于 3 项的空白
-  if (set.size < 3) {
-    const fallbacks = ['专业技能掌握度', '核心业务交付', '复杂问题分析与排查', '工程化规范与落地', '团队沟通与自驱协同']
-    for (const fb of fallbacks) {
-      set.add(fb)
-      if (set.size >= 5) break
-    }
-  }
   return Array.from(set)
 })
+
+const hasFixedRadarProfile = computed(() => !!projectStore.currentProject?.job_config?.radar_profile_hash)
 
 // 将当前候选人的评估记录对齐到岗位统一指标
 const activeRadarChecks = computed<RadarCheckItem[]>(() => {
   const analysis = resumeStore.selectedResume?.analysis
   const metrics = unifiedJobMetrics.value
   if (!analysis) return []
+  if (analysis.radarStale) return metrics.map(criterion => ({ criterion, level: 0, evidence: '', assessment: '旧测评使用了不同的岗位指标，待 AI 复核', isCovered: false, isUnknown: true }))
 
   const expComps: any[] = analysis.experienceCompetencies || []
   const coreChecks: any[] = (analysis as any).coreCriterionChecks || []
@@ -1063,15 +1078,10 @@ const activeRadarChecks = computed<RadarCheckItem[]>(() => {
   return metrics.map(metric => {
     // 优先精确匹配
     let matched = allExisting.find(item => item.criterion === metric || item.criterion?.trim().toLowerCase() === metric.trim().toLowerCase())
-    // 其次模糊包含匹配
-    if (!matched) {
-      matched = allExisting.find(item => item.criterion && (item.criterion.includes(metric) || metric.includes(item.criterion)))
-    }
-
     if (matched) {
       const lvl = typeof matched.level === 'number' ? Math.max(0, Math.min(4, matched.level)) : 0
       const hasEv = !!(matched.evidence && matched.evidence.trim())
-      const isKnown = matched.evidence_status === 'known' || hasEv || (lvl === 0 && matched.assessment && !matched.assessment.includes('未提及') && !matched.assessment.includes('未提供') && !matched.assessment.includes('材料未提及'))
+      const isKnown = matched.evidence_status !== 'unknown' && matched.evidence_status !== 'conflict' && hasEv
       return {
         criterion: metric,
         level: lvl,
@@ -1093,11 +1103,12 @@ const activeRadarChecks = computed<RadarCheckItem[]>(() => {
   })
 })
 
+const missingRadarMetrics = computed(() => activeRadarChecks.value.filter(item => item.isUnknown).map(item => item.criterion))
+
 const radarCoverageRatio = computed(() => {
-  const a = resumeStore.selectedResume?.analysis as any
-  if (a && typeof a.radar_coverage === 'number') {
-    return a.radar_coverage
-  }
+  const a = resumeStore.selectedResume?.analysis
+  if (a?.radarStale) return 0
+  if (a && typeof a.radarCoverage === 'number') return a.radarCoverage
   const checks = activeRadarChecks.value
   if (!checks.length) return 0
   const knownCount = checks.filter(c => !c.isUnknown).length
@@ -1105,17 +1116,16 @@ const radarCoverageRatio = computed(() => {
 })
 
 const isRankEligible = computed(() => {
-  const a = resumeStore.selectedResume?.analysis as any
-  if (a && typeof a.rank_eligible === 'boolean') {
-    return a.rank_eligible
-  }
+  const a = resumeStore.selectedResume?.analysis
+  if (a?.radarStale) return false
+  if (a && typeof a.rankEligible === 'boolean') return a.rankEligible
   return radarCoverageRatio.value >= 0.8
 })
 
 const radarScoreBounds = computed(() => {
-  const a = resumeStore.selectedResume?.analysis as any
-  if (a && typeof a.score_lower_bound === 'number' && typeof a.score_upper_bound === 'number') {
-    return `${a.score_lower_bound.toFixed(1)} ~ ${a.score_upper_bound.toFixed(1)} 分`
+  const a = resumeStore.selectedResume?.analysis
+  if (a && typeof a.scoreLowerBound === 'number' && typeof a.scoreUpperBound === 'number') {
+    return `${a.scoreLowerBound.toFixed(1)} ~ ${a.scoreUpperBound.toFixed(1)} 分`
   }
   return ''
 })
@@ -1143,7 +1153,7 @@ const radarIndicators = computed(() => {
 })
 
 const radarCandidateValues = computed(() => {
-  return radarDisplayChecks.value.map(c => c.level ?? 0)
+  return radarDisplayChecks.value.map(c => c.isUnknown ? null : c.level)
 })
 
 // 左右面板拖拽调整宽度 (Splitter Resizer)
@@ -1557,7 +1567,6 @@ const showConfigGuide = ref(false)
 const showBossDialog = ref(false)
 const showInterviewDialog = ref(false)
 const isClearingProject = ref(false)
-const hasReanalyzableResumes = computed(() => resumeStore.resumes.some(r => r.status === 'done' || r.status === 'error'))
 const isAnalysisBusy = computed(() => resumeStore.isAnalyzing || resumeStore.resumes.some(r => r.status === 'analyzing'))
 
 async function handleReviewRedLine(criterion: string, status: 'met' | 'violated' | 'unknown') {
@@ -2128,7 +2137,10 @@ const sortedResumes = computed(() => {
   return [...resumeStore.resumes].sort((a, b) => {
     if (a.status === 'done' && b.status !== 'done') return -1
     if (a.status !== 'done' && b.status === 'done') return 1
-    if (a.status === 'done' && b.status === 'done') return (b.score || 0) - (a.score || 0)
+    if (a.status === 'done' && b.status === 'done') {
+      if (!!a.analysis?.rankEligible !== !!b.analysis?.rankEligible) return a.analysis?.rankEligible ? -1 : 1
+      return (b.score || 0) - (a.score || 0)
+    }
     if (a.status === 'analyzing' && b.status === 'pending') return -1
     if (a.status === 'pending' && b.status === 'analyzing') return 1
     return 0
@@ -2138,7 +2150,7 @@ const sortedResumes = computed(() => {
 // 排名按综合得分降序排列
 const rankedResumes = computed(() => {
   return resumeStore.resumes
-    .filter(r => r.status === 'done' && r.score)
+    .filter(r => r.status === 'done' && r.analysis?.rankEligible && !r.analysis?.radarStale)
     .sort((a, b) => (b.score || 0) - (a.score || 0))
 })
 
@@ -2215,11 +2227,18 @@ async function handleSelectFiles() {
   }
 }
 
-function handleStartAnalysis() {
+async function handleStartAnalysis() {
   const pendingCount = resumeStore.analysisReadyCount
-  if (pendingCount === 0) { ElMessage.warning(t('guide.noResumesToAnalyze')); return }
+  if (resumeStore.isAnalyzing || resumeStore.resumes.length === 0) return
   if (!checkAIConfig()) { showConfigGuide.value = true; return }
-  resumeStore.startAnalysis()
+  if (pendingCount > 0) {
+    if (await resumeStore.startAnalysis() && projectId.value) await projectStore.refreshProject(projectId.value)
+    return
+  }
+  const completedCount = resumeStore.doneCount
+  if (completedCount === 0) { ElMessage.warning(t('guide.noResumesToAnalyze')); return }
+  const started = await resumeStore.reAnalyzeAll()
+  if (started && projectId.value) await projectStore.refreshProject(projectId.value)
 }
 
 // 加载解析内容
@@ -2264,21 +2283,8 @@ watch(() => resumeStore.selectedId, () => {
   if (rightTab.value === 'content') { loadParsedContent() }
 })
 
-async function handleReAnalyze(id: string) {
-  if (!checkAIConfig()) { showConfigGuide.value = true; return }
-  await resumeStore.reAnalyze(id)
-}
-
-async function handleReAnalyzeAll() {
-  if (!hasReanalyzableResumes.value) { ElMessage.warning(t('home.noAnalyzedResumes')); return }
-  if (!checkAIConfig()) { showConfigGuide.value = true; return }
-  const ok = await resumeStore.reAnalyzeAll()
-  if (!ok) { ElMessage.warning(t('home.noAnalyzedResumes')) }
-}
-
 function handleResumeMenuCommand(command: string) {
   if (command === 'import-local') void handleSelectFiles()
-  if (command === 'reanalyze') void handleReAnalyzeAll()
   if (command === 'export') void handleExport()
   if (command === 'clear') void handleClearProject()
 }
@@ -2357,8 +2363,7 @@ onMounted(async () => {
     if (projectStore.currentProject) {
       jobTitle.value = projectStore.currentProject.job_config?.title || jobTitle.value
     }
-    // 静默检查并由 AI 自动推导补齐岗位统一技能指标
-    await checkAndAutoGenerateMetrics()
+    // 岗位雷达指标只在 HR 确认草稿后更新。
     // 加载项目下的简历
     await resumeStore.loadProjectResumes(projectId.value)
     selectTargetResumeFromRoute()
@@ -2842,21 +2847,7 @@ onUnmounted(() => {
           transform: translateY(0);
         }
 
-        &.is-all-done {
-          background: rgba(37, 99, 235, 0.08);
-          border: 1px solid rgba(37, 99, 235, 0.25);
-          color: var(--accent-blue, #2563eb);
-          box-shadow: none;
-          cursor: not-allowed;
-          opacity: 0.9;
-
-          &:hover {
-            transform: none;
-            box-shadow: none;
-          }
-        }
-
-        &:disabled:not(.is-all-done) {
+        &:disabled {
           background: var(--bg-card-secondary, #f1f5f9);
           border: 1px solid $gray-4;
           color: $text-secondary;
