@@ -341,7 +341,7 @@
                   <span>{{ item.abilityScore }}</span>
                 </div>
                 <div v-else class="candidate-match-pending">{{ item.radarStale ? '待复核' : '待分析' }}</div>
-                <small>岗位依据分</small>
+                <small>综合评分</small>
               </div>
             </div>
 
@@ -366,7 +366,7 @@
             </div>
 
             <div class="wb-candidate-foot">
-              <span class="candidate-created-time">入库 {{ formatDate(item.createdAt) }}<span v-if="item.analysisStatus === 'done' && !item.radarStale"> · 岗位依据分 {{ item.abilityScore }}</span><span v-else-if="item.matchScore"> · 综合匹配参考 {{ item.matchScore }}</span></span>
+              <span class="candidate-created-time">入库 {{ formatDate(item.createdAt) }}<span v-if="item.analysisStatus === 'done' && !item.radarStale"> · 综合评分 {{ item.abilityScore }}</span><span v-else-if="item.matchScore"> · 综合匹配参考 {{ item.matchScore }}</span></span>
               <div class="candidate-actions">
                 <el-button class="candidate-primary-action" size="small" type="primary" plain @click="navigateToEvaluation(item)">查看测评</el-button>
                 <el-button class="candidate-secondary-action" size="small" type="primary" @click="openInterviewInvite(item)">
@@ -444,7 +444,7 @@
               </template>
             </el-table-column>
 
-            <el-table-column label="岗位依据分" width="110" align="center">
+            <el-table-column label="综合评分" width="110" align="center">
               <template #default="{ row }">
                 <span
                   v-if="row.analysisStatus === 'done' && !row.radarStale"
@@ -563,7 +563,7 @@
             </div>
             <div class="invite-sub-text">
               <span>应聘分库：<strong>{{ inviteCandidate.jobTitle || inviteCandidate.projectName }}</strong></span>
-              <span v-if="inviteCandidate.rankEligible"> · 岗位依据分：<strong>{{ inviteCandidate.abilityScore }}分</strong></span><span v-else-if="inviteCandidate.matchScore"> · 综合匹配参考：<strong>{{ inviteCandidate.matchScore }}分</strong></span>
+              <span v-if="inviteCandidate.rankEligible"> · 综合评分：<strong>{{ inviteCandidate.abilityScore }}分</strong></span><span v-else-if="inviteCandidate.matchScore"> · 综合匹配参考：<strong>{{ inviteCandidate.matchScore }}分</strong></span>
             </div>
           </div>
           <el-button

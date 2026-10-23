@@ -19,7 +19,7 @@
           <div v-for="item in inStage(stage)" :key="item.projectCandidateId" class="wb-kanban-card" role="button" tabindex="0" @click="edit(item)" @keydown.enter="edit(item)">
             <div style="display:flex;gap:9px;align-items:center"><span class="wb-avatar" style="width:31px;height:31px">{{ getCandidateSurname(item) }}</span><strong>{{ item.name }}</strong></div>
             <div class="wb-muted" style="font-size:12px;margin:8px 0">{{ item.jobTitle || item.projectName }}</div>
-            <div style="display:flex;justify-content:space-between;align-items:center"><span class="wb-pill">{{ item.analysisStatus === 'done' && !item.radarStale ? `岗位 ${item.abilityScore}` : item.radarStale ? '待复核' : '待分析' }}</span><span class="wb-muted" style="font-size:11px">{{ item.owner || '未分配' }}</span></div>
+            <div style="display:flex;justify-content:space-between;align-items:center"><span class="wb-pill">{{ item.analysisStatus === 'done' && !item.radarStale ? `综合 ${item.abilityScore}` : item.radarStale ? '待复核' : '待分析' }}</span><span class="wb-muted" style="font-size:11px">{{ item.owner || '未分配' }}</span></div>
             <div v-if="item.nextActionAt" class="wb-muted" style="font-size:11px;margin-top:8px">下次：{{ formatDate(item.nextActionAt) }}</div>
           </div>
           <div v-if="!inStage(stage).length" class="wb-muted" style="font-size:12px;padding:8px 4px">暂无人选</div>

@@ -104,9 +104,9 @@ const resultCaptionText = computed(() => {
   if (props.resume.analysis?.radarStale) return `待复核 · 旧分 ${props.resume.analysis?.abilityScore ?? props.resume.score ?? '—'}`
   const cov = props.resume.analysis?.radarCoverage
   if (typeof cov === 'number' && cov < 1) {
-    return `岗位评分 · 覆盖 ${Math.round(cov * 100)}%`
+    return `综合评分 · 技能覆盖 ${Math.round(cov * 100)}%`
   }
-  return '岗位依据分'
+  return '综合评分'
 })
 
 const failureSummary = computed(() => {

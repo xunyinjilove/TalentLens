@@ -37,7 +37,7 @@ import (
 )
 
 // 版本信息
-const AppVersion = "1.8.64"
+const AppVersion = "1.8.65"
 const analysisFormatRetryVersion = "model-json-repair-v1"
 const GitHubRepo = "xunyinjilove/TalentLens"
 
@@ -4333,7 +4333,21 @@ func scoreCandidate(result *AnalysisResult, criteria []string, initialScores ...
 		result.ScoreBasis = "provisional"
 	}
 
-	result.AbilityScore = int(math.Round(result.CoreMatch))
+	// 统一技能指标雷达得分作为技能匹配度 (SkillMatch)
+	if wAll > 0 {
+		result.SkillMatch = math.Round(totalScore)
+	}
+
+	// 经典权重融合模型：技能 55% + 经验 35% + 学历 10%
+	if result.ExperienceMatch > 0 || result.EducationMatch > 0 {
+		weighted := clampFloat(result.SkillMatch, 0, 100)*0.55 +
+			clampFloat(result.ExperienceMatch, 0, 100)*0.35 +
+			clampFloat(result.EducationMatch, 0, 100)*0.10
+		result.AbilityScore = int(math.Round(weighted))
+	} else {
+		result.AbilityScore = int(math.Round(result.CoreMatch))
+	}
+
 	result.BonusScore = 0
 	refreshCandidateRecommendation(result)
 }
