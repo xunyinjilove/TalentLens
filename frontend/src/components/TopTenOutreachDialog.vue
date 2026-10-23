@@ -26,7 +26,7 @@
             一键全选 / 纳入本批
           </el-checkbox>
           <span class="selected-badge">已选 {{ selectedCount }} / {{ batch.items.length }} 人</span>
-          <el-radio-group v-model="templateMode" size="small" @change="() => preview(true)" style="margin-left: 8px">
+          <el-radio-group v-model="templateMode" size="small" @change="handleTemplateModeChange" style="margin-left: 8px">
             <el-radio-button label="template">⚡ 极速企业模板 (0 AI消耗)</el-radio-button>
             <el-radio-button label="ai">✨ AI 深度定制</el-radio-button>
           </el-radio-group>
@@ -58,6 +58,7 @@
           <strong>#{{ item.rank }} {{ item.candidateName }}</strong>
           <span class="wb-pill" v-if="item.abilityScore > 0">能力 {{ item.abilityScore }}</span>
           <span class="wb-pill wb-muted" v-else>待初筛</span>
+          <span class="wb-pill ai-saved-pill" v-if="item.aiCustomized">✨ 已保存 AI 定制</span>
           <span class="wb-muted">{{ item.platform || '平台未确认' }} · {{ item.platformCandidateId || '缺少稳定 ID' }}</span>
           <el-button v-if="item.profileUrl" size="small" link @click="openProfile(item.profileUrl)">打开候选人网页</el-button>
           <div class="head-actions" v-if="batch.status === 'draft'">
@@ -81,7 +82,7 @@
           <div class="wb-actions" style="margin-bottom:8px">
             <el-checkbox v-model="selected[item.id]">纳入本批</el-checkbox>
           </div>
-          <el-input v-model="messages[item.id]" type="textarea" :rows="3" :maxlength="500" show-word-limit :disabled="!selected[item.id]" />
+          <el-input v-model="messages[item.id]" type="textarea" :rows="3" :maxlength="500" show-word-limit :disabled="!selected[item.id]" @change="val => saveEditedMessage(item, val)" />
         </template>
         <template v-else>
           <p class="outreach-message">{{ item.message }}</p>
@@ -183,7 +184,7 @@ import { computed, ref, watch } from 'vue'
 import { InfoFilled, Refresh } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 
-interface Item { id:string; rank:number; candidateName:string; platform:string; platformCandidateId:string; profileUrl:string; redLineStatus:string; abilityScore:number; evidence:string; message:string; status:string; result:string }
+interface Item { id:string; rank:number; candidateName:string; platform:string; platformCandidateId:string; profileUrl:string; redLineStatus:string; abilityScore:number; evidence:string; message:string; status:string; result:string; aiCustomized?:boolean }
 interface JobOption { id:string; title:string; company?:string; workArea?:string }
 interface Batch { id:string; status:string; projectTitle:string; items:Item[]; authorization?:{jobId:string; jobTitle:string; perPersonLimit:number; totalLimit:number; reservedPoints:number; status:string; message:string} }
 const props = withDefaults(defineProps<{
@@ -251,7 +252,25 @@ function handleSelectAll(val: any) {
 }
 
 function statusLabel(status:string){return ({queued:'待发送',awaiting_confirmation:'已核点／待发送',sending:'发送中或中断待核查',partial:'部分完成／待核查',needs_manual:'需人工处理',excluded:'未纳入',sent:'已核实发送',failed:'失败',uncertain:'待核查'} as Record<string,string>)[status]||status}
-async function preview(forceNew=false){
+function handleTemplateModeChange(val: any) {
+  if (val === 'template') {
+    void preview(true, 'force_template')
+  } else {
+    void preview(true, 'ai')
+  }
+}
+async function saveEditedMessage(item: Item, val: string) {
+  const clean = String(val || '').trim()
+  if (!clean || !props.projectId) return
+  try {
+    const api: any = await import('../../wailsjs/go/main/App')
+    if (api.SaveOutreachItemMessage) {
+      await api.SaveOutreachItemMessage(props.projectId, item.id, clean)
+      item.aiCustomized = true
+    }
+  } catch {}
+}
+async function preview(forceNew=false, explicitMode?: string){
   if(!props.projectId)return
   loading.value=true;error.value='';batch.value=null
   try{
@@ -269,10 +288,14 @@ async function preview(forceNew=false){
       }catch{}
       localStorage.removeItem(storageKey)
     }
+    const modeToUse = explicitMode || templateMode.value
     if (api.PreviewBatchOutreach) {
-      batch.value = await api.PreviewBatchOutreach(props.projectId, ids, templateMode.value)
+      batch.value = await api.PreviewBatchOutreach(props.projectId, ids, modeToUse)
     } else {
       batch.value = await api.PreviewTopTenOutreach(props.projectId)
+    }
+    if (!explicitMode && batch.value?.items?.some(item => item.aiCustomized)) {
+      templateMode.value = 'ai'
     }
     if(batch.value?.id && ids.length === 0)localStorage.setItem(storageKey,batch.value.id)
     for(const item of batch.value?.items||[]){
@@ -290,7 +313,8 @@ async function regenerateSingle(item: Item) {
     const newMsg = await api.GenerateCandidateAIOutreachMessage(props.projectId, item.id)
     if (newMsg) {
       messages.value[item.id] = newMsg
-      ElMessage.success(`已结合【${item.candidateName}】的真实项目与工作经历重新定制招呼语`)
+      item.aiCustomized = true
+      ElMessage.success(`已结合【${item.candidateName}】的真实项目与工作经历重新定制招呼语并保存`)
     }
   } catch (err: any) {
     ElMessage.error(`AI 生成失败: ${err?.message || String(err)}`)
@@ -311,12 +335,14 @@ async function regenerateAll() {
         const newMsg = await api.GenerateCandidateAIOutreachMessage(props.projectId, item.id)
         if (newMsg) {
           messages.value[item.id] = newMsg
+          item.aiCustomized = true
           successCount++
         }
       } catch {}
       regenerating.value[item.id] = false
     }
-    ElMessage.success(`已完成 ${successCount} 位候选人的 AI 深度定制招呼语`)
+    templateMode.value = 'ai'
+    ElMessage.success(`已完成 ${successCount} 位候选人的 AI 深度定制招呼语并保存`)
   } finally {
     regeneratingAll.value = false
   }
@@ -567,6 +593,7 @@ watch(()=>props.candidateIds,()=>{if(props.modelValue)void preview(true)},{deep:
 .head-actions{margin-left:auto}
 .evidence-line{display:flex;align-items:center;gap:6px;margin:6px 0!important}
 .evidence-tag{display:inline-block;padding:1px 6px;border-radius:4px;background:rgba(79, 70, 229, 0.1);color:#4f46e5;font-weight:600;font-size:11px}
+.ai-saved-pill{background:rgba(79, 70, 229, 0.12)!important;color:#4f46e5!important;font-weight:600}
 .budget-summary{display:flex;flex-wrap:wrap;gap:8px 20px;padding:16px;margin-bottom:16px;border:1px solid var(--wb-border);border-radius:12px;background:var(--wb-surface-soft);font-size:13px;color:var(--wb-text)}
 .budget-summary p{flex-basis:100%;margin:0}
 .budget-hint{font-size:13px;line-height:1.6;color:var(--wb-text);margin:0 0 16px}

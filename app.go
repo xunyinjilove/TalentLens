@@ -37,7 +37,7 @@ import (
 )
 
 // 版本信息
-const AppVersion = "1.8.57"
+const AppVersion = "1.8.58"
 const analysisFormatRetryVersion = "model-json-repair-v1"
 const GitHubRepo = "xunyinjilove/TalentLens"
 
@@ -2555,11 +2555,99 @@ func (a *App) StartSearchWithOptions(projectID string, keyword string, city stri
 	return a.startQuotaMatrixSearch(projectID, keyword, city, expYears, eduLevel, count, platforms, quotaMatrixJSON, autoAnalyze, 0, "balanced")
 }
 
+func normalizeActivityDays(activityDays int) int {
+	switch activityDays {
+	case 0, 1, 3, 7, 14, 30, 60, 180, 365, 366:
+		return activityDays
+	default:
+		return 0
+	}
+}
+
+func activityDaysTo51JobLabel(activityDays int) string {
+	switch activityDays {
+	case 1, 3, 7:
+		return "近1周"
+	case 14:
+		return "近2周"
+	case 30:
+		return "近1个月"
+	case 60:
+		return "近2个月"
+	case 180:
+		return "近6个月"
+	case 365:
+		return "近1年"
+	case 366:
+		return "1年及以上"
+	default:
+		return ""
+	}
+}
+
+func activityLabelToDays(label string) int {
+	switch strings.TrimSpace(label) {
+	case "近1周":
+		return 7
+	case "近2周":
+		return 14
+	case "近1个月":
+		return 30
+	case "近2个月":
+		return 60
+	case "近6个月":
+		return 180
+	case "近1年":
+		return 365
+	case "1年及以上":
+		return 366
+	default:
+		return 0
+	}
+}
+
+func buildEffectiveSearchKeyword(jobTitle string, rawInputKeyword string, savedExtraKeywords string) (effectiveKeyword string, extraKeywords string) {
+	baseTitle := strings.TrimSpace(jobTitle)
+	rawInput := strings.TrimSpace(rawInputKeyword)
+	rawExtra := strings.TrimSpace(savedExtraKeywords)
+
+	// 若调用方传入了 "职位名 附加词1 附加词2"，提取其中的附加词
+	if baseTitle != "" && strings.HasPrefix(rawInput, baseTitle) {
+		suffix := strings.TrimSpace(strings.TrimPrefix(rawInput, baseTitle))
+		if suffix != "" {
+			rawExtra = suffix
+		}
+	} else if baseTitle == "" && rawInput != "" {
+		baseTitle = rawInput
+	}
+
+	seen := make(map[string]bool)
+	if baseTitle != "" {
+		seen[baseTitle] = true
+	}
+	var extraTokens []string
+	splitter := regexp.MustCompile(`[\s,，;；、\n]+`)
+	for _, tok := range splitter.Split(rawExtra, -1) {
+		tok = strings.TrimSpace(tok)
+		if tok != "" && !seen[tok] {
+			seen[tok] = true
+			extraTokens = append(extraTokens, tok)
+		}
+	}
+	extraKeywords = strings.Join(extraTokens, " ")
+	if baseTitle != "" && extraKeywords != "" {
+		effectiveKeyword = baseTitle + " " + extraKeywords
+	} else if baseTitle != "" {
+		effectiveKeyword = baseTitle
+	} else {
+		effectiveKeyword = extraKeywords
+	}
+	return effectiveKeyword, extraKeywords
+}
+
 // StartSearchWithPolicy 为 HR 的活跃度和渠道策略选择提供明确参数；旧入口保持兼容。
 func (a *App) StartSearchWithPolicy(projectID string, keyword string, city string, expYears int, eduLevel string, count int, platforms []string, quotaMatrixJSON string, autoAnalyze bool, activityDays int, channelStrategy string) bool {
-	if activityDays != 0 && activityDays != 1 && activityDays != 3 {
-		activityDays = 0
-	}
+	activityDays = normalizeActivityDays(activityDays)
 	if channelStrategy != "priority" {
 		channelStrategy = "balanced"
 	}
@@ -2577,9 +2665,17 @@ func (a *App) startQuotaMatrixSearch(projectID string, keyword string, city stri
 		})
 		return false
 	}
-	// The saved position is the sole source of candidate search conditions.
-	if title := strings.TrimSpace(project.JobConfig.Title); title != "" {
-		keyword = title
+	baseTitle := strings.TrimSpace(project.JobConfig.Title)
+	savedExtra := ""
+	if project.JobConfig.SourcingFilters != nil {
+		savedExtra = project.JobConfig.SourcingFilters["extra_keywords"]
+		if activityDays == 0 && strings.TrimSpace(project.JobConfig.SourcingFilters["recent_active_time"]) != "" {
+			activityDays = activityLabelToDays(project.JobConfig.SourcingFilters["recent_active_time"])
+		}
+	}
+	effectiveKw, extraKeywords := buildEffectiveSearchKeyword(baseTitle, keyword, savedExtra)
+	if effectiveKw != "" {
+		keyword = effectiveKw
 	}
 	if workCity := strings.TrimSpace(project.JobConfig.City); workCity != "" {
 		city = workCity
@@ -2731,13 +2827,28 @@ func (a *App) startQuotaMatrixSearch(projectID string, keyword string, city stri
 		"--channel-strategy", channelStrategy,
 	}
 	if slices.Contains(platforms, "51job") {
+		mergedFilters := make(map[string]string)
+		for k, v := range project.JobConfig.SourcingFilters {
+			mergedFilters[k] = v
+		}
+		if activeLabel := activityDaysTo51JobLabel(activityDays); activeLabel != "" {
+			mergedFilters["recent_active_time"] = activeLabel
+		}
+		if extraKeywords != "" {
+			mergedFilters["extra_keywords"] = extraKeywords
+		}
+		titleFor51 := baseTitle
+		if titleFor51 == "" {
+			titleFor51 = keyword
+		}
 		filters := map[string]interface{}{
-			"title":      keyword,
-			"work_city":  city,
-			"experience": strings.TrimSpace(project.JobConfig.ExperienceText),
-			"education":  eduLevel,
-			"skills":     project.JobConfig.RequiredSkills,
-			"filters":    project.JobConfig.SourcingFilters,
+			"title":          titleFor51,
+			"extra_keywords": extraKeywords,
+			"work_city":      city,
+			"experience":     strings.TrimSpace(project.JobConfig.ExperienceText),
+			"education":      eduLevel,
+			"skills":         project.JobConfig.RequiredSkills,
+			"filters":        mergedFilters,
 		}
 		if filters["experience"] == "" && expYears > 0 {
 			filters["experience"] = expStr

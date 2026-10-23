@@ -39,3 +39,50 @@ test('activity filter only accepts explicitly labeled recent activity', async ()
     assert.equal((await agent.extractCandidatesAcrossFrames(page, 10, '', '', [], [], { activeDays: 3 })).length, 0);
   } finally { delete global.document; }
 });
+
+test('51job 7-tier recent active time filter and extra keywords task builder', async () => {
+  assert.equal(agent.activeDaysTo51JobLabel(7), '近1周');
+  assert.equal(agent.activeDaysTo51JobLabel(14), '近2周');
+  assert.equal(agent.activeDaysTo51JobLabel(30), '近1个月');
+  assert.equal(agent.activeDaysTo51JobLabel(60), '近2个月');
+  assert.equal(agent.activeDaysTo51JobLabel(180), '近6个月');
+  assert.equal(agent.activeDaysTo51JobLabel(365), '近1年');
+  assert.equal(agent.activeDaysTo51JobLabel(366), '1年及以上');
+
+  assert.equal(agent.normalize51JobOption('最近活跃时间', '近6个月'), '近6个月');
+  assert.equal(agent.normalize51JobOption('最近活跃时间', '1年及以上'), '1年及以上');
+  assert.equal(agent.normalize51JobOption('最近活跃时间', '不限'), '不限');
+  assert.equal(agent.normalize51JobOption('最近活跃时间', 180), '近6个月');
+
+  const tasks = agent.build51JobQuotaTasks({
+    title: '体外诊断研发工程师',
+    extra_keywords: 'PCR 微流控',
+    skills: ['引物设计', '冻干工艺']
+  }, '', 15);
+  assert.equal(tasks.length, 3);
+  assert.equal(tasks[0].keyword, '体外诊断研发工程师 PCR 微流控');
+  assert.equal(tasks[1].keyword, '体外诊断研发工程师 PCR 微流控 引物设计');
+  assert.equal(tasks[2].keyword, '体外诊断研发工程师 PCR 微流控 冻干工艺');
+
+  const makeCard = (label) => ({
+    offsetParent: {}, getClientRects: () => [1],
+    innerText: `张先生\n上海 本科 5年经验\n${label}\n负责PCR试剂开发`,
+    querySelector: selector => selector.includes('.firstline .name')
+      ? { innerText: '张先生' }
+      : selector.includes('.userinfo') ? { innerText: '上海 本科 5年经验' } : null,
+    querySelectorAll: () => [], getAttribute: () => null
+  });
+  const page = { evaluate: async (fn, ...args) => fn(...args), frames: () => [] };
+  try {
+    global.document = { querySelectorAll: () => [makeCard('近2个月活跃')] };
+    assert.equal((await agent.extractCandidatesAcrossFrames(page, 10, '', '前程无忧', [], [], { recentActiveTime: '近6个月' })).length, 1);
+    assert.equal((await agent.extractCandidatesAcrossFrames(page, 10, '', '前程无忧', [], [], { recentActiveTime: '近1个月' })).length, 0);
+    assert.equal((await agent.extractCandidatesAcrossFrames(page, 10, '', '前程无忧', [], [], { recentActiveTime: '1年及以上' })).length, 0);
+
+    global.document = { querySelectorAll: () => [makeCard('1年及以上活跃')] };
+    assert.equal((await agent.extractCandidatesAcrossFrames(page, 10, '', '前程无忧', [], [], { recentActiveTime: '1年及以上' })).length, 1);
+    assert.equal((await agent.extractCandidatesAcrossFrames(page, 10, '', '前程无忧', [], [], { recentActiveTime: '近1年' })).length, 0);
+  } finally {
+    delete global.document;
+  }
+});
