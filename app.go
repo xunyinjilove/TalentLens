@@ -37,7 +37,7 @@ import (
 )
 
 // 版本信息
-const AppVersion = "1.8.62"
+const AppVersion = "1.8.63"
 const analysisFormatRetryVersion = "model-json-repair-v1"
 const GitHubRepo = "xunyinjilove/TalentLens"
 
@@ -2194,6 +2194,9 @@ func (a *App) TestPlatformLogin(platform string) bool {
 
 	dataDir := filepath.Join(a.getDataDir(), "candidates_multi")
 	_ = os.MkdirAll(dataDir, 0755)
+	for _, plat := range []string{"51job", "boss", "zhaopin", "liepin"} {
+		_ = os.Remove(filepath.Join(dataDir, "manual_view_"+plat+".flag"))
+	}
 
 	scriptCandidates := []string{
 		filepath.Join("scripts", "multi_platform_agent.js"),
@@ -2296,6 +2299,9 @@ func (a *App) ExecuteBossCandidateAction(actionType string, candidateName string
 
 	dataDir := filepath.Join(a.getDataDir(), "candidates_multi")
 	_ = os.MkdirAll(dataDir, 0755)
+	for _, plat := range []string{"51job", "boss", "zhaopin", "liepin"} {
+		_ = os.Remove(filepath.Join(dataDir, "manual_view_"+plat+".flag"))
+	}
 
 	actionLabels := map[string]string{
 		"greet":           "打招呼 / 发送沟通意向",
@@ -2742,6 +2748,9 @@ func (a *App) startQuotaMatrixSearch(projectID string, keyword string, city stri
 
 	dataDir := filepath.Join(a.getDataDir(), "candidates_multi")
 	_ = os.MkdirAll(dataDir, 0755)
+	for _, plat := range []string{"51job", "boss", "zhaopin", "liepin"} {
+		_ = os.Remove(filepath.Join(dataDir, "manual_view_"+plat+".flag"))
+	}
 
 	// 探测脚本路径
 	scriptCandidates := []string{

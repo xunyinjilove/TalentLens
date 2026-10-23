@@ -335,17 +335,17 @@
           <h3>51job 寻才筛选</h3>
           <p>只用于搜索候选人；留空即不限。工作城市、工作年限、最低学历和必备技能沿用上方职位设置。</p>
           <div class="sourcing-filter-grid">
-            <el-form-item label="年龄"><el-select v-model="sourcingFilters.age" clearable placeholder="不限" allow-create filterable><el-option v-for="v in ['22岁及以下','22-25岁','25-30岁','30-35岁','35-45岁','45岁及以上']" :key="v" :label="v" :value="v" /></el-select></el-form-item>
-            <el-form-item label="性别"><el-select v-model="sourcingFilters.gender" clearable placeholder="不限"><el-option label="男" value="男" /><el-option label="女" value="女" /></el-select></el-form-item>
+            <el-form-item label="年龄"><el-select v-model="sourcingFilters.age" clearable placeholder="不限" allow-create filterable><el-option v-for="v in ['不限','22岁及以下','22-25岁','25-30岁','30-35岁','35-45岁','45岁及以上']" :key="v" :label="v" :value="v" /></el-select></el-form-item>
+            <el-form-item label="性别"><el-select v-model="sourcingFilters.gender" clearable placeholder="不限"><el-option label="不限" value="不限" /><el-option label="男" value="男" /><el-option label="女" value="女" /></el-select></el-form-item>
             <el-form-item label="居住地"><el-cascader v-model="catalogSelections.residence" :options="residenceOptions" :props="catalogProps" filterable clearable collapse-tags collapse-tags-tooltip placeholder="选择现居地" @change="syncCatalogFilter('residence')" /></el-form-item>
-            <el-form-item label="学校性质"><el-select v-model="sourcingFilters.school_type" clearable placeholder="不限" allow-create filterable><el-option v-for="v in ['全日制','985','211','双一流','留学经历','在校生']" :key="v" :label="v" :value="v" /></el-select></el-form-item>
+            <el-form-item label="学校性质"><el-select v-model="sourcingFilters.school_type" clearable placeholder="不限" allow-create filterable><el-option v-for="v in ['不限','全日制','985','211','双一流','留学经历','在校生']" :key="v" :label="v" :value="v" /></el-select></el-form-item>
             <el-form-item label="求职状态"><el-select v-model="sourcingFilters.job_seeking_status" clearable placeholder="不限"><el-option v-for="v in jobStatusOptions" :key="v" :label="v" :value="v" /></el-select></el-form-item>
             <el-form-item label="期望行业"><el-cascader v-model="catalogSelections.expected_industry" :options="industryOptions" :props="catalogProps" filterable clearable collapse-tags collapse-tags-tooltip placeholder="选择期望行业" @change="syncCatalogFilter('expected_industry')" /></el-form-item>
             <el-form-item label="期望职能"><el-cascader v-model="catalogSelections.expected_function" :options="functionOptions" :props="catalogProps" filterable clearable collapse-tags collapse-tags-tooltip placeholder="选择期望职能" @change="syncCatalogFilter('expected_function')" /></el-form-item>
-            <el-form-item label="期望月薪"><el-select v-model="sourcingFilters.expected_salary" clearable placeholder="不限" allow-create filterable><el-option v-for="v in ['8千','1万','1.5万','2万','2.5万','3万','4万','5万','6万','10万及以上']" :key="v" :label="v" :value="v" /></el-select></el-form-item>
+            <el-form-item label="期望月薪"><el-select v-model="sourcingFilters.expected_salary" clearable placeholder="不限" allow-create filterable><el-option v-for="v in ['不限','8千','1万','1.5万','2万','2.5万','3万','4万','5万','6万','10万及以上']" :key="v" :label="v" :value="v" /></el-select></el-form-item>
             <el-form-item label="从事行业"><el-cascader v-model="catalogSelections.current_industry" :options="industryOptions" :props="catalogProps" filterable clearable collapse-tags collapse-tags-tooltip placeholder="选择从事行业" @change="syncCatalogFilter('current_industry')" /></el-form-item>
             <el-form-item label="从事职能"><el-cascader v-model="catalogSelections.current_function" :options="functionOptions" :props="catalogProps" filterable clearable collapse-tags collapse-tags-tooltip placeholder="选择从事职能" @change="syncCatalogFilter('current_function')" /></el-form-item>
-            <el-form-item label="最近活跃时间"><el-select v-model="sourcingFilters.recent_active_time" clearable placeholder="不限"><el-option v-for="v in ['近1周','近2周','近1个月','近2个月','近6个月','近1年','1年及以上']" :key="v" :label="v" :value="v" /></el-select></el-form-item>
+            <el-form-item label="最近活跃时间"><el-select v-model="sourcingFilters.recent_active_time" clearable placeholder="不限"><el-option v-for="v in ['不限','近1周','近2周','近1个月','近2个月','近6个月','近1年','1年及以上']" :key="v" :label="v" :value="v" /></el-select></el-form-item>
           </div>
         </div>
 
@@ -642,7 +642,7 @@ const jobForm = reactive({
   education_level: '本科',
   job_description: ''
 })
-const emptySourcingFilters = () => ({ age: '', gender: '', residence: '', school_type: '', job_seeking_status: '', expected_industry: '', expected_function: '', expected_salary: '', current_industry: '', current_function: '', recent_active_time: '', extra_keywords: '' })
+const emptySourcingFilters = () => ({ age: '不限', gender: '不限', residence: '', school_type: '不限', job_seeking_status: '不限', expected_industry: '', expected_function: '', expected_salary: '不限', current_industry: '', current_function: '', recent_active_time: '不限', extra_keywords: '' })
 const sourcingFilters = reactive(emptySourcingFilters())
 type CatalogFilterKey = 'residence' | 'expected_industry' | 'expected_function' | 'current_industry' | 'current_function'
 type CatalogNode = { label: string; children: CatalogNode[] }
@@ -661,9 +661,10 @@ function toCascaderOptions(nodes: CatalogNode[], parents: string[] = []): Cascad
 const residenceOptions = toCascaderOptions(searchOptions.residence as CatalogNode[])
 const industryOptions = toCascaderOptions(searchOptions.industry as CatalogNode[])
 const functionOptions = toCascaderOptions(searchOptions.functions as CatalogNode[])
-const jobStatusOptions = searchOptions.jobStatuses.length
+const baseJobStatuses = searchOptions.jobStatuses.length
   ? searchOptions.jobStatuses
   : ['离职-周内到岗', '在职-月内到岗', '在职-观望机会']
+const jobStatusOptions = ['不限', ...baseJobStatuses.filter((item: string) => item !== '不限')]
 function optionsForCatalog(key: CatalogFilterKey): CascaderNode[] {
   return key === 'residence' ? residenceOptions : key.endsWith('industry') ? industryOptions : functionOptions
 }
@@ -943,7 +944,12 @@ function openEditModal(project: Project) {
   jobForm.experience_years = formatExpRequirement(project.job_config)
   jobForm.education_level = project.job_config?.education_level || '本科'
   jobForm.job_description = project.job_config?.job_description || ''
-  Object.assign(sourcingFilters, emptySourcingFilters(), project.job_config?.sourcing_filters || {})
+  const defaults = emptySourcingFilters()
+  const savedFilters = project.job_config?.sourcing_filters || {}
+  for (const key of Object.keys(defaults) as Array<keyof typeof defaults>) {
+    const val = (savedFilters[key] || '').trim()
+    sourcingFilters[key] = val || defaults[key]
+  }
   restoreCatalogSelections()
 
   // 修复空数组短路 bug：若 core_criteria 为 [] 则正确读取 required_skills
@@ -1099,7 +1105,7 @@ async function saveJob() {
       required_skills: skills,
       experience_years: expYears,
       experience_text: expText,
-      sourcing_filters: Object.fromEntries(Object.entries(sourcingFilters).map(([key, value]) => [key, value.trim()]).filter(([, value]) => value)),
+      sourcing_filters: Object.fromEntries(Object.entries(sourcingFilters).map(([key, value]) => [key, (value || '').trim()]).filter(([, value]) => value && value !== '不限')),
       education_level: jobForm.education_level,
       job_description: jobForm.job_description.trim(),
       city: jobForm.city,
