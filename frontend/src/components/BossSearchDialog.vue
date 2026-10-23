@@ -99,24 +99,13 @@
                 <span>{{ isQuotaMatrixActive ? '收起配额调度矩阵' : '⚡ AI 智能拓词与配额调度 (突破茧房)' }}</span>
               </button>
             </div>
-            <el-input v-model="form.keyword" disabled placeholder="以职位管理中保存的名称检索" />
+            <el-input :model-value="effectiveSearchKeyword" disabled placeholder="以职位配置中保存的名称与检索关键词组合检索" />
           </div>
           <div class="form-item flex-1">
             <label class="form-label">目标城市</label>
             <el-select v-model="form.city" disabled style="width: 100%">
               <el-option v-for="c in cityOptions" :key="c" :label="c" :value="c" />
             </el-select>
-          </div>
-        </div>
-
-        <div class="form-row" style="margin-top: 6px;">
-          <div class="form-item flex-2">
-            <label class="form-label">附加检索关键词（可选，与职位名空格拼接组合检索）</label>
-            <el-input
-              v-model="form.extraKeywords"
-              clearable
-              placeholder="如：医疗器械 IVD（多个词用空格或逗号分隔，与职位名称组合收窄检索）"
-            />
           </div>
         </div>
 
@@ -851,9 +840,14 @@ const form = reactive({
   activeDays: 0
 })
 
+const currentSavedJobConfig = computed(() => {
+  return props.jobConfig || projectStore.projects.find(item => item.id === props.projectId)?.job_config || {}
+})
+
 const normalizedExtraKeywords = computed(() => {
-  const baseTitle = (form.keyword || '').trim()
-  const tokens = String(form.extraKeywords || '')
+  const baseTitle = (currentSavedJobConfig.value.title || form.keyword || '').trim()
+  const rawExtra = currentSavedJobConfig.value.sourcing_filters?.extra_keywords ?? form.extraKeywords ?? ''
+  const tokens = String(rawExtra)
     .split(/[\s,，;；、\n]+/)
     .map(t => t.trim())
     .filter(t => t && t !== baseTitle)
@@ -861,7 +855,8 @@ const normalizedExtraKeywords = computed(() => {
 })
 
 const effectiveSearchKeyword = computed(() => {
-  return [form.keyword.trim(), normalizedExtraKeywords.value].filter(Boolean).join(' ').trim()
+  const baseTitle = (currentSavedJobConfig.value.title || form.keyword || '').trim()
+  return [baseTitle, normalizedExtraKeywords.value].filter(Boolean).join(' ').trim()
 })
 
 const displayed51JobFilters = computed(() => {
