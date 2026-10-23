@@ -74,6 +74,10 @@
                   </button>
                   <template #dropdown>
                     <el-dropdown-menu class="resume-more-dropdown">
+                      <el-dropdown-item command="filter51" :disabled="!projectId">
+                        <el-icon><Filter /></el-icon>
+                        <span>51job 人才管理自动筛选</span>
+                      </el-dropdown-item>
                       <el-dropdown-item command="import-local">
                         <el-icon><UploadFilled /></el-icon>
                         <span>导入本地简历（PDF/Word/图片）</span>
@@ -857,6 +861,15 @@
       :is-continue="bossDialogContinueMode"
       @refresh="handleRefreshProject"
     />
+    <TalentManagementFilterDialog
+      v-model="showTalentFilterDialog"
+      :project-id="projectId"
+      :project-name="projectName"
+      :job-title="projectStore.currentProject?.job_config?.title || jobTitle"
+      :default-education="projectStore.currentProject?.job_config?.education_level || ''"
+      :default-city="projectStore.currentProject?.job_config?.city || ''"
+      @completed="handleRefreshProject"
+    />
     <AIInterviewDialog v-model="showInterviewDialog" :resume-id="resumeStore.selectedResume?.id || ''" />
     <el-dialog v-model="radarDraftOpen" title="确认岗位统一技能指标" width="min(680px,92vw)">
       <p>这组指标将固定用于当前岗位。确认后，指标不一致的旧测评会标为待复核。</p>
@@ -972,6 +985,7 @@ import LanguageSwitcher from '../components/LanguageSwitcher.vue'
 import AIConfigGuide from '../components/AIConfigGuide.vue'
 import DevPanel from '../components/DevPanel.vue'
 import BossSearchDialog from '../components/BossSearchDialog.vue'
+import TalentManagementFilterDialog from '../components/TalentManagementFilterDialog.vue'
 import AIInterviewDialog from '../components/AIInterviewDialog.vue'
 import TopTenOutreachDialog from '../components/TopTenOutreachDialog.vue'
 import SvgDonutRing from '../components/charts/SvgDonutRing.vue'
@@ -1565,6 +1579,7 @@ const contactStatusText = computed(() => ({
 const jobTitle = ref('高级Go开发工程师')
 const showConfigGuide = ref(false)
 const showBossDialog = ref(false)
+const showTalentFilterDialog = ref(false)
 const showInterviewDialog = ref(false)
 const isClearingProject = ref(false)
 const isAnalysisBusy = computed(() => resumeStore.isAnalyzing || resumeStore.resumes.some(r => r.status === 'analyzing'))
@@ -2284,6 +2299,7 @@ watch(() => resumeStore.selectedId, () => {
 })
 
 function handleResumeMenuCommand(command: string) {
+  if (command === 'filter51') showTalentFilterDialog.value = true
   if (command === 'import-local') void handleSelectFiles()
   if (command === 'export') void handleExport()
   if (command === 'clear') void handleClearProject()

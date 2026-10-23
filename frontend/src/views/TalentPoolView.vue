@@ -40,6 +40,9 @@
           </el-button>
           <template #dropdown>
             <el-dropdown-menu>
+              <el-dropdown-item command="filter51" :disabled="!selectedProjectId">
+                <el-icon><CircleCheck /></el-icon>51job 人才管理自动筛选
+              </el-dropdown-item>
               <el-dropdown-item command="import" :disabled="importing">
                 <el-icon><Download /></el-icon>导入 51job 投递
               </el-dropdown-item>
@@ -769,6 +772,16 @@
       :edu-level="selectedProject.job_config?.education_level || ''"
       @refresh="refresh"
     />
+    <TalentManagementFilterDialog
+      v-if="selectedProject"
+      v-model="showTalentFilterDialog"
+      :project-id="selectedProject.id"
+      :project-name="selectedProject.name"
+      :job-title="selectedProject.job_config?.title || selectedProject.name"
+      :default-education="selectedProject.job_config?.education_level || ''"
+      :default-city="selectedProject.job_config?.city || ''"
+      @completed="refresh"
+    />
 
     <!-- 待分配投递抽屉 -->
     <el-drawer v-model="inboxOpen" title="主动投递 · 待分配" size="500px">
@@ -871,6 +884,7 @@ import { useProjectStore, type Project } from '../composables/useProjectStore'
 import { useRecruitmentStore, stageLabels, type TalentCandidate } from '../composables/useRecruitmentStore'
 import BossSearchDialog from '../components/BossSearchDialog.vue'
 import TopTenOutreachDialog from '../components/TopTenOutreachDialog.vue'
+import TalentManagementFilterDialog from '../components/TalentManagementFilterDialog.vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { getCandidateSurname } from '../utils/candidate'
 
@@ -1010,6 +1024,7 @@ function resetFilters() {
 }
 
 const showSearch = ref(false)
+const showTalentFilterDialog = ref(false)
 const showOutreach = ref(false)
 const outreachCandidateIds = ref<string[]>([])
 
@@ -1033,6 +1048,13 @@ const mergeReasons = ref<Record<string, string>>({})
 const pendingReviewCount = computed(() => pendingApplications.value.length + duplicates.value.length)
 
 function handleLibraryAction(command: string) {
+  if (command === 'filter51') {
+    if (!selectedProjectId.value) {
+      ElMessage.warning('请先在左侧选择一个具体职位分库')
+      return
+    }
+    showTalentFilterDialog.value = true
+  }
   if (command === 'import') void import51Job()
   if (command === 'inbox') showInbox()
   if (command === 'duplicates') showDuplicates()

@@ -210,6 +210,39 @@ CREATE TABLE IF NOT EXISTS communication_job_sync_snapshots (
   started_at TEXT NOT NULL,
   finished_at TEXT NOT NULL DEFAULT ''
 );
+CREATE TABLE IF NOT EXISTS talent_management_filter_runs (
+  id TEXT PRIMARY KEY,
+  project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  job_title TEXT NOT NULL DEFAULT '',
+  mode TEXT NOT NULL DEFAULT 'dry_run',
+  status TEXT NOT NULL DEFAULT 'running',
+  filter_json TEXT NOT NULL DEFAULT '{}',
+  total_scanned INTEGER NOT NULL DEFAULT 0,
+  unfit_count INTEGER NOT NULL DEFAULT 0,
+  keep_matched_count INTEGER NOT NULL DEFAULT 0,
+  keep_unknown_count INTEGER NOT NULL DEFAULT 0,
+  whitelist_skip_count INTEGER NOT NULL DEFAULT 0,
+  imported_count INTEGER NOT NULL DEFAULT 0,
+  message TEXT NOT NULL DEFAULT '',
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS talent_management_filter_items (
+  id TEXT PRIMARY KEY,
+  run_id TEXT NOT NULL REFERENCES talent_management_filter_runs(id) ON DELETE CASCADE,
+  project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  candidate_key TEXT NOT NULL DEFAULT '',
+  resume_id TEXT NOT NULL DEFAULT '',
+  candidate_name TEXT NOT NULL DEFAULT '',
+  decision TEXT NOT NULL DEFAULT '',
+  primary_reason_code TEXT NOT NULL DEFAULT '',
+  reason_label TEXT NOT NULL DEFAULT '',
+  clicked_reason_button TEXT NOT NULL DEFAULT '',
+  action_status TEXT NOT NULL DEFAULT '',
+  card_json TEXT NOT NULL DEFAULT '{}',
+  created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_tm_filter_items_run ON talent_management_filter_items(run_id);
 `
 
 func (a *App) getRecruitmentDB() (*sql.DB, error) {
@@ -408,6 +441,8 @@ func (a *App) deleteRecruitmentProject(projectID string) error {
 		`DELETE FROM outreach_items WHERE batch_id IN (SELECT id FROM outreach_batches WHERE project_id = ?)`,
 		`DELETE FROM outreach_batches WHERE project_id = ?`,
 		`DELETE FROM candidate_ai_outreach_messages WHERE project_id = ?`,
+		`DELETE FROM talent_management_filter_items WHERE project_id = ?`,
+		`DELETE FROM talent_management_filter_runs WHERE project_id = ?`,
 		`DELETE FROM analysis_jobs WHERE project_candidate_id IN (SELECT id FROM project_candidates WHERE project_id = ?)`,
 		`DELETE FROM evaluations WHERE project_candidate_id IN (SELECT id FROM project_candidates WHERE project_id = ?)`,
 		`DELETE FROM project_candidate_resumes WHERE project_candidate_id IN (SELECT id FROM project_candidates WHERE project_id = ?)`,
@@ -445,6 +480,8 @@ func (a *App) clearRecruitmentProjectResumes(projectID string) error {
 		`DELETE FROM outreach_items WHERE batch_id IN (SELECT id FROM outreach_batches WHERE project_id = ?)`,
 		`DELETE FROM outreach_batches WHERE project_id = ?`,
 		`DELETE FROM candidate_ai_outreach_messages WHERE project_id = ?`,
+		`DELETE FROM talent_management_filter_items WHERE project_id = ?`,
+		`DELETE FROM talent_management_filter_runs WHERE project_id = ?`,
 		`DELETE FROM analysis_jobs WHERE project_candidate_id IN (SELECT id FROM project_candidates WHERE project_id = ?)`,
 		`DELETE FROM evaluations WHERE project_candidate_id IN (SELECT id FROM project_candidates WHERE project_id = ?)`,
 		`DELETE FROM project_candidate_resumes WHERE project_candidate_id IN (SELECT id FROM project_candidates WHERE project_id = ?)`,

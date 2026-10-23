@@ -415,3 +415,125 @@ func TestPreviewBatchOutreachForeignKeySelfHealing(t *testing.T) {
 		t.Fatalf("ProjectCandidateID 应为有效的 project_candidates.id，而非裸 resume.ID: %s", batch.Items[0].ProjectCandidateID)
 	}
 }
+
+func TestTalentManagementFilterPersistenceAndImport(t *testing.T) {
+	app := NewApp()
+	app.dataDirOverride = t.TempDir()
+	defer app.closeRecruitmentDB()
+
+	project := app.CreateProject("AI赋能开发程序员", "AI研发部", 2, "HR", "", &JobConfig{
+		Title:          "AI赋能开发程序员",
+		RequiredSkills: []string{"Agent", "知识库构建", "Python"},
+	})
+
+	// 1. 验证年龄/性别筛选合规门禁
+	if err := validateTalentFilterCompliance(TalentManagementFilterConfig{
+		EnableAgeFilter:     true,
+		MaxAge:              35,
+		ComplianceConfirmed: false,
+	}); err == nil {
+		t.Fatalf("未勾选合规确认时启用年龄筛选应当返回错误")
+	}
+
+	if err := validateTalentFilterCompliance(TalentManagementFilterConfig{
+		EnableAgeFilter:     true,
+		MinAge:              22,
+		MaxAge:              35,
+		ComplianceConfirmed: true,
+	}); err != nil {
+		t.Fatalf("勾选合规确认后不应报错: %v", err)
+	}
+
+	// 2. 验证通过筛选或资料未知的候选人自动导入到项目待分析列表
+	age21 := 21
+	wy1 := 1.0
+	keptItem := TalentManagementFilterCardItem{
+		CandidateKey:    "51job_900102",
+		ResumeID:        "900102",
+		ProfileURL:      "https://ehire.51job.com/Revision/talent/resume/detail?resumeId=900102",
+		CandidateName:   "申佳怡",
+		Gender:          "女",
+		Age:             &age21,
+		WorkYears:       &wy1,
+		Education:       "本科",
+		Residence:       "北京",
+		IntentRole:      "大模型应用工程师",
+		IntentCity:      "北京",
+		IntentSalaryRaw: "1-1.5万/月",
+		School:          "张家口学院",
+		Major:           "数字媒体技术",
+		EduGradRange:    "2022.09-2026.06",
+		RecentCompany:   "北京恒兴仁业科技",
+		RecentRole:      "大模型应用工程师",
+		Skills:          []string{"精排", "agent", "知识库构建"},
+		Decision:        "KEEP_MATCHED",
+		ReasonLabel:     "硬性条件全部符合，保留并导入待分析",
+	}
+
+	importedResumeID, err := app.importKeptTalentManagementCandidate(project.ID, keptItem)
+	if err != nil || importedResumeID == "" {
+		t.Fatalf("importKeptTalentManagementCandidate 失败: %v", err)
+	}
+
+	resumes := app.GetProjectResumes(project.ID)
+	if len(resumes) != 1 || resumes[0].FileName != "申佳怡" {
+		t.Fatalf("导入的候选人未出现在项目简历列表中: %+v", resumes)
+	}
+
+	// 3. 验证筛选审计记录保存、查询与 Excel 导出
+	run := TalentManagementFilterRun{
+		ID:        "tm_filter_test_1",
+		ProjectID: project.ID,
+		JobTitle:  "AI赋能开发程序员",
+		Mode:      "execute",
+		Status:    "ok",
+		FilterConfig: TalentManagementFilterConfig{
+			JobTitle:        "AI赋能开发程序员",
+			MinEducation:    "本科",
+			ExcludeStudents: true,
+		},
+		Summary: TalentManagementFilterSummary{
+			TotalScanned:     2,
+			UnfitCount:       1,
+			KeepMatchedCount: 1,
+			ImportedCount:    1,
+		},
+		Items: []TalentManagementFilterCardItem{
+			{
+				CandidateKey:        "51job_900101",
+				ResumeID:            "900101",
+				CandidateName:       "周瑞闯",
+				Education:           "大专",
+				Decision:            "UNFIT",
+				PrimaryReasonCode:   "education",
+				ReasonLabel:         "学历(大专)低于要求(本科)",
+				ClickedReasonButton: "学历(大专)不匹配",
+				ActionStatus:        "marked_unfit",
+				ActionMessage:       "已在 51job 标记不合适（勾选：学历(大专)不匹配）",
+			},
+			keptItem,
+		},
+		Message:   "已完成 2 位待处理候选人自动筛选处理",
+		CreatedAt: "2026-10-23T06:00:00Z",
+		UpdatedAt: "2026-10-23T06:01:00Z",
+	}
+
+	if err := app.saveTalentManagementFilterRun(run); err != nil {
+		t.Fatalf("saveTalentManagementFilterRun 失败: %v", err)
+	}
+
+	runs, err := app.List51JobTalentFilterRuns(project.ID)
+	if err != nil || len(runs) != 1 {
+		t.Fatalf("List51JobTalentFilterRuns 返回异常: %d, %v", len(runs), err)
+	}
+
+	detail, err := app.Get51JobTalentFilterRunDetail(run.ID)
+	if err != nil || len(detail.Items) != 2 {
+		t.Fatalf("Get51JobTalentFilterRunDetail 返回异常: %+v, %v", detail, err)
+	}
+
+	excelPath, err := app.Export51JobTalentFilterReport(run.ID)
+	if err != nil || excelPath == "" {
+		t.Fatalf("Export51JobTalentFilterReport 导出失败: %s, %v", excelPath, err)
+	}
+}
