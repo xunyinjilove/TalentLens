@@ -235,6 +235,14 @@
           </el-form-item>
         </div>
 
+        <el-form-item label="检索关键词（选填，寻才时自动与职位名称空格拼接组合检索）">
+          <el-input
+            v-model="sourcingFilters.extra_keywords"
+            clearable
+            placeholder="如：体外诊断 IVD 大客户（多个词用空格或逗号分隔，留空则仅按职位名称检索）"
+          />
+        </el-form-item>
+
         <div class="form-row three-cols">
           <el-form-item label="招聘人数">
             <el-input-number v-model="jobForm.headcount" :min="1" :max="99" style="width: 100%" />
@@ -335,7 +343,6 @@
             <el-form-item label="从事行业"><el-input v-model="sourcingFilters.current_industry" clearable placeholder="如：医疗器械" /></el-form-item>
             <el-form-item label="从事职能"><el-input v-model="sourcingFilters.current_function" clearable placeholder="如：项目管理" /></el-form-item>
             <el-form-item label="最近活跃时间"><el-select v-model="sourcingFilters.recent_active_time" clearable placeholder="不限"><el-option v-for="v in ['近1周','近2周','近1个月','近2个月','近6个月','近1年','1年及以上']" :key="v" :label="v" :value="v" /></el-select></el-form-item>
-            <el-form-item label="附加检索关键词"><el-input v-model="sourcingFilters.extra_keywords" clearable placeholder="如：医疗器械 IVD（与职位名空格组合检索）" /></el-form-item>
           </div>
         </div>
 
