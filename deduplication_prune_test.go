@@ -131,7 +131,7 @@ func TestPruneDuplicateProjectResumes(t *testing.T) {
 }
 
 func TestContractRadarScoringFixtures(t *testing.T) {
-	// 夹具 1: 6 项等权，[3, 3, 2, 4, 3, null]，未知1项 -> 覆盖率 83.33%，得分 75.00，合格，区间 62.50 ~ 79.17
+	// 夹具 1: 6 项等权，[3, 3, 2, 4, 3, 0(unknown)]，未知1项(0/4) -> 覆盖率 83.33%，全维度得分 63 (62.50 四舍五入)，合格，区间 62.50 ~ 79.17
 	criteria1 := []string{"M1", "M2", "M3", "M4", "M5", "M6"}
 	res1 := &AnalysisResult{
 		CoreCriterionChecks: []CoreCriterionCheck{
@@ -150,14 +150,14 @@ func TestContractRadarScoringFixtures(t *testing.T) {
 	if !res1.RankEligible {
 		t.Fatalf("夹具1应具备排名资格")
 	}
-	if res1.AbilityScore != 75 {
-		t.Fatalf("夹具1得分应为 75，实际: %d", res1.AbilityScore)
+	if res1.AbilityScore != 63 {
+		t.Fatalf("夹具1全维度得分应为 63，实际: %d", res1.AbilityScore)
 	}
 	if res1.ScoreLowerBound < 62.4 || res1.ScoreLowerBound > 62.6 {
 		t.Fatalf("夹具1下界应为 62.50，实际: %f", res1.ScoreLowerBound)
 	}
 
-	// 夹具 2: 5 项等权，[3, 2, 1, null, null] -> 覆盖率 60%，得分 50.00，不合格 (<80%)，区间 30.00 ~ 70.00
+	// 夹具 2: 5 项等权，[3, 2, 1, 0(unknown), 0(unknown)] -> 覆盖率 60%，全维度得分 30，仍参与排名 (provisional)，区间 30.00 ~ 70.00
 	criteria2 := []string{"M1", "M2", "M3", "M4", "M5"}
 	res2 := &AnalysisResult{
 		CoreCriterionChecks: []CoreCriterionCheck{
@@ -172,11 +172,11 @@ func TestContractRadarScoringFixtures(t *testing.T) {
 	if res2.RadarCoverage != 0.6 {
 		t.Fatalf("夹具2覆盖率应为 60%%，实际: %v", res2.RadarCoverage)
 	}
-	if res2.RankEligible {
-		t.Fatalf("夹具2覆盖率不足80%%，不应具备正式排名资格")
+	if !res2.RankEligible || res2.ScoreBasis != "provisional" {
+		t.Fatalf("夹具2含未核实项也应计分并参与排名: %+v", res2)
 	}
-	if res2.AbilityScore != 50 {
-		t.Fatalf("夹具2得分应为 50，实际: %d", res2.AbilityScore)
+	if res2.AbilityScore != 30 {
+		t.Fatalf("夹具2全维度得分应为 30，实际: %d", res2.AbilityScore)
 	}
 
 	// 夹具 3: 5 项等权，[0, 3, 3, 2, 2]，0 有明确依据 -> 覆盖率 100%，得分 50.00，合格，区间 50.00 ~ 50.00

@@ -42,7 +42,7 @@ func checkRadarLabel(check CoreCriterionCheck) string {
 	if check.EvidenceStatus == "known" && strings.TrimSpace(check.Evidence) != "" {
 		return fmt.Sprintf("%d/4", check.Level)
 	}
-	return "待核实"
+	return fmt.Sprintf("%d/4（待核查）", check.Level)
 }
 
 // PreviewResumeAIRecheck performs one HR-triggered evidence request. It saves a

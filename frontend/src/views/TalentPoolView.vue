@@ -334,13 +334,13 @@
                 <div class="candidate-target-role">目标：{{ item.jobTitle || item.projectName }}</div>
               </div>
               <div class="candidate-score-wrap">
-                <div v-if="item.rankEligible"
+                <div v-if="item.analysisStatus === 'done' && !item.radarStale"
                   class="candidate-match-ring" :style="{ '--match': `${item.abilityScore}%` }"
                   role="img" :aria-label="`岗位依据分 ${item.abilityScore} 分`"
                   :title="`岗位依据分：${item.abilityScore} 分`">
                   <span>{{ item.abilityScore }}</span>
                 </div>
-                <div v-else class="candidate-match-pending">{{ item.radarStale ? '待复核' : '待核实' }}</div>
+                <div v-else class="candidate-match-pending">{{ item.radarStale ? '待复核' : '待分析' }}</div>
                 <small>岗位依据分</small>
               </div>
             </div>
@@ -366,7 +366,7 @@
             </div>
 
             <div class="wb-candidate-foot">
-              <span class="candidate-created-time">入库 {{ formatDate(item.createdAt) }}<span v-if="item.rankEligible"> · 岗位依据分 {{ item.abilityScore }}</span><span v-else-if="item.matchScore"> · 综合匹配参考 {{ item.matchScore }}</span></span>
+              <span class="candidate-created-time">入库 {{ formatDate(item.createdAt) }}<span v-if="item.analysisStatus === 'done' && !item.radarStale"> · 岗位依据分 {{ item.abilityScore }}</span><span v-else-if="item.matchScore"> · 综合匹配参考 {{ item.matchScore }}</span></span>
               <div class="candidate-actions">
                 <el-button class="candidate-primary-action" size="small" type="primary" plain @click="navigateToEvaluation(item)">查看测评</el-button>
                 <el-button class="candidate-secondary-action" size="small" type="primary" @click="openInterviewInvite(item)">
@@ -447,13 +447,13 @@
             <el-table-column label="岗位依据分" width="110" align="center">
               <template #default="{ row }">
                 <span
-                  v-if="row.rankEligible"
+                  v-if="row.analysisStatus === 'done' && !row.radarStale"
                   class="score-badge"
                   :class="scoreLevelClass(row.abilityScore)"
                 >
                   {{ row.abilityScore }} 分
                 </span>
-                <span v-else class="score-badge pending">{{ row.radarStale ? '待复核' : '待核实' }}</span>
+                <span v-else class="score-badge pending">{{ row.radarStale ? '待复核' : '待分析' }}</span>
               </template>
             </el-table-column>
 
@@ -1234,9 +1234,11 @@ const filtered = computed(() => recruitment.candidates.filter(item =>
 ).sort((a, b) => {
   const recent = (b.createdAt || '').localeCompare(a.createdAt || '')
   if (sortOrder.value === 'newest') return recent || a.projectCandidateId.localeCompare(b.projectCandidateId)
-  if (a.rankEligible !== b.rankEligible) return a.rankEligible ? -1 : 1
-  const scoreA = a.rankEligible ? a.abilityScore : 0
-  const scoreB = b.rankEligible ? b.abilityScore : 0
+  const hasScoreA = a.analysisStatus === 'done' && !a.radarStale
+  const hasScoreB = b.analysisStatus === 'done' && !b.radarStale
+  if (hasScoreA !== hasScoreB) return hasScoreA ? -1 : 1
+  const scoreA = hasScoreA ? a.abilityScore : 0
+  const scoreB = hasScoreB ? b.abilityScore : 0
   const score = sortOrder.value === 'score_desc'
     ? scoreB - scoreA
     : scoreA - scoreB

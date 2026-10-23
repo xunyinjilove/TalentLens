@@ -37,7 +37,7 @@ import (
 )
 
 // 版本信息
-const AppVersion = "1.8.63"
+const AppVersion = "1.8.64"
 const analysisFormatRetryVersion = "model-json-repair-v1"
 const GitHubRepo = "xunyinjilove/TalentLens"
 
@@ -1658,9 +1658,13 @@ func (a *App) prepareResumeDecision(resume *Resume, job *JobConfig) {
 	if profileMismatch {
 		oldScore := resume.Score
 		oldOverall, oldAbility, oldCore := resume.Analysis.OverallScore, resume.Analysis.AbilityScore, resume.Analysis.CoreMatch
+		oldRec := resume.Analysis.Recommendation
 		a.applyJobDecision(resume.Analysis, job, resume)
 		resume.Score = oldScore
 		resume.Analysis.OverallScore, resume.Analysis.AbilityScore, resume.Analysis.CoreMatch = oldOverall, oldAbility, oldCore
+		if oldRec != "" {
+			resume.Analysis.Recommendation = oldRec
+		}
 		resume.Analysis.RadarStale = true
 		resume.Analysis.RankEligible = false
 		resume.Analysis.ScoreBasis = "stale"
@@ -3930,7 +3934,7 @@ func (a *App) buildAnalysisPrompt(resume *Resume, jobCfg *JobConfig) string {
 			"overall_score 必须在逻辑上严密契合各分项得分，基准公式为：skill_match * 0.55 + experience_match * 0.35 + education_match * 0.10（四舍五入取整）。不得脱离单项评分凭主观臆断给出突变分数。\n\n"+
 			"**核心能力与岗位统一技能雷达指标 (experience_competencies 与 core_criterion_checks)**：\n"+
 			"必须严格围绕上述【岗位统一能力评分卡与雷达指标】逐项评估！每一项的 criterion 必须与指标名称完全一致（逐字对应，不得自创其他名称）；\n"+
-			"level 为 0-4 分整数（0 未体现、1 了解/线索、2 熟练参与、3 精通独立完成、4 专家主导复盘）；evidence 必须是简历中连续且真实的原文引用（无证据时填空字符串且 level 必须为 0）；assessment 给出专业评估与核实要点。最终岗位能力分由系统按各项等级等权计算。\n\n"+
+			"level 为 0-4 分整数（0 未体现/无关、1 了解/背景线索、2 熟练参与、3 精通独立完成、4 专家主导复盘）；每项指标都必须给出 0-4 分：若有明确原文依据，evidence 必须是简历中连续且真实的原文引用；若简历未直接提及该指标，evidence 填空字符串 \"\"，但仍须结合候选人所在行业、公司业务与岗位经历背景评估给出 0-4 分（完全无关打 0 分，有相关行业/公司背景线索打 1-2 分），并在 assessment 中给出评估依据与待核实要点。最终岗位能力分由系统按全部指标等级等权汇总计算。\n\n"+
 			"### 输出要求\n\n"+
 			"请严格按以下JSON格式输出，不要输出任何其他内容：\n\n"+
 			"```json\n"+
@@ -4271,6 +4275,7 @@ func scoreCandidate(result *AnalysisResult, criteria []string, initialScores ...
 	wAll := len(criteria)
 	wKnown := 0
 	pKnown := 0
+	pAll := 0
 
 	byCrit := make(map[string]CoreCriterionCheck)
 	for _, c := range result.CoreCriterionChecks {
@@ -4283,47 +4288,48 @@ func scoreCandidate(result *AnalysisResult, criteria []string, initialScores ...
 		if !exists {
 			continue
 		}
-		// 沉默和模型解释不构成证据；0 级同样需要可定位的原文。
+		lvl := check.Level
+		if lvl < 0 {
+			lvl = 0
+		} else if lvl > 4 {
+			lvl = 4
+		}
+		pAll += lvl
+
 		isKnown := check.EvidenceStatus == "known" && strings.TrimSpace(check.Evidence) != ""
 		if check.EvidenceStatus == "" && strings.TrimSpace(check.Evidence) != "" {
 			isKnown = true
 		}
 
-		if isKnown && check.Level >= 0 && check.Level <= 4 {
+		if isKnown {
 			wKnown++
-			pKnown += check.Level
+			pKnown += lvl
 		}
 	}
 
 	coverage := 0.0
-	knownScore := 0.0
+	totalScore := 0.0
 	lowerBound := 0.0
 	upperBound := 100.0
 
 	if wAll > 0 {
 		coverage = float64(wKnown) / float64(wAll)
-		if wKnown > 0 {
-			knownScore = float64(100*pKnown) / float64(4*wKnown)
-		}
+		totalScore = float64(100*pAll) / float64(4*wAll)
 		lowerBound = float64(100*pKnown) / float64(4*wAll)
 		upperBound = lowerBound + float64(100*(wAll-wKnown))/float64(wAll)
 	}
 
-	rankEligible := (wKnown*100 >= wAll*80)
+	rankEligible := wAll > 0
 	result.RadarCoverage = coverage
 	result.RankEligible = rankEligible
 	result.ScoreLowerBound = lowerBound
 	result.ScoreUpperBound = upperBound
 
 	result.HolisticMatchScore = holisticMatchScore(result)
-	if rankEligible {
-		result.CoreMatch = math.Round(knownScore)
+	result.CoreMatch = math.Round(totalScore)
+	if wKnown*100 >= wAll*80 {
 		result.ScoreBasis = "rubric"
-	} else if wKnown > 0 {
-		result.CoreMatch = math.Round(knownScore)
-		result.ScoreBasis = "provisional"
 	} else {
-		result.CoreMatch = 0
 		result.ScoreBasis = "provisional"
 	}
 
@@ -4410,7 +4416,6 @@ func (a *App) applyJobDecision(result *AnalysisResult, job *JobConfig, resume *R
 	}
 	scoreCandidate(result, criteria, initialScore)
 	if len(job.RadarMetrics) == 0 || (job.RadarSourceHash != "" && job.RadarSourceHash != jobRadarSourceHash(job)) {
-		result.RankEligible = false
 		result.ScoreBasis = "provisional"
 	}
 	if len(job.RedLines) > 0 || len(job.BonusPoints) > 0 {

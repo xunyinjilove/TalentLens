@@ -1,5 +1,5 @@
 $ErrorActionPreference = "Stop"
-$version = "1.8.63"
+$version = "1.8.64"
 Write-Host "Syncing runtime assets..."
 node scripts/sync-runtime-assets.js
 

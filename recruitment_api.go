@@ -187,9 +187,9 @@ func (a *App) ListTalentCandidates(projectID string) ([]TalentCandidate, error) 
 					sourceResume.Analysis = &analysis
 					sourceResume.Score = item.AbilityScore
 					a.prepareResumeDecision(&sourceResume, &project.JobConfig)
-					item.RankEligible = sourceResume.Analysis.RankEligible && !sourceResume.Analysis.RadarStale
+					item.RankEligible = !sourceResume.Analysis.RadarStale
 					item.RadarStale = sourceResume.Analysis.RadarStale
-					if item.RankEligible {
+					if !item.RadarStale {
 						item.AbilityScore = sourceResume.Analysis.AbilityScore
 					}
 				}
