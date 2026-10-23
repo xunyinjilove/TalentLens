@@ -307,33 +307,67 @@ async function select51JobPickerOption(page, containerClass, value) {
   }, containerClass);
   if (!opened) return false;
   await new Promise(resolve => setTimeout(resolve, 180));
-  const selected = await page.evaluate(({ target }) => {
+  const titles = {
+    '.candidate-living-area-picker': '选择现居地',
+    '.candidate-expected-industry-picker': '选择行业',
+    '.candidate-expected-function-picker': '选择职能',
+    '.candidate-engage-industry-picker': '选择行业',
+    '.candidate-engage-function-picker': '选择职能'
+  };
+  const requested = clean.split(/[;；]/).map(item => item.trim()).filter(Boolean);
+  const selected = await page.evaluate(({ values, title }) => {
     const dialog = Array.from(document.querySelectorAll('.el-dialog__wrapper'))
-      .filter(item => getComputedStyle(item).display !== 'none').at(-1);
-    if (!dialog) return false;
-    const leaf = Array.from(dialog.querySelectorAll('[title], span, li'))
-      .find(item => item.getAttribute('title') === target || (item.childElementCount <= 1 && (item.textContent || '').trim() === target));
-    if (!leaf) {
-      dialog.querySelector('.el-dialog__headerbtn')?.click();
-      return false;
+      .filter(item => item.querySelector('.jbs_cascader_dialog_title')?.textContent.trim() === title &&
+        getComputedStyle(item).display !== 'none' && !item.className.includes('dialog-fade-leave')).at(-1);
+    const picker = dialog?.querySelector('.jbs_cascader_panel')?.__vue__;
+    if (!picker || !Array.isArray(picker.$props?.options)) return false;
+    const findLeaf = (nodes, label) => {
+      for (const node of nodes) {
+        if (node.label === label) {
+          if (!node.children?.length) return node;
+          return node.children.find(child => child.label === `全部 ${label}`) ||
+            node.children.find(child => child.label?.startsWith('全部')) || null;
+        }
+        const found = findLeaf(node.children || [], label);
+        if (found) return found;
+      }
+      return null;
+    };
+    for (const value of values) {
+      const path = value.split(' › ').map(part => part.trim()).filter(Boolean);
+      let nodes = picker.$props.options;
+      let leaf = null;
+      if (path.length > 1) {
+        for (const segment of path) {
+          leaf = nodes.find(item => item.label === segment);
+          if (!leaf) break;
+          nodes = leaf.children || [];
+        }
+      } else {
+        leaf = findLeaf(nodes, path[0]);
+      }
+      if (!leaf || leaf.children?.length || !leaf.value) {
+        dialog.querySelector('.el-dialog__headerbtn')?.click();
+        return false;
+      }
+      picker.onClick(leaf.value, true, (leaf.level || path.length) - 1);
     }
-    leaf.click();
     return true;
-  }, { target: clean });
+  }, { values: requested, title: titles[containerClass] });
   if (!selected) return false;
   await new Promise(resolve => setTimeout(resolve, 120));
-  return page.evaluate(({ target }) => {
+  return page.evaluate(({ targets, title }) => {
     const dialog = Array.from(document.querySelectorAll('.el-dialog__wrapper'))
-      .filter(item => getComputedStyle(item).display !== 'none').at(-1);
+      .filter(item => item.querySelector('.jbs_cascader_dialog_title')?.textContent.trim() === title &&
+        getComputedStyle(item).display !== 'none' && !item.className.includes('dialog-fade-leave')).at(-1);
     if (!dialog) return false;
     const selectedCount = Number(dialog.querySelector('.count_checked')?.textContent || 0);
-    const selectedLabel = (dialog.querySelector('.selected_list_wrapper_tag')?.textContent || '').trim();
-    if (selectedCount === 0 && !selectedLabel.includes(target)) return false;
+    if (selectedCount < targets.length) return false;
     const confirm = Array.from(dialog.querySelectorAll('button')).find(item => (item.textContent || '').replace(/\s+/g, '') === '确定');
     if (!confirm) return false;
     confirm.click();
     return true;
-  }, { target: clean });
+  }, { targets: requested, title: titles[containerClass] });
 }
 
 async function apply51JobFilters(page) {
@@ -365,9 +399,8 @@ async function apply51JobFilters(page) {
   });
   const extraKw = String(spec.extra_keywords || saved.extra_keywords || '').trim();
   const statuses = [{ label: '职位名称', value: spec.title || options.keyword, status: '已应用' }];
-  if (extraKw) statuses.push({ label: '附加关键词', value: extraKw, status: '已应用（组合检索）' });
+  if (extraKw) statuses.push({ label: '检索关键词', value: extraKw, status: '已应用（组合检索）' });
   if (spec.work_city) statuses.push({ label: '工作城市', value: spec.work_city, status: '本地核对' });
-  if (Array.isArray(spec.skills) && spec.skills.length) statuses.push({ label: '必备技能', value: spec.skills.join('、'), status: '已应用（技能分轮）' });
   for (const [label, value, control] of requested) {
     let applied = false;
     try {
@@ -377,7 +410,7 @@ async function apply51JobFilters(page) {
     } catch (error) {
       sendMsg('status', { platform: '51job', message: `51job「${label}」筛选未应用：${error.message}` });
     }
-    const localFallback = !applied && ['工作年限', '学历要求', '居住地', '最近活跃时间'].includes(label);
+    const localFallback = !applied && ['工作年限', '学历要求', '居住地', '最近活跃时间', '年龄', '性别'].includes(label);
     statuses.push({ label, value, status: applied ? '已应用' : (localFallback ? '本地核对' : '未应用') });
   }
   sendMsg('status', { platform: '51job', filterStatuses: statuses, message: `51job 职位条件核对完成：${statuses.filter(item => item.status.startsWith('已应用')).length} 项网页已应用，${statuses.filter(item => item.status === '本地核对').length} 项本地核对，${statuses.filter(item => item.status === '未应用').length} 项未应用` });
@@ -395,25 +428,12 @@ function build51JobQuotaTasks(job51Filters, fallbackKeyword, currentBatchQuota) 
     .filter(item => item && item !== title);
   const uniqueExtra = [...new Set(extraTokens)].join(' ');
   const baseSearchTerm = [title, uniqueExtra].filter(Boolean).join(' ').replace(/\s+/g, ' ').trim();
-  const skills = [...new Set((spec.skills || []).map(item => String(item).trim()).filter(Boolean))].slice(0, 4);
-  const titleQuota = skills.length ? Math.max(1, Math.ceil(currentBatchQuota * 0.6)) : currentBatchQuota;
-  const remaining = currentBatchQuota - titleQuota;
-  const quotaTasks = [{
+  // 必备关键技能（spec.skills）仅用于技能指标雷达与 AI 评分，绝不拼入 51job 搜索框
+  return [{
     keyword: baseSearchTerm,
     categoryName: uniqueExtra ? `职位+关键词：${uniqueExtra}` : '职位名称',
-    targetCount: titleQuota
+    targetCount: currentBatchQuota
   }];
-  skills.forEach((skill, index) => {
-    const amount = Math.floor(remaining / skills.length) + (index < remaining % skills.length ? 1 : 0);
-    if (amount > 0) {
-      quotaTasks.push({
-        keyword: `${baseSearchTerm} ${skill}`.replace(/\s+/g, ' ').trim(),
-        categoryName: `必备技能：${skill}`,
-        targetCount: amount
-      });
-    }
-  });
-  return quotaTasks;
 }
 
 async function submit51jobSearch(page, keyword) {
@@ -922,6 +942,40 @@ async function waitForCaptchaResolved(page, platformKey, cfg) {
 }
 
 // 跨 Frame 深度穿透提取候选人卡片（支持 51job 新版/老版、BOSS 直聘、智联、猎聘等全渠道，并支持全局跨批次排重）
+function matches51JobDemographics(candidate, filters = {}) {
+  const text = [candidate.name, candidate.demographicText, candidate.infoText]
+    .filter(Boolean)
+    .join(' · ')
+    .replace(/\s+/g, ' ');
+  const requestedGender = String(filters.gender || '').trim();
+  if (requestedGender) {
+    let gender = text.match(/(?:^|[\s·|,，;；])([男女])(?=$|[\s·|,，;；])/)?.[1] ||
+      text.match(/(?:性别[：:]?\s*)(男|女)/)?.[1] || '';
+    if (!gender) {
+      if (/先生|♂/.test(text)) gender = '男';
+      else if (/女士|小姐|♀/.test(text)) gender = '女';
+    }
+    if (!gender || gender !== requestedGender) return false;
+  }
+  const requestedAge = String(filters.age || '').trim().replace(/[—–~～至]/g, '-');
+  if (requestedAge) {
+    const age = Number(text.match(/(?:^|[^\d])(\d{1,2})\s*岁/)?.[1]);
+    if (!age || age < 16 || age > 80) return false;
+    const numbers = [...requestedAge.matchAll(/\d+/g)].map(item => Number(item[0]));
+    if (!numbers.length) return false;
+    if (/以下|及以下|以内/.test(requestedAge)) {
+      if (age > numbers[0]) return false;
+    } else if (/以上|及以上/.test(requestedAge)) {
+      if (age < numbers[0]) return false;
+    } else if (numbers.length >= 2) {
+      if (age < numbers[0] || age > numbers[1]) return false;
+    } else if (age !== numbers[0]) {
+      return false;
+    }
+  }
+  return true;
+}
+
 async function extractCandidatesAcrossFrames(page, targetCount, keyword, platformName, excludedNames = [], excludedUrls = [], filters = {}) {
   const evaluateCardFn = (targetCount, kw, pName, exclNames, exclUrls, activeFilters) => {
     const results = [];
@@ -955,10 +1009,16 @@ async function extractCandidatesAcrossFrames(page, targetCount, keyword, platfor
       // 优先从画像区域而非整张卡片判断，避免把项目工作年限或学校所在地当成候选人条件。
       const profileEl = el.querySelector('.userinfo, .firstline, .base-info.join-text-wrap, .base-info, .exp-edu, .user-desc, .info-labels, td.exp, td.edu');
       const profileText = profileEl ? profileEl.innerText : text.split('\n').slice(0, 3).join(' ');
+      const demographicText = Array.from(el.querySelectorAll('.userinfo, .firstline, .base-info.join-text-wrap, .base-info, .exp-edu, .user-desc, .info-labels'))
+        .map(node => node.innerText || '').filter(Boolean).join(' · ') || text.split('\n').slice(0, 4).join(' · ');
       // 平台未披露的字段保持未知；启用过滤时不把未知推断成满足。
-      const city = (activeFilters.city || '').trim();
+      const cityTargets = String(activeFilters.city || '').split(/[;；]/).map(value => {
+        const parts = value.split(' › ').map(part => part.trim()).filter(Boolean);
+        const leaf = parts.at(-1) || '';
+        return leaf.startsWith('全部 ') ? (parts.at(-2) || leaf.slice(3)) : leaf;
+      }).filter(Boolean);
       const hasDisclosedCity = /(?:现居|居住地|所在城市|北京|上海|广州|深圳|杭州|成都|武汉|南京|苏州|西安|重庆|天津|长沙|郑州|东莞|青岛|沈阳|宁波|无锡|佛山|合肥|昆明|福州|厦门|济南|哈尔滨|长春|大连|石家庄|太原|南昌|贵阳|南宁|海口|兰州|银川|西宁|乌鲁木齐|呼和浩特|拉萨|珠海|惠州|中山|嘉兴|常州|南通|徐州|绍兴|温州|台州|金华|烟台|潍坊)/.test(profileText);
-      if (city && city !== '不限' && city !== '全国' && hasDisclosedCity && !profileText.includes(city)) continue;
+      if (cityTargets.length && hasDisclosedCity && !cityTargets.some(city => city === '不限' || city === '全国' || profileText.includes(city))) continue;
       const workCity = (activeFilters.workCity || '').trim();
       const desiredLocation = text.match(/(?:期望(?:工作)?(?:城市|地点)|意向(?:城市|地点))[：:]\s*([^\n|]+)/);
       if (workCity && desiredLocation && !desiredLocation[1].includes(workCity)) continue;
@@ -1062,6 +1122,7 @@ async function extractCandidatesAcrossFrames(page, targetCount, keyword, platfor
 
       results.push({
         name,
+        demographicText,
         infoText,
         workText,
         skills: tags,
@@ -1075,14 +1136,16 @@ async function extractCandidatesAcrossFrames(page, targetCount, keyword, platfor
 
   // 1. 优先在主文档查找
   let items = await page.evaluate(evaluateCardFn, targetCount, keyword, platformName, excludedNames, excludedUrls, filters).catch(() => []);
-  if (items && items.length > 0) return items;
+  const verifyDemographics = cards => platformName === '前程无忧'
+    ? cards.filter(card => matches51JobDemographics(card, filters)) : cards;
+  if (items && items.length > 0) return verifyDemographics(items);
 
   // 2. 主文档无结果时穿透遍历子 iframe
   for (const frame of page.frames()) {
     if (frame === page.mainFrame()) continue;
     try {
       const fItems = await frame.evaluate(evaluateCardFn, targetCount, keyword, platformName, excludedNames, excludedUrls, filters);
-      if (fItems && fItems.length > 0) return fItems;
+      if (fItems && fItems.length > 0) return verifyDemographics(fItems);
     } catch (e) {}
   }
   return [];
@@ -2070,7 +2133,7 @@ async function autoNavigateAndSearch(page, platformKey, cfg, searchKeyword) {
             cfg.name,
             Array.from(projectExcludedNames),
             Array.from(projectExcludedUrls),
-            { city: platformKey === '51job' ? options.job51Filters?.filters?.residence || '' : options.city, workCity: platformKey === '51job' ? options.job51Filters?.work_city || '' : '', exp: options.exp, edu: options.edu, activeDays: options.activeDays, recentActiveTime: platformKey === '51job' ? options.job51Filters?.filters?.recent_active_time || '' : '' }
+            { city: platformKey === '51job' ? options.job51Filters?.filters?.residence || '' : options.city, workCity: platformKey === '51job' ? options.job51Filters?.work_city || '' : '', exp: options.exp, edu: options.edu, activeDays: options.activeDays, recentActiveTime: platformKey === '51job' ? options.job51Filters?.filters?.recent_active_time || '' : '', age: platformKey === '51job' ? options.job51Filters?.filters?.age || '' : '', gender: platformKey === '51job' ? options.job51Filters?.filters?.gender || '' : '' }
           );
           scraped = selectFreshCandidates(scraped, remainingForTask, projectExcludedUrls, seenCandidateKeys,
             platformKey === '51job' ? deferred51jobKeys : undefined);
@@ -2609,6 +2672,6 @@ if (require.main === module) {
   });
 }
 
-module.exports = { allocateQuota, planChannelQuota, smoothScroll, keepPageActiveInBackground, setBrowserWindowState, preserveBrowserWindow, connectToExistingBrowser, launchPlatformBrowser, openDedicatedSearchPage, createBackgroundPage, capture51jobDetailUrl, extract51JobResumeId, isComplete51JobDetail, isBrowserStartPage, browserLaunchArgs, closeUnusedStartPages, isPlatformPageUrl, ensurePlatformPage, activeDaysTo51JobLabel, normalize51JobOption, select51JobPopoverOption, apply51JobFilters, build51JobQuotaTasks, submit51jobSearch, detectCaptcha, extractCandidatesAcrossFrames, selectFreshCandidates, advanceSearchResults, searchRetryDelay, waitForSearchRetry, main };
+module.exports = { allocateQuota, planChannelQuota, smoothScroll, keepPageActiveInBackground, setBrowserWindowState, preserveBrowserWindow, connectToExistingBrowser, launchPlatformBrowser, openDedicatedSearchPage, createBackgroundPage, capture51jobDetailUrl, extract51JobResumeId, isComplete51JobDetail, isBrowserStartPage, browserLaunchArgs, closeUnusedStartPages, isPlatformPageUrl, ensurePlatformPage, activeDaysTo51JobLabel, normalize51JobOption, select51JobPopoverOption, apply51JobFilters, build51JobQuotaTasks, submit51jobSearch, detectCaptcha, matches51JobDemographics, extractCandidatesAcrossFrames, selectFreshCandidates, advanceSearchResults, searchRetryDelay, waitForSearchRetry, main };
 module.exports.claimResumeSnapshot = claimResumeSnapshot;
 module.exports.searchRetryMessage = searchRetryMessage;

@@ -6,6 +6,17 @@ const path = require('node:path');
 const vm = require('node:vm');
 const agent = require('./multi_platform_agent');
 
+test('51job explicit gender and age filters exclude contradictory and undisclosed profiles', () => {
+  const filters = { gender: '男', age: '30-35岁' };
+  assert.equal(agent.matches51JobDemographics({ demographicText: '男 · 32岁 · 上海' }, filters), true);
+  assert.equal(agent.matches51JobDemographics({ name: '张先生', demographicText: '32岁 | 5年 | 本科 | 上海' }, filters), true);
+  assert.equal(agent.matches51JobDemographics({ name: '刘女士', demographicText: '32岁 | 5年 | 本科 | 上海' }, filters), false);
+  assert.equal(agent.matches51JobDemographics({ demographicText: '女 · 32岁 · 上海' }, filters), false);
+  assert.equal(agent.matches51JobDemographics({ demographicText: '男 · 年龄未透露 · 上海' }, filters), false);
+  assert.equal(agent.matches51JobDemographics({ demographicText: '32岁 · 上海' }, filters), false);
+  assert.equal(agent.matches51JobDemographics({ demographicText: '女 · 29岁' }, {}), true);
+});
+
 test('quota preserves total and zero weight', () => {
   assert.deepEqual(agent.allocateQuota(20, [{ ratio: 40 }, { ratio: 30 }, { ratio: 30 }]), [8, 6, 6]);
   assert.deepEqual(agent.allocateQuota(10, [{ ratio: 99 }, { ratio: 1 }, { ratio: 0 }]), [10, 0, 0]);
