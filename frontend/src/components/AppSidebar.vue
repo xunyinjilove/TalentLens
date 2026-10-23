@@ -34,6 +34,12 @@
         <span class="nav-label">简历人才库</span>
       </router-link>
 
+      <router-link to="/interviews" class="nav-item" :class="{ active: route.path === '/interviews' }">
+        <el-icon class="nav-icon"><Calendar /></el-icon>
+        <span class="nav-label">面试安排</span>
+        <span v-if="recruitmentStore.dashboard.upcomingInterviews > 0" class="nav-badge">{{ recruitmentStore.dashboard.upcomingInterviews }}</span>
+      </router-link>
+
       <div class="nav-group-title">智能助手</div>
 
       <div
@@ -82,16 +88,21 @@
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, onMounted } from 'vue'
 import { useRoute } from 'vue-router'
+import { Calendar } from '@element-plus/icons-vue'
 import { useTheme } from '../composables/useTheme'
 import { useProjectStore } from '../composables/useProjectStore'
 import { useAIAssistantStore } from '../composables/useAIAssistantStore'
+import { useRecruitmentStore } from '../composables/useRecruitmentStore'
 
 const route = useRoute()
 const { isDark, toggleTheme } = useTheme()
 const projectStore = useProjectStore()
 const assistantStore = useAIAssistantStore()
+const recruitmentStore = useRecruitmentStore()
+
+onMounted(() => { void recruitmentStore.loadDashboard() })
 
 const projectCount = computed(() => projectStore.projects.length)
 

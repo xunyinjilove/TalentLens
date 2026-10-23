@@ -12,6 +12,7 @@ export interface Project {
   remark?: string
   job_config: {
     title: string
+    direction?: string
     requirements?: string[]
     required_skills: string[]
     experience_years: number
@@ -20,10 +21,16 @@ export interface Project {
     city?: string
     employment_type?: string
     salary_range?: string
+    experience_text?: string
+    sourcing_filters?: Record<string, string>
     interview_questions?: string[]
     red_lines?: string[]
     bonus_points?: string[]
     core_criteria?: string[]
+    radar_metrics?: string[]
+    radar_profile_hash?: string
+    radar_profile_version?: number
+    radar_source_hash?: string
   }
   resume_ids: string[]
   status: 'publishing' | 'draft' | 'paused' | 'analyzing' | 'completed' | string

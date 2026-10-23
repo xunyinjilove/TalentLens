@@ -1,5 +1,6 @@
 import { defineStore } from 'pinia'
 import { ref, computed, onMounted } from 'vue'
+import { ElMessage } from 'element-plus'
 
 // 尝试导入 Wails 运行时（可能不存在于纯前端开发模式）
 let WailsRuntime: any = null
@@ -92,7 +93,14 @@ export interface Resume {
     bonusMatches?: string[]
     bonusChecks?: Array<{ rule_id?: string; criterion: string; status: 'met' | 'violated' | 'unknown'; suggested_status?: string; evidence: string; reviewed_at?: string }>
     confirmedBonusCount?: number
-    coreCriterionChecks?: Array<{ criterion: string; level: number; evidence?: string; assessment?: string }>
+    coreCriterionChecks?: Array<{ criterion: string; level: number; evidence?: string; assessment?: string; evidence_status?: string }>
+    radarCoverage?: number
+    rankEligible?: boolean
+    radarStale?: boolean
+    radarProfileHash?: string
+    scoreLowerBound?: number
+    scoreUpperBound?: number
+    holisticMatchScore?: number
     competencyStatus?: string
     competencyMessage?: string
     experienceCompetencies?: Array<{ criterion: string; level: number; evidence?: string; assessment?: string }>
@@ -159,6 +167,7 @@ export const useResumeStore = defineStore('resume', () => {
   const resumes = ref<Resume[]>([])
   const isAnalyzing = ref(false)
   const selectedId = ref<string | null>(null)
+  let batchRunProjectId = ''
   
   // 分析进度状态
   const batchProgress = ref<BatchProgress>({ current: 0, total: 0, currentResumeId: null })
@@ -270,6 +279,13 @@ export const useResumeStore = defineStore('resume', () => {
               bonusChecks: a.bonus_checks || [],
               confirmedBonusCount: a.confirmed_bonus_count || 0,
               coreCriterionChecks: a.core_criterion_checks || [],
+              radarCoverage: a.radar_coverage || 0,
+              rankEligible: !!a.rank_eligible,
+              radarStale: !!a.radar_stale,
+              radarProfileHash: a.radar_profile_hash || '',
+              scoreLowerBound: a.score_lower_bound || 0,
+              scoreUpperBound: a.score_upper_bound ?? 100,
+              holisticMatchScore: a.holistic_match_score || 0,
               experienceCompetencies: a.experience_competencies || [],
           competencyStatus: a.competency_status || "",
           competencyMessage: a.competency_message || "",
@@ -358,72 +374,6 @@ export const useResumeStore = defineStore('resume', () => {
     selectedId.value = id
   }
 
-  // 重新分析（需要 AI 配置，返回是否成功启动）
-  async function reAnalyze(id: string): Promise<boolean> {
-    const resume = resumes.value.find(r => r.id === id)
-    if (!resume) return false
-
-    // 检查 AI 配置
-    const aiConfig = getAIConfig()
-    if (!aiConfig || !aiConfig.api_key) {
-      devLog('error', '重新分析失败: 未配置 AI Key')
-      return false
-    }
-
-    resume.status = 'pending'
-    resume.score = undefined
-    resume.analysis = undefined
-
-    // Wails 环境：调用后端分析
-    if (isWailsEnv && WailsApp) {
-      let jobConfig = getJobConfig()
-      try {
-        if (resume.projectId) {
-          const project = await WailsApp.GetProject(resume.projectId)
-          if (!project?.job_config) throw new Error('当前项目岗位配置不存在')
-          jobConfig = project.job_config
-        }
-        resume.status = 'analyzing'
-        devLog('info', `重新分析简历: ${resume.fileName}`)
-        await WailsApp.AnalyzeResume(id, aiConfig, jobConfig)
-        // 结果通过 analysis:completed 事件回调更新
-      } catch (err: any) {
-        devLog('error', `重新分析失败: ${err.message || err}`)
-        resume.status = 'error'
-      }
-      return true
-    }
-
-    // 非 Wails 环境 Mock（仅用于开发调试）
-    devLog('warn', '非 Wails 环境，使用 Mock 重新分析')
-    resume.status = 'analyzing'
-    setTimeout(() => {
-      resume.status = 'done'
-      resume.score = Math.floor(Math.random() * 30) + 70
-      resume.analysis = {
-        overallScore: resume.score,
-        experienceMatch: Math.floor(Math.random() * 20) + 80,
-        skillMatch: Math.floor(Math.random() * 25) + 75,
-        educationMatch: Math.floor(Math.random() * 15) + 85,
-        skillDetail: 'Mock 模式',
-        experienceDetail: 'Mock 模式',
-        educationDetail: 'Mock 模式',
-        candidateName: resume.fileName.replace(/\.[^/.]+$/, ''),
-        workYears: '3年',
-        education: '本科',
-        currentRole: '开发工程师',
-        summary: 'Mock 模式分析完成',
-        strengths: ['技能匹配', '经验丰富'],
-        weaknesses: ['可提升空间'],
-        risks: [],
-        recommendation: 'recommend',
-        interviewSuggestions: []
-      }
-      resume.analyzedAt = new Date().toISOString()
-    }, 1500)
-    return true
-  }
-
   // 模拟的分析结果模板
   const mockStrengths = [
     '技术栈与岗位要求高度匹配',
@@ -502,13 +452,13 @@ export const useResumeStore = defineStore('resume', () => {
   }
 
   // 开始分析所有待分析的简历
-  async function startAnalysis(includeDone = false) {
-    if (isAnalyzing.value) return
+  async function startAnalysis(includeDone = false): Promise<boolean> {
+    if (isAnalyzing.value) return false
 
     isAnalyzing.value = true
 
     const pendingResumes = resumes.value.filter(r => r.status === 'pending' || r.status === 'error' || (includeDone && r.status === 'done'))
-    if (!pendingResumes.length) { isAnalyzing.value = false; return }
+    if (!pendingResumes.length) { isAnalyzing.value = false; return false }
 
     // 如果在 Wails 环境下，使用后端 API
     if (isWailsEnv && WailsApp) {
@@ -518,7 +468,7 @@ export const useResumeStore = defineStore('resume', () => {
       if (!aiConfig || !aiConfig.api_key) {
         devLog('error', 'AI 配置无效或缺少 API Key')
         isAnalyzing.value = false
-        return
+        return false
       }
 
       // 使用 Wails 后端批量分析
@@ -529,6 +479,7 @@ export const useResumeStore = defineStore('resume', () => {
         // the next HR action; the batch must not rewrite a stale project list.
         const firstResume = pendingResumes[0]
         const projId = firstResume?.projectId
+        batchRunProjectId = projId || ''
         if (projId) {
           const project = await WailsApp.GetProject(projId)
           if (!project?.job_config) throw new Error('当前项目岗位配置不存在')
@@ -538,12 +489,15 @@ export const useResumeStore = defineStore('resume', () => {
           await WailsApp.StartBatchAnalysis(resumeIds, aiConfig, jobConfig)
           devLog('info', 'StartBatchAnalysis 调用成功')
         }
+        // isAnalyzing 会在接收到 batch:completed 事件时设置为 false。
+        return true
       } catch (err: any) {
         devLog('error', `启动批量分析失败: ${err.message || err}`)
+        ElMessage.error(err?.message || String(err))
+        batchRunProjectId = ''
         isAnalyzing.value = false
+        return false
       }
-      // 注意：isAnalyzing 会在接收到 batch:completed 事件时设置为 false
-      return
     }
 
     // 非 Wails 环境，使用 Mock 模式
@@ -614,6 +568,7 @@ export const useResumeStore = defineStore('resume', () => {
 
     isAnalyzing.value = false
     batchProgress.value = { current: 0, total: 0, currentResumeId: null }
+    return true
   }
 
   // HR 明确触发时，将已完成记录一并交给后端重新分析。
@@ -628,8 +583,7 @@ export const useResumeStore = defineStore('resume', () => {
 
     if (!resumes.value.some(r => r.status === 'done' || r.status === 'error')) return false
     // Do not clear a previous evaluation before the backend accepts this action.
-    await startAnalysis(true)
-    return true
+    return await startAnalysis(true)
   }
 
   // 后端先确认只清空当前项目，成功后再更新前端列表。
@@ -741,6 +695,13 @@ export const useResumeStore = defineStore('resume', () => {
           bonusChecks: a.bonus_checks || [],
           confirmedBonusCount: a.confirmed_bonus_count || 0,
           coreCriterionChecks: a.core_criterion_checks || [],
+          radarCoverage: a.radar_coverage || 0,
+          rankEligible: !!a.rank_eligible,
+          radarStale: !!a.radar_stale,
+          radarProfileHash: a.radar_profile_hash || '',
+          scoreLowerBound: a.score_lower_bound || 0,
+          scoreUpperBound: a.score_upper_bound ?? 100,
+          holisticMatchScore: a.holistic_match_score || 0,
           experienceCompetencies: a.experience_competencies || [],
           competencyStatus: a.competency_status || "",
           competencyMessage: a.competency_message || "",
@@ -779,6 +740,10 @@ export const useResumeStore = defineStore('resume', () => {
       devLog('info', `批量分析完成, 共 ${data.total} 份`)
       isAnalyzing.value = false
       batchProgress.value = { current: 0, total: 0, currentResumeId: null }
+      const finishedProjectId = batchRunProjectId
+      batchRunProjectId = ''
+      if (finishedProjectId && resumes.value.some(resume => resume.projectId === finishedProjectId)) void loadProjectResumes(finishedProjectId)
+      if (data.failed > 0) ElMessage.warning(`本批 ${data.failed} 份分析失败；原有测评（如有）已保留，请查看日志后重试`)
     })
 
     const unsubContact = WailsRuntime.EventsOn('resume:contact_updated', (data: any) => {
@@ -840,7 +805,6 @@ export const useResumeStore = defineStore('resume', () => {
     loadProjectResumes,
     deleteResume,
     selectResume,
-    reAnalyze,
     reAnalyzeAll,
     startAnalysis,
     clearProjectResumes,

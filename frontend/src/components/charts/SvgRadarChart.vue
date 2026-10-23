@@ -42,6 +42,7 @@
       <!-- 4. 候选人实际匹配层 (Candidate Layer, 主题蓝渐变/半透实色) -->
       <g class="radar-candidate-layer">
         <polygon
+          v-if="!hasUnknown"
           :points="candidatePoints"
           fill="rgba(37, 99, 235, 0.22)"
           stroke="#2563eb"
@@ -49,17 +50,18 @@
           class="candidate-polygon"
         />
         <!-- 顶点圆点 (带呼吸动效与点击热区) -->
+        <line v-for="pt in (hasUnknown ? knownVertices : [])" :key="'line-' + pt.index" :x1="center" :y1="center" :x2="pt.x" :y2="pt.y" stroke="#2563eb" stroke-width="2" stroke-dasharray="3,3" />
         <circle
-          v-for="(pt, pIdx) in candidateVertices"
-          :key="'pt-' + pIdx"
+          v-for="pt in knownVertices"
+          :key="'pt-' + pt.index"
           :cx="pt.x"
           :cy="pt.y"
-          :r="selectedIndex === pIdx ? 6 : 4"
-          :fill="selectedIndex === pIdx ? '#1d4ed8' : '#2563eb'"
+          :r="selectedIndex === pt.index ? 6 : 4"
+          :fill="selectedIndex === pt.index ? '#1d4ed8' : '#2563eb'"
           stroke="#ffffff"
-          :stroke-width="selectedIndex === pIdx ? 2.5 : 2"
+          :stroke-width="selectedIndex === pt.index ? 2.5 : 2"
           class="vertex-circle"
-          @click="handleSelect(pIdx)"
+          @click="handleSelect(pt.index)"
         />
       </g>
 
@@ -72,7 +74,7 @@
           :class="{ active: selectedIndex === lIdx }"
           @click="handleSelect(lIdx)"
         >
-          <title>{{ lbl.fullName }}：{{ candidateScores[lIdx] }}/4</title>
+          <title>{{ lbl.fullName }}：{{ candidateScores[lIdx] === null ? '待核实' : `${candidateScores[lIdx]}/4` }}</title>
           <text
             :x="lbl.x"
             :y="lbl.labelY"
@@ -89,7 +91,7 @@
             dominant-baseline="middle"
             class="radar-score-text"
           >
-            {{ candidateScores[lIdx] }}/{{ indicators[lIdx]?.max || 4 }}
+            {{ candidateScores[lIdx] === null ? '待核实' : `${candidateScores[lIdx]}/${indicators[lIdx]?.max || 4}` }}
           </text>
         </g>
       </g>
@@ -120,7 +122,7 @@ interface Indicator {
 const props = withDefaults(
   defineProps<{
     indicators: Indicator[]
-    candidateValues: number[]
+    candidateValues: Array<number | null>
     benchmarkValues?: number[]
     selectedIndex?: number | null
     size?: number
@@ -177,16 +179,20 @@ const outerVertices = computed(() => {
 const candidateScores = computed(() => {
   return props.indicators.map((_, idx) => {
     const val = props.candidateValues[idx]
-    return typeof val === 'number' ? val : 2
+    return typeof val === 'number' && Number.isFinite(val) ? val : null
   })
 })
+
+const hasUnknown = computed(() => candidateScores.value.some(score => score === null))
 
 const candidateVertices = computed(() => {
   return candidateScores.value.map((score, idx) => {
     const maxVal = props.indicators[idx]?.max || 4
-    return getPoint(idx, score / maxVal)
+    return getPoint(idx, (score ?? 0) / maxVal)
   })
 })
+
+const knownVertices = computed(() => candidateVertices.value.map((point, index) => ({ ...point, index })).filter(point => candidateScores.value[point.index] !== null))
 
 const candidatePoints = computed(() => {
   return candidateVertices.value.map((p) => `${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(' ')

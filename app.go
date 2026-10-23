@@ -21,6 +21,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -36,7 +37,7 @@ import (
 )
 
 // 版本信息
-const AppVersion = "1.8.44"
+const AppVersion = "1.8.57"
 const analysisFormatRetryVersion = "model-json-repair-v1"
 const GitHubRepo = "xunyinjilove/TalentLens"
 
@@ -83,22 +84,28 @@ type AIConfig struct {
 
 // JobConfig 岗位配置
 type JobConfig struct {
-	Title                string   `json:"title"`
-	Requirements         []string `json:"requirements"`
-	RequiredSkills       []string `json:"required_skills"`
-	ExperienceYears      int      `json:"experience_years"`
-	EducationLevel       string   `json:"education_level"`
-	JobDescription       string   `json:"job_description,omitempty"`
-	City                 string   `json:"city,omitempty"`
-	EmploymentType       string   `json:"employment_type,omitempty"`
-	SalaryRange          string   `json:"salary_range,omitempty"`
-	ExperienceText       string   `json:"experience_text,omitempty"`       // 原始自定义经验要求，输入什么就是什么
-	InterviewQuestions   []string `json:"interview_questions,omitempty"`   // 初试重点核查题纲与重点问题
-	RedLines             []string `json:"red_lines,omitempty"`             // 兼容旧项目；已并入初试问题
-	BonusPoints          []string `json:"bonus_points,omitempty"`          // 兼容旧项目；已并入初试问题
-	EquivalentExperience []string `json:"equivalent_experience,omitempty"` // 旧项目兼容读取；不再参与配置或评估
-	TrainableSkills      []string `json:"trainable_skills,omitempty"`      // 旧项目兼容读取；不再参与配置或评估
-	CoreCriteria         []string `json:"core_criteria,omitempty"`         // 岗位能力评分卡；为空时使用 RequiredSkills
+	Title                string            `json:"title"`
+	Direction            string            `json:"direction,omitempty"`
+	Requirements         []string          `json:"requirements"`
+	RequiredSkills       []string          `json:"required_skills"`
+	ExperienceYears      int               `json:"experience_years"`
+	EducationLevel       string            `json:"education_level"`
+	JobDescription       string            `json:"job_description,omitempty"`
+	City                 string            `json:"city,omitempty"`
+	EmploymentType       string            `json:"employment_type,omitempty"`
+	SalaryRange          string            `json:"salary_range,omitempty"`
+	ExperienceText       string            `json:"experience_text,omitempty"`       // 原始自定义经验要求，输入什么就是什么
+	SourcingFilters      map[string]string `json:"sourcing_filters,omitempty"`      // 仅用于平台寻才，不参与评分或红线
+	InterviewQuestions   []string          `json:"interview_questions,omitempty"`   // 初试重点核查题纲与重点问题
+	RedLines             []string          `json:"red_lines,omitempty"`             // 兼容旧项目；已并入初试问题
+	BonusPoints          []string          `json:"bonus_points,omitempty"`          // 兼容旧项目；已并入初试问题
+	EquivalentExperience []string          `json:"equivalent_experience,omitempty"` // 旧项目兼容读取；不再参与配置或评估
+	TrainableSkills      []string          `json:"trainable_skills,omitempty"`      // 旧项目兼容读取；不再参与配置或评估
+	CoreCriteria         []string          `json:"core_criteria,omitempty"`         // 岗位能力评分卡；为空时使用 RequiredSkills
+	RadarMetrics         []string          `json:"radar_metrics,omitempty"`         // 人工确认或批量分析前自动固定的岗位雷达维度
+	RadarProfileHash     string            `json:"radar_profile_hash,omitempty"`
+	RadarProfileVersion  int               `json:"radar_profile_version,omitempty"`
+	RadarSourceHash      string            `json:"radar_source_hash,omitempty"`
 }
 
 // GetInterviewQuestions 获取初试重点核查题纲（自动兼容平滑继承历史保存的红线与加分项内容）
@@ -275,10 +282,13 @@ type AnalysisResult struct {
 	CompetencyMessage      string               `json:"competency_message,omitempty"`
 
 	// 契约化雷达覆盖率与全维度评分区间
-	RadarCoverage   float64 `json:"radar_coverage,omitempty"`    // 已知维度权重覆盖率 (0.0~1.0)
-	RankEligible    bool    `json:"rank_eligible,omitempty"`     // 是否达到 80% 覆盖率排名资格
-	ScoreLowerBound float64 `json:"score_lower_bound,omitempty"` // 全维度下界 (未知项按0分估算)
-	ScoreUpperBound float64 `json:"score_upper_bound,omitempty"` // 全维度上界 (未知项按4分满分估算)
+	RadarCoverage      float64 `json:"radar_coverage,omitempty"`    // 已知维度权重覆盖率 (0.0~1.0)
+	RankEligible       bool    `json:"rank_eligible,omitempty"`     // 是否达到 80% 覆盖率排名资格
+	ScoreLowerBound    float64 `json:"score_lower_bound,omitempty"` // 全维度下界 (未知项按0分估算)
+	ScoreUpperBound    float64 `json:"score_upper_bound,omitempty"` // 全维度上界 (未知项按4分满分估算)
+	RadarProfileHash   string  `json:"radar_profile_hash,omitempty"`
+	RadarStale         bool    `json:"radar_stale,omitempty"`
+	HolisticMatchScore int     `json:"holistic_match_score,omitempty"`
 
 	// 面试建议
 	InterviewSuggestions []string `json:"interview_suggestions"`
@@ -1355,6 +1365,20 @@ func (a *App) GetProject(id string) *Project {
 
 // UpdateProject 更新项目
 func (a *App) UpdateProject(p *Project) error {
+	if p != nil {
+		if previous := a.GetProject(p.ID); previous != nil && jobRadarSourceHash(&previous.JobConfig) != jobRadarSourceHash(&p.JobConfig) {
+			// New job facts create a new rubric version. Its axes are fixed by the
+			// next explicit batch analysis, after relevance checks complete.
+			version := previous.JobConfig.RadarProfileVersion + 1
+			if version < 1 {
+				version = 1
+			}
+			p.JobConfig.RadarProfileVersion = version
+			p.JobConfig.RadarMetrics = nil
+			p.JobConfig.RadarProfileHash = ""
+			p.JobConfig.RadarSourceHash = ""
+		}
+	}
 	p.UpdatedAt = time.Now()
 	a.saveProject(p)
 	return nil
@@ -1593,6 +1617,32 @@ func (a *App) prepareResumeDecision(resume *Resume, job *JobConfig) {
 	if resume == nil || resume.Analysis == nil || job == nil {
 		return
 	}
+	metrics := getUnifiedJobMetrics(job)
+	profileMismatch := !analysisMatchesRadar(resume.Analysis, metrics, activeJobRadarHash(job))
+	if job.RadarProfileVersion > 1 && resume.Analysis.RadarProfileHash == "" {
+		profileMismatch = true
+	}
+	if job.RadarProfileVersion >= 1 && job.RadarProfileHash == "" {
+		profileMismatch = true
+	}
+	if job.RadarSourceHash != "" && job.RadarSourceHash != jobRadarSourceHash(job) {
+		profileMismatch = true
+	}
+	if job.RadarProfileHash != "" && resume.Analysis.RadarProfileHash == "" && len(resume.Analysis.CoreCriterionChecks) != len(metrics) {
+		profileMismatch = true
+	}
+	if profileMismatch {
+		oldScore := resume.Score
+		oldOverall, oldAbility, oldCore := resume.Analysis.OverallScore, resume.Analysis.AbilityScore, resume.Analysis.CoreMatch
+		a.applyJobDecision(resume.Analysis, job, resume)
+		resume.Score = oldScore
+		resume.Analysis.OverallScore, resume.Analysis.AbilityScore, resume.Analysis.CoreMatch = oldOverall, oldAbility, oldCore
+		resume.Analysis.RadarStale = true
+		resume.Analysis.RankEligible = false
+		resume.Analysis.ScoreBasis = "stale"
+		// 保留旧分作为参考，不用新岗位指标改写历史分析。
+		return
+	}
 	a.applyJobDecision(resume.Analysis, job, resume)
 	resume.Score = int(resume.Analysis.OverallScore)
 	resume.Analysis.ManagerPitch = a.buildReviewedManagerPitch(resume.Analysis, resume)
@@ -1606,6 +1656,9 @@ func (a *App) GetProjectRanking(projectID string) []*Resume {
 }
 
 func sortResumesByDecision(resumes []*Resume) {
+	eligible := func(r *Resume) bool {
+		return r != nil && r.Analysis != nil && r.Analysis.RankEligible && !r.Analysis.RadarStale
+	}
 	ability := func(r *Resume) int {
 		if r.Analysis != nil && r.Analysis.AbilityScore > 0 {
 			return r.Analysis.AbilityScore
@@ -1614,6 +1667,9 @@ func sortResumesByDecision(resumes []*Resume) {
 	}
 	sort.SliceStable(resumes, func(i, j int) bool {
 		left, right := resumes[i], resumes[j]
+		if eligible(left) != eligible(right) {
+			return eligible(left)
+		}
 		leftScore, rightScore := ability(left), ability(right)
 		if leftScore != rightScore {
 			return leftScore > rightScore
@@ -2514,12 +2570,22 @@ func (a *App) startQuotaMatrixSearch(projectID string, keyword string, city stri
 	// Keep the public Wails signature compatible with older clients, but all
 	// sourcing entrances now capture only. AI requires an explicit HR action.
 	autoAnalyze = false
-	if !interviewIDPattern.MatchString(projectID) || a.GetProject(projectID) == nil {
+	project := a.GetProject(projectID)
+	if !interviewIDPattern.MatchString(projectID) || project == nil {
 		runtime.EventsEmit(a.ctx, "platform:error", map[string]interface{}{
 			"type": "error", "message": "招聘项目不存在，请重新选择项目后搜索",
 		})
 		return false
 	}
+	// The saved position is the sole source of candidate search conditions.
+	if title := strings.TrimSpace(project.JobConfig.Title); title != "" {
+		keyword = title
+	}
+	if workCity := strings.TrimSpace(project.JobConfig.City); workCity != "" {
+		city = workCity
+	}
+	expYears = project.JobConfig.ExperienceYears
+	eduLevel = project.JobConfig.EducationLevel
 	a.bossMutex.Lock()
 	if a.searchStarting || (a.bossCmd != nil && a.bossCmd.Process != nil) {
 		a.bossMutex.Unlock()
@@ -2663,6 +2729,22 @@ func (a *App) startQuotaMatrixSearch(projectID string, keyword string, city stri
 		"--auto-analyze", fmt.Sprintf("%t", autoAnalyze),
 		"--active-days", fmt.Sprintf("%d", activityDays),
 		"--channel-strategy", channelStrategy,
+	}
+	if slices.Contains(platforms, "51job") {
+		filters := map[string]interface{}{
+			"title":      keyword,
+			"work_city":  city,
+			"experience": strings.TrimSpace(project.JobConfig.ExperienceText),
+			"education":  eduLevel,
+			"skills":     project.JobConfig.RequiredSkills,
+			"filters":    project.JobConfig.SourcingFilters,
+		}
+		if filters["experience"] == "" && expYears > 0 {
+			filters["experience"] = expStr
+		}
+		if encoded, err := json.Marshal(filters); err == nil {
+			cmdArgs = append(cmdArgs, "--51job-filters", string(encoded))
+		}
 	}
 	stopFile := filepath.Join(dataDir, fmt.Sprintf("stop_%d.flag", time.Now().UnixNano()))
 	cmdArgs = append(cmdArgs, "--stop-file", stopFile)
@@ -2912,7 +2994,7 @@ func (a *App) MigrateExistingResumes() string {
 
 // resolveCandidateRadarScore 获取候选人在指定雷达技能指标上的得分 (0-4)
 func resolveCandidateRadarScore(analysis *AnalysisResult, metric string) (int, bool) {
-	if analysis == nil {
+	if analysis == nil || analysis.RadarStale {
 		return 0, false
 	}
 	cleanMetric := strings.TrimSpace(metric)
@@ -2920,40 +3002,16 @@ func resolveCandidateRadarScore(analysis *AnalysisResult, metric string) (int, b
 		return 0, false
 	}
 
-	var allChecks []CoreCriterionCheck
-	allChecks = append(allChecks, analysis.CoreCriterionChecks...)
-	allChecks = append(allChecks, analysis.ExperienceCompetencies...)
-
-	// 1. 优先精确逐字匹配（忽略大小写与首尾空白）
-	for _, item := range allChecks {
+	for _, item := range analysis.CoreCriterionChecks {
 		c := strings.TrimSpace(item.Criterion)
 		if strings.EqualFold(c, cleanMetric) {
-			lvl := item.Level
-			if lvl < 0 {
-				lvl = 0
-			} else if lvl > 4 {
-				lvl = 4
+			if item.EvidenceStatus == "unknown" || item.EvidenceStatus == "conflict" || strings.TrimSpace(item.Evidence) == "" || item.Level < 0 || item.Level > 4 {
+				return 0, false
 			}
-			return lvl, true
+			return item.Level, true
 		}
 	}
-
-	// 2. 模糊双向包含匹配（处理如“Vue3”匹配“Vue3前端框架”或反向包含）
-	for _, item := range allChecks {
-		c := strings.TrimSpace(item.Criterion)
-		if c != "" && (strings.Contains(c, cleanMetric) || strings.Contains(cleanMetric, c)) {
-			lvl := item.Level
-			if lvl < 0 {
-				lvl = 0
-			} else if lvl > 4 {
-				lvl = 4
-			}
-			return lvl, true
-		}
-	}
-
-	// 候选人已完成分析但该项未体现/未提及，按雷达模型规范确定为 0 级
-	return 0, true
+	return 0, false
 }
 
 // ExportProjectReport 导出项目分析报告为 Excel
@@ -3077,8 +3135,11 @@ func (a *App) ExportProjectReport(projectID string) (string, error) {
 		// 追加各项雷达指标得分
 		for _, m := range radarMetrics {
 			if r.Analysis != nil {
-				score, _ := resolveCandidateRadarScore(r.Analysis, m)
-				rowData = append(rowData, score)
+				if score, ok := resolveCandidateRadarScore(r.Analysis, m); ok {
+					rowData = append(rowData, score)
+				} else {
+					rowData = append(rowData, "待核实")
+				}
 			} else {
 				rowData = append(rowData, "")
 			}
@@ -3290,6 +3351,8 @@ func (a *App) AnalyzeResume(resumeID string, cfg *AIConfig, jobCfg *JobConfig) (
 	if err := json.Unmarshal(data, &resume); err != nil {
 		return nil, fmt.Errorf("解析简历失败: %v", err)
 	}
+	previousCompleted := resume.Status == "done" && resume.Analysis != nil
+	previousResume := resume
 	if db := a.activeRecruitmentDB(); db != nil && resume.ProjectID != "" {
 		_ = db.QueryRow(`SELECT COALESCE(MAX(version),0) FROM job_rules WHERE project_id=? AND status='approved'`,
 			resume.ProjectID).Scan(&resume.AnalysisRuleVersion)
@@ -3316,9 +3379,20 @@ func (a *App) AnalyzeResume(resumeID string, cfg *AIConfig, jobCfg *JobConfig) (
 		"progress": 10,
 	})
 
-	// 确保所属项目已完备统一技能与核心能力指标（若不足3项则静默生成并持久化）
+	// 批量入口先固定岗位指标；分析只使用该批次的固定画像。
 	if resume.ProjectID != "" {
-		if updatedP := a.EnsureProjectJobMetrics(resume.ProjectID); updatedP != nil {
+		if updatedP := a.GetProject(resume.ProjectID); updatedP != nil {
+			if jobCfg != nil && jobCfg.RadarProfileHash != "" &&
+				(updatedP.JobConfig.RadarProfileHash != jobCfg.RadarProfileHash ||
+					updatedP.JobConfig.RadarSourceHash != jobRadarSourceHash(&updatedP.JobConfig)) {
+				if previousCompleted {
+					a.saveResume(&previousResume)
+				} else {
+					resume.Status = "pending"
+					a.saveResume(&resume)
+				}
+				return nil, fmt.Errorf("分析期间岗位指标已变化，请重新启动整批分析")
+			}
 			jobCfg = &updatedP.JobConfig
 		}
 	}
@@ -3339,9 +3413,14 @@ func (a *App) AnalyzeResume(resumeID string, cfg *AIConfig, jobCfg *JobConfig) (
 	})
 	analysis, err := a.analyzeModelWithFormatRetry(cfg, prompt)
 	if err != nil {
-		resume.Status = "error"
-		resume.ErrorMessage = err.Error()
-		a.saveResume(&resume)
+		if previousCompleted {
+			// A failed manual rerun must not discard an existing evaluation.
+			a.saveResume(&previousResume)
+		} else {
+			resume.Status = "error"
+			resume.ErrorMessage = err.Error()
+			a.saveResume(&resume)
+		}
 		a.logError(resume.FileName, err.Error(), prompt, "")
 		runtime.EventsEmit(a.ctx, "analysis:error", map[string]interface{}{
 			"id":    resumeID,
@@ -3365,12 +3444,19 @@ func (a *App) AnalyzeResume(resumeID string, cfg *AIConfig, jobCfg *JobConfig) (
 	})
 	a.completeInitialCompetencies(analysis, &resume, jobCfg, cfg)
 	a.applyJobDecision(analysis, jobCfg, &resume)
+	analysis.RadarProfileHash = activeJobRadarHash(jobCfg)
 
 	if analysis.WaterCheck == nil {
 		analysis.WaterCheck = a.generateFallbackWaterCheck(analysis)
 	}
 	// 推介卡在人工核验结果产生后重建，不能直接转发 AI 可能写出的“已命中加分/通过红线”。
 	analysis.ManagerPitch = a.buildReviewedManagerPitch(analysis, &resume)
+	if previousCompleted {
+		if err := a.archivePriorAnalysis(resumeID, data); err != nil {
+			a.saveResume(&previousResume)
+			return nil, fmt.Errorf("归档旧测评失败，已保留原结果: %w", err)
+		}
+	}
 
 	// 更新简历状态 - 进度 100%
 	runtime.EventsEmit(a.ctx, "analysis:progress", map[string]interface{}{
@@ -3403,6 +3489,16 @@ func (a *App) AnalyzeResume(resumeID string, cfg *AIConfig, jobCfg *JobConfig) (
 	})
 
 	return analysis, nil
+}
+
+func (a *App) archivePriorAnalysis(resumeID string, previous []byte) error {
+	historyDir := filepath.Join(a.getDataDir(), "analysis_history")
+	if err := os.MkdirAll(historyDir, 0755); err != nil {
+		return err
+	}
+	idHash := sha256.Sum256([]byte(resumeID))
+	historyPath := filepath.Join(historyDir, fmt.Sprintf("%d-%x.json", time.Now().UnixNano(), idHash[:6]))
+	return os.WriteFile(historyPath, previous, 0600)
 }
 
 // analyzeModelWithFormatRetry repairs predictable schema deviations locally,
@@ -3439,14 +3535,36 @@ func (a *App) analyzeModelWithFormatRetry(cfg *AIConfig, prompt string) (*Analys
 }
 
 // StartBatchAnalysis 批量分析简历
-func (a *App) StartBatchAnalysis(resumeIDs []string, cfg *AIConfig, jobCfg *JobConfig) {
-	if cfg == nil || cfg.APIKey == "" {
-		log.Println("[StartBatchAnalysis] AI 未配置，终止")
-		runtime.EventsEmit(a.ctx, "analysis:error", map[string]interface{}{
-			"id":    "",
-			"error": "AI 未配置: 请先在设置中填写 API Key",
-		})
-		return
+func (a *App) StartBatchAnalysis(resumeIDs []string, cfg *AIConfig, jobCfg *JobConfig) error {
+	if cfg == nil || cfg.APIKey == "" || cfg.BaseURL == "" {
+		return fmt.Errorf("AI 未配置: 请先在设置中填写 API Key 和 Base URL")
+	}
+	if len(resumeIDs) > 0 {
+		projectID := ""
+		for i, id := range resumeIDs {
+			data, err := readJSONFile(filepath.Join(a.getDataDir(), "resumes", id+".json"))
+			if err != nil {
+				return fmt.Errorf("简历不存在: %w", err)
+			}
+			var record struct {
+				ProjectID string `json:"project_id"`
+			}
+			if err := json.Unmarshal(data, &record); err != nil {
+				return fmt.Errorf("读取简历所属职位失败: %w", err)
+			}
+			if i == 0 {
+				projectID = record.ProjectID
+			} else if record.ProjectID != projectID {
+				return fmt.Errorf("一批简历只能属于同一个职位专属分库")
+			}
+		}
+		if projectID != "" {
+			project, err := a.ensureBatchJobRadar(projectID, cfg)
+			if err != nil {
+				return err
+			}
+			jobCfg = &project.JobConfig
+		}
 	}
 	go func() {
 		total := len(resumeIDs)
@@ -3462,6 +3580,7 @@ func (a *App) StartBatchAnalysis(resumeIDs []string, cfg *AIConfig, jobCfg *JobC
 		sem := make(chan struct{}, maxWorkers)
 		var wg sync.WaitGroup
 		var processedCount int32
+		var failedCount int32
 
 		for _, id := range resumeIDs {
 			wg.Add(1)
@@ -3475,6 +3594,7 @@ func (a *App) StartBatchAnalysis(resumeIDs []string, cfg *AIConfig, jobCfg *JobC
 
 				_, err := a.AnalyzeResume(resumeID, cfg, jobCfg)
 				if err != nil {
+					atomic.AddInt32(&failedCount, 1)
 					log.Printf("分析简历 %s 失败: %v", resumeID, err)
 				}
 
@@ -3491,15 +3611,20 @@ func (a *App) StartBatchAnalysis(resumeIDs []string, cfg *AIConfig, jobCfg *JobC
 		wg.Wait()
 
 		runtime.EventsEmit(a.ctx, "batch:completed", map[string]interface{}{
-			"total": total,
+			"total":  total,
+			"failed": atomic.LoadInt32(&failedCount),
 		})
 	}()
+	return nil
 }
 
 // getUnifiedJobMetrics 获取当前岗位的统一技能指标列表（技能要求 + 核心能力），与前端展示完全一致
 func getUnifiedJobMetrics(jobCfg *JobConfig) []string {
 	if jobCfg == nil {
-		return []string{"专业技能掌握度", "核心业务交付", "综合解决问题能力"}
+		return nil
+	}
+	if len(jobCfg.RadarMetrics) > 0 {
+		return uniqueJobMetrics(jobCfg.RadarMetrics)
 	}
 	var unifiedMetrics []string
 	seenMetrics := make(map[string]bool)
@@ -3517,19 +3642,48 @@ func getUnifiedJobMetrics(jobCfg *JobConfig) []string {
 			unifiedMetrics = append(unifiedMetrics, c)
 		}
 	}
-	if len(unifiedMetrics) < 3 {
-		fallbacks := []string{"专业技能掌握度", "核心业务交付", "复杂问题分析与排查", "工程化规范与落地", "团队沟通与自驱协同"}
-		for _, fb := range fallbacks {
-			if !seenMetrics[fb] {
-				seenMetrics[fb] = true
-				unifiedMetrics = append(unifiedMetrics, fb)
-				if len(unifiedMetrics) >= 5 {
-					break
-				}
-			}
+	return unifiedMetrics
+}
+
+func uniqueJobMetrics(items []string) []string {
+	result := make([]string, 0, 8)
+	seen := map[string]bool{}
+	for _, item := range items {
+		item = strings.TrimSpace(item)
+		if item != "" && !seen[item] && len(result) < 8 {
+			result = append(result, item)
+			seen[item] = true
 		}
 	}
-	return unifiedMetrics
+	return result
+}
+
+func jobMetricsHash(metrics []string) string {
+	sum := sha256.Sum256([]byte(strings.Join(uniqueJobMetrics(metrics), "\x00")))
+	return fmt.Sprintf("radar-v1-%x", sum[:12])
+}
+
+func analysisMatchesRadar(result *AnalysisResult, metrics []string, hash string) bool {
+	if result == nil || len(metrics) == 0 {
+		return false
+	}
+	if result.RadarProfileHash != "" {
+		return result.RadarProfileHash == hash
+	}
+	// 旧结果可以缺少当前维度，但不能包含其他画像的维度。
+	if len(result.CoreCriterionChecks) == 0 {
+		return false
+	}
+	allowed := map[string]bool{}
+	for _, metric := range metrics {
+		allowed[metric] = true
+	}
+	for _, check := range result.CoreCriterionChecks {
+		if !allowed[strings.TrimSpace(check.Criterion)] {
+			return false
+		}
+	}
+	return true
 }
 
 // buildAnalysisPrompt 构建分析提示词
@@ -3655,8 +3809,8 @@ func (a *App) buildAnalysisPrompt(resume *Resume, jobCfg *JobConfig) string {
 			"  \"experience_detail\": \"详细分析工作经历与岗位的匹配程度，包括行业相关度、项目复杂度、职责范围等\",\n"+
 			"  \"education_detail\": \"分析学历背景、专业对口程度、是否有相关认证或培训\",\n"+
 			"  \"recommendation\": \"recommend\",\n"+
-			"  \"core_criterion_checks\": " + expCompJsonBlock + ",\n" +
-			"  \"experience_competencies\": " + expCompJsonBlock + ",\n" +
+			"  \"core_criterion_checks\": "+expCompJsonBlock+",\n"+
+			"  \"experience_competencies\": "+expCompJsonBlock+",\n"+
 			"  \"strengths\": [\n"+
 			"    \"具体的优势1（必须引用简历中的事实依据）\",\n"+
 			"    \"具体的优势2\"\n"+
@@ -3950,20 +4104,22 @@ func scoreCandidate(result *AnalysisResult, criteria []string, initialScores ...
 		}
 		result.AbilityScore = int(math.Round(result.CoreMatch))
 		result.OverallScore = float64(result.AbilityScore)
+		result.RankEligible = false
+		result.ScoreBasis = "provisional"
+		result.HolisticMatchScore = holisticMatchScore(result)
 		refreshCandidateRecommendation(result)
 		return
 	}
 
 	if len(result.CoreCriterionChecks) == 0 {
-		if result.CoreMatch == 0 {
-			result.CoreMatch = result.SkillMatch*0.55 + result.ExperienceMatch*0.45
-		}
-		if initialScore > 0 && result.CoreMatch < float64(initialScore) {
-			result.CoreMatch = float64(initialScore)
-		}
-		result.AbilityScore = int(math.Round(result.CoreMatch))
-		result.OverallScore = float64(result.AbilityScore)
+		result.CoreMatch = 0
+		result.AbilityScore = 0
+		result.OverallScore = 0
+		result.RadarCoverage = 0
+		result.ScoreLowerBound, result.ScoreUpperBound = 0, 100
 		result.ScoreBasis = "provisional"
+		result.RankEligible = false
+		result.HolisticMatchScore = holisticMatchScore(result)
 		refreshCandidateRecommendation(result)
 		return
 	}
@@ -3977,24 +4133,16 @@ func scoreCandidate(result *AnalysisResult, criteria []string, initialScores ...
 		byCrit[strings.TrimSpace(c.Criterion)] = c
 	}
 
-	coveredCount := 0
 	for _, metric := range criteria {
 		m := strings.TrimSpace(metric)
 		check, exists := byCrit[m]
 		if !exists {
 			continue
 		}
-		coveredCount++
-
-		// 契约：known 必须有明确可核对依据，包括明确的低等级或否定信息，整数 0-4
-		// unknown: 没有足够的原文信息或所给引用不能支持该维度
-		isKnown := check.EvidenceStatus == "known"
-		if check.EvidenceStatus == "" {
-			if strings.TrimSpace(check.Evidence) != "" {
-				isKnown = true
-			} else if check.Level == 0 && strings.TrimSpace(check.Assessment) != "" && !strings.Contains(check.Assessment, "未提供") && !strings.Contains(check.Assessment, "未提及") && !strings.Contains(check.Assessment, "材料不足") {
-				isKnown = true
-			}
+		// 沉默和模型解释不构成证据；0 级同样需要可定位的原文。
+		isKnown := check.EvidenceStatus == "known" && strings.TrimSpace(check.Evidence) != ""
+		if check.EvidenceStatus == "" && strings.TrimSpace(check.Evidence) != "" {
+			isKnown = true
 		}
 
 		if isKnown && check.Level >= 0 && check.Level <= 4 {
@@ -4023,38 +4171,16 @@ func scoreCandidate(result *AnalysisResult, criteria []string, initialScores ...
 	result.ScoreLowerBound = lowerBound
 	result.ScoreUpperBound = upperBound
 
-	macroScore := 0.0
-	if result.SkillMatch > 0 || result.ExperienceMatch > 0 {
-		macroScore = clampFloat(result.SkillMatch*0.55+result.ExperienceMatch*0.45, 0, 100)
-	}
-	if initialScore > 0 && macroScore < float64(initialScore) {
-		macroScore = float64(initialScore)
-	}
-
-	if macroScore > 0 {
-		result.CoreMatch = math.Round(macroScore)
-		if rankEligible {
-			result.ScoreBasis = "rubric"
-		} else {
-			result.ScoreBasis = "provisional"
-		}
-	} else if rankEligible {
+	result.HolisticMatchScore = holisticMatchScore(result)
+	if rankEligible {
 		result.CoreMatch = math.Round(knownScore)
 		result.ScoreBasis = "rubric"
 	} else if wKnown > 0 {
-		if coveredCount < len(criteria) {
-			result.CoreMatch = math.Round(lowerBound)
-		} else {
-			result.CoreMatch = math.Round(knownScore)
-		}
+		result.CoreMatch = math.Round(knownScore)
 		result.ScoreBasis = "provisional"
 	} else {
 		result.CoreMatch = 0
 		result.ScoreBasis = "provisional"
-	}
-
-	if initialScore > 0 && result.CoreMatch < float64(initialScore) {
-		result.CoreMatch = float64(initialScore)
 	}
 
 	result.AbilityScore = int(math.Round(result.CoreMatch))
@@ -4122,11 +4248,6 @@ func (a *App) applyJobDecision(result *AnalysisResult, job *JobConfig, resume *R
 		return
 	}
 	criteria := getUnifiedJobMetrics(job)
-	if len(job.CoreCriteria) > 0 && len(job.RequiredSkills) == 0 {
-		criteria = job.CoreCriteria
-	} else if len(job.RequiredSkills) > 0 && len(job.CoreCriteria) == 0 {
-		criteria = job.RequiredSkills
-	}
 	// 评分卡只接受简历材料中能逐字定位的依据；没有证据的高等级回落为“未体现”。
 	if resume != nil {
 		validateCompetencyEvidence(result.CoreCriterionChecks, resume)
@@ -4144,6 +4265,10 @@ func (a *App) applyJobDecision(result *AnalysisResult, job *JobConfig, resume *R
 		initialScore = resume.InitialScore
 	}
 	scoreCandidate(result, criteria, initialScore)
+	if len(job.RadarMetrics) == 0 || (job.RadarSourceHash != "" && job.RadarSourceHash != jobRadarSourceHash(job)) {
+		result.RankEligible = false
+		result.ScoreBasis = "provisional"
+	}
 	if len(job.RedLines) > 0 || len(job.BonusPoints) > 0 {
 		proposedBonus := result.BonusChecks
 		checks := make([]RedLineCheck, 0, len(job.RedLines))

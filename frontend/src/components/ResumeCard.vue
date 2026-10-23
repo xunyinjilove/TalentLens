@@ -32,12 +32,12 @@
       <div class="card-body">
         <!-- 分析完成状态 -->
         <div v-if="resume.status === 'done'" class="result">
-          <div class="score-badge" :class="scoreClass">
-            <span class="score-number">{{ displayScore }}</span>
+          <div class="score-badge" :class="isOfficialScore ? scoreClass : 'medium'">
+            <span class="score-number">{{ isOfficialScore ? displayScore : '—' }}</span>
           </div>
           <div class="result-copy">
-            <span class="result-caption">能力评估</span>
-            <span class="recommendation" :class="recommendationClass">{{ recommendationText }}</span>
+            <span class="result-caption">{{ resultCaptionText }}</span>
+            <span v-if="isOfficialScore || resume.analysis?.radarStale" class="recommendation" :class="isOfficialScore ? recommendationClass : 'consider'">{{ isOfficialScore ? recommendationText : `待复核 · 原结论：${recommendationText}` }}</span>
           </div>
         </div>
 
@@ -66,16 +66,8 @@
       </div>
 
       <div class="card-footer">
-        <span class="footer-hint">{{ resume.status === 'pending' ? '已入库，等待手动分析' : '点击查看评测详情' }}</span>
+        <span class="footer-hint">{{ resume.status === 'pending' ? '已入库，等待批量分析' : '点击查看评测详情' }}</span>
         <div class="card-actions">
-          <button
-            v-if="resume.status !== 'analyzing'"
-            class="action-btn reanalyze-btn"
-            @click.stop="$emit('re-analyze', resume.id)"
-          >
-            <el-icon><RefreshRight /></el-icon>
-            {{ resume.status === 'pending' ? '分析' : $t('analysis.reAnalyze') }}
-          </button>
           <button
             class="action-btn delete-btn"
             @click.stop="$emit('delete', resume.id)"
@@ -94,8 +86,7 @@ import { useI18n } from 'vue-i18n'
 import {
   Loading,
   CircleClose,
-  Clock,
-  RefreshRight
+  Clock
 } from '@element-plus/icons-vue'
 import type { Resume } from '../composables/useResumeStore'
 
@@ -105,7 +96,18 @@ const props = defineProps<{
   resume: Resume
   sequence: number
   selected?: boolean
+  profileConfirmed?: boolean
 }>()
+
+const isOfficialScore = computed(() => !!props.resume.analysis?.rankEligible && !props.resume.analysis?.radarStale)
+const isProvisionalScore = computed(() => !props.resume.analysis?.radarStale && ((props.resume.analysis?.radarCoverage || 0) > 0 || typeof props.resume.analysis?.abilityScore === 'number'))
+const resultCaptionText = computed(() => {
+  if (isOfficialScore.value) return '岗位依据分'
+  if (props.resume.analysis?.radarStale) return `待复核 · 旧分 ${props.resume.analysis?.abilityScore ?? props.resume.score ?? '—'}`
+  if (isProvisionalScore.value) return `暂评 ${props.resume.analysis?.abilityScore ?? props.resume.score ?? '—'} · 覆盖 ${Math.round((props.resume.analysis?.radarCoverage || 0) * 100)}%`
+  if (!props.profileConfirmed) return '岗位指标待固定'
+  return '原文证据待补'
+})
 
 const failureSummary = computed(() => {
   const message = props.resume.errorMessage || ''
@@ -118,7 +120,6 @@ const failureSummary = computed(() => {
 
 defineEmits<{
   (e: 'click'): void
-  (e: 're-analyze', id: string): void
   (e: 'delete', id: string): void
 }>()
 
@@ -671,23 +672,6 @@ $radius-md: 10px;
         padding: 3px 8px;
       }
 
-      .reanalyze-btn {
-        display: flex;
-        align-items: center;
-        gap: 4px;
-        color: $primary;
-        background: rgba(30, 58, 95, 0.06);
-        border: 1px solid rgba(30, 58, 95, 0.15);
-
-        .el-icon { font-size: 13px; }
-
-        &:hover {
-          background: rgba(30, 58, 95, 0.12);
-          border-color: $primary-light;
-        }
-        &:active { transform: scale(0.96); }
-      }
-
       .delete-btn {
         color: $error;
 
@@ -908,12 +892,6 @@ $radius-md: 10px;
   }
 
   .footer-hint { color: var(--text-muted); font-size: 11px; }
-
-  .card-footer .card-actions .reanalyze-btn {
-    color: var(--accent-blue);
-    background: var(--accent-blue-light);
-    border-color: var(--accent-blue-subtle);
-  }
 
   .card-footer .card-actions .delete-btn { color: var(--color-danger); }
   .card-footer .card-actions .delete-btn:hover { background: var(--color-danger-bg); }

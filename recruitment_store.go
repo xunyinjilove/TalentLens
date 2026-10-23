@@ -150,6 +150,8 @@ CREATE TABLE IF NOT EXISTS follow_up_events (
   to_stage TEXT NOT NULL DEFAULT '', note TEXT NOT NULL DEFAULT '',
   actor TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL
 );
+CREATE INDEX IF NOT EXISTS follow_up_events_candidate_created
+  ON follow_up_events(project_candidate_id, created_at DESC);
 CREATE TABLE IF NOT EXISTS interviews (
   id TEXT PRIMARY KEY, project_candidate_id TEXT NOT NULL REFERENCES project_candidates(id),
   starts_at TEXT NOT NULL, ends_at TEXT NOT NULL, interviewer TEXT NOT NULL DEFAULT '',
@@ -157,6 +159,13 @@ CREATE TABLE IF NOT EXISTS interviews (
   note TEXT NOT NULL DEFAULT '', status TEXT NOT NULL DEFAULT 'scheduled',
   created_at TEXT NOT NULL, updated_at TEXT NOT NULL
 );
+CREATE INDEX IF NOT EXISTS interviews_candidate_schedule
+  ON interviews(project_candidate_id, status, starts_at);
+CREATE TABLE IF NOT EXISTS today_todos (
+  id TEXT PRIMARY KEY, title TEXT NOT NULL,
+  created_at TEXT NOT NULL, completed_at TEXT NOT NULL DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS today_todos_completed_at ON today_todos(completed_at);
 CREATE TABLE IF NOT EXISTS communication_jobs (
   id TEXT PRIMARY KEY,
   platform TEXT NOT NULL,

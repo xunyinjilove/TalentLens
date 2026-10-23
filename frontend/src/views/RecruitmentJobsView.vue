@@ -76,7 +76,6 @@
         <table class="saas-table">
           <thead>
             <tr>
-              <th class="col-sourcing">寻才</th>
               <th class="col-title">职位名称</th>
               <th class="col-dept">部门</th>
               <th class="col-headcount">招聘人数</th>
@@ -88,7 +87,7 @@
           </thead>
           <tbody>
             <tr v-if="loading" class="empty-row">
-              <td colspan="8">
+              <td colspan="7">
                 <div class="empty-state">
                   <el-icon class="is-loading" style="font-size: 24px;"><Loading /></el-icon>
                   <p>正在载入职位数据…</p>
@@ -96,7 +95,7 @@
               </td>
             </tr>
             <tr v-else-if="!filteredProjects.length" class="empty-row">
-              <td colspan="8">
+              <td colspan="7">
                 <div class="empty-state">
                   <p>未找到符合条件的职位</p>
                   <el-button size="small" type="primary" plain @click="openCreateModal">立即新建职位</el-button>
@@ -108,18 +107,6 @@
               :key="project.id"
               class="table-row"
             >
-              <!-- 快捷寻才（最左侧第一列） -->
-              <td class="col-sourcing">
-                <button
-                  class="sourcing-pill-btn"
-                  title="立即为该岗位检索人才"
-                  @click.stop="openSourcing(project)"
-                >
-                  <el-icon><Position /></el-icon>
-                  <span>寻才</span>
-                </button>
-              </td>
-
               <!-- 职位名称与次行信息 -->
               <td class="col-title">
                 <div class="job-title-wrapper">
@@ -333,6 +320,23 @@
           </el-form-item>
         </div>
 
+        <div class="sourcing-filter-section">
+          <h3>51job 寻才筛选</h3>
+          <p>只用于搜索候选人；留空即不限。工作城市、工作年限、最低学历和必备技能沿用上方职位设置。</p>
+          <div class="sourcing-filter-grid">
+            <el-form-item label="年龄"><el-select v-model="sourcingFilters.age" clearable placeholder="不限" allow-create filterable><el-option v-for="v in ['22岁及以下','22-25岁','25-30岁','30-35岁','35-45岁','45岁及以上']" :key="v" :label="v" :value="v" /></el-select></el-form-item>
+            <el-form-item label="性别"><el-select v-model="sourcingFilters.gender" clearable placeholder="不限"><el-option label="男" value="男" /><el-option label="女" value="女" /></el-select></el-form-item>
+            <el-form-item label="居住地"><el-input v-model="sourcingFilters.residence" clearable placeholder="如：上海；不从工作城市推断" /></el-form-item>
+            <el-form-item label="学校性质"><el-select v-model="sourcingFilters.school_type" clearable placeholder="不限" allow-create filterable><el-option v-for="v in ['全日制','985','211','双一流','留学经历','在校生']" :key="v" :label="v" :value="v" /></el-select></el-form-item>
+            <el-form-item label="求职状态"><el-input v-model="sourcingFilters.job_seeking_status" clearable placeholder="按 51job 页面状态填写" /></el-form-item>
+            <el-form-item label="期望行业"><el-input v-model="sourcingFilters.expected_industry" clearable placeholder="如：医疗器械" /></el-form-item>
+            <el-form-item label="期望职能"><el-input v-model="sourcingFilters.expected_function" clearable placeholder="如：机械设计" /></el-form-item>
+            <el-form-item label="期望月薪"><el-select v-model="sourcingFilters.expected_salary" clearable placeholder="不限" allow-create filterable><el-option v-for="v in ['8千','1万','1.5万','2万','2.5万','3万','4万','5万','6万','10万及以上']" :key="v" :label="v" :value="v" /></el-select></el-form-item>
+            <el-form-item label="从事行业"><el-input v-model="sourcingFilters.current_industry" clearable placeholder="如：医疗器械" /></el-form-item>
+            <el-form-item label="从事职能"><el-input v-model="sourcingFilters.current_function" clearable placeholder="如：项目管理" /></el-form-item>
+          </div>
+        </div>
+
         <el-form-item>
           <template #label>
             <div class="job-description-label-row">
@@ -439,6 +443,7 @@
             <div class="skills-label-wrapper">
               <div class="skills-label-title">必备关键技能 / 评分项 (回车分隔)</div>
               <div class="skills-label-tip">（关键技能用于生成技能指标雷达，可分析八项以内的技能，若不足则AI自动匹配技能）</div>
+              <el-button type="primary" link size="small" :loading="skillDraftGenerating" @click="generateSkillSuggestions()">✨ AI 建议技能</el-button>
             </div>
           </template>
           <el-input
@@ -446,6 +451,16 @@
             placeholder="输入核心专业技能，多个技能以逗号或回车隔开 (选填，留空由 AI 智能拟定)"
             @blur="syncSkills"
           />
+          <div v-if="skillDirectionPromptVisible" class="skill-suggestion-preview">
+            <strong>先确认岗位方向</strong>
+            <div class="skill-direction-list"><el-button v-for="direction in skillSuggestedDirections" :key="direction" size="small" @click="generateSkillSuggestions(direction)">{{ direction }}</el-button></div>
+            <div class="skill-direction-custom"><el-input v-model="skillCustomDirection" placeholder="输入具体岗位方向" /><el-button :disabled="!skillCustomDirection.trim()" @click="generateSkillSuggestions(skillCustomDirection)">确认方向</el-button></div>
+          </div>
+          <div v-if="skillDraft.length" class="skill-suggestion-preview">
+            <div class="skill-suggestion-heading"><strong>AI 技能草稿 · {{ skillDraftDirection }}</strong><span>勾选并编辑后应用；现有技能不会被覆盖。</span></div>
+            <div v-for="(item, index) in skillDraft" :key="index" class="skill-suggestion-row"><el-checkbox v-model="item.selected" :aria-label="`选用建议技能 ${index + 1}`" /><el-input v-model="item.text" maxlength="50" /></div>
+            <div class="skill-suggestion-actions"><el-button size="small" @click="skillDraft = []">放弃</el-button><el-button type="primary" size="small" @click="applySkillSuggestions">应用选中技能</el-button></div>
+          </div>
         </el-form-item>
 
         <el-form-item label="初试重点核查题纲（进入初试环节时自动生成重点核验题目，以逗号或分号分隔）">
@@ -485,6 +500,7 @@
       :city="sourcingProject.job_config?.city || '上海'"
       :exp-years="sourcingProject.job_config?.experience_years || 0"
       :edu-level="sourcingProject.job_config?.education_level || ''"
+      :job-config="sourcingProject.job_config"
       @refresh="load"
       @update:model-value="val => { showSourcingDialog = val; if (!val) sourcingProject = null }"
     />
@@ -537,7 +553,14 @@ const directionPromptVisible = ref(false)
 const suggestedDirections = ref<string[]>([])
 const customDirectionInput = ref('')
 const activeConflicts = ref<string[]>([])
+const skillDraftGenerating = ref(false)
+const skillDraft = ref<Array<{ text: string; selected: boolean }>>([])
+const skillDraftDirection = ref('')
+const skillDirectionPromptVisible = ref(false)
+const skillSuggestedDirections = ref<string[]>([])
+const skillCustomDirection = ref('')
 let activeRequestSeq = 0
+let activeSkillRequestSeq = 0
 const keyword = ref('')
 const globalSearch = ref('')
 const selectedDepartment = ref('')
@@ -590,6 +613,8 @@ const jobForm = reactive({
   education_level: '本科',
   job_description: ''
 })
+const emptySourcingFilters = () => ({ age: '', gender: '', residence: '', school_type: '', job_seeking_status: '', expected_industry: '', expected_function: '', expected_salary: '', current_industry: '', current_function: '' })
+const sourcingFilters = reactive(emptySourcingFilters())
 
 function formatExpRequirement(jobConfig: any): string {
   if (jobConfig?.experience_text) return String(jobConfig.experience_text)
@@ -618,6 +643,46 @@ function splitTags(input: string): string[] {
 
 function syncSkills() {
   // synced when saving
+}
+async function generateSkillSuggestions(explicitDirection?: string) {
+  const title = jobForm.title.trim()
+  if (!title) { ElMessage.warning('请先填写职位名称'); return }
+  const formId = currentFormInstanceId.value
+  const requestId = ++activeSkillRequestSeq
+  skillDraftGenerating.value = true
+  skillDraft.value = []
+  skillDirectionPromptVisible.value = false
+  try {
+    const api: any = await import('../../wailsjs/go/main/App')
+    const result = await api.SuggestJobSkills({ title, direction: explicitDirection || jobForm.direction, department: jobForm.department.trim(), jobDescription: jobForm.job_description.trim(), existingSkills: splitTags(skillsInput.value) })
+    if (requestId !== activeSkillRequestSeq || formId !== currentFormInstanceId.value || title !== jobForm.title.trim() || !editModalVisible.value) return
+    if (result.status === 'needs_direction') {
+      skillSuggestedDirections.value = result.suggestedDirections || []
+      skillDirectionPromptVisible.value = true
+      return
+    }
+    if (result.status !== 'ready') { ElMessage.warning(result.message || '未能生成技能建议'); return }
+    jobForm.direction = result.direction || explicitDirection || jobForm.direction
+    skillDraftDirection.value = jobForm.direction
+    skillDraft.value = (result.skills || []).map((text: string) => ({ text, selected: true }))
+    if (!skillDraft.value.length) ElMessage.info('现有技能已覆盖本次建议，无需重复添加')
+  } catch (err: any) { ElMessage.error(err?.message || String(err)) }
+  finally { if (requestId === activeSkillRequestSeq) skillDraftGenerating.value = false }
+}
+function applySkillSuggestions() {
+  const existing = splitTags(skillsInput.value)
+  const seen = new Set(existing.map(item => item.toLowerCase()))
+  let added = 0
+  for (const draft of skillDraft.value) {
+    const text = draft.text.trim()
+    if (!draft.selected || !text || seen.has(text.toLowerCase()) || existing.length >= 8) continue
+    existing.push(text)
+    seen.add(text.toLowerCase())
+    added++
+  }
+  skillsInput.value = existing.join(', ')
+  skillDraft.value = []
+  ElMessage.success(`已追加 ${added} 项技能；核对后点击“保存职位”生效`)
 }
 function syncInterviewQuestions() {}
 
@@ -750,6 +815,8 @@ const suggested51JobCity = computed(() => {
 function openCreateModal() {
   void ensure51JobJobsCache()
   aiDraft.value = ''
+  skillDraft.value = []
+  skillDirectionPromptVisible.value = false
   currentDraftDirection.value = ''
   directionPromptVisible.value = false
   suggestedDirections.value = []
@@ -770,6 +837,7 @@ function openCreateModal() {
   jobForm.experience_years = '3-5 年'
   jobForm.education_level = '本科'
   jobForm.job_description = ''
+  Object.assign(sourcingFilters, emptySourcingFilters())
   skillsInput.value = '' // 清空默认值，杜绝硬编码预填前端技能
   interviewQuestionsInput.value = ''
   editModalVisible.value = true
@@ -778,6 +846,8 @@ function openCreateModal() {
 function openEditModal(project: Project) {
   void ensure51JobJobsCache()
   aiDraft.value = ''
+  skillDraft.value = []
+  skillDirectionPromptVisible.value = false
   currentDraftDirection.value = ''
   directionPromptVisible.value = false
   suggestedDirections.value = []
@@ -787,7 +857,7 @@ function openEditModal(project: Project) {
   currentEditProjectId.value = project.id
   currentFormInstanceId.value = 'form_' + Date.now()
   jobForm.title = project.job_config?.title || project.name
-  jobForm.direction = ''
+  jobForm.direction = project.job_config?.direction || ''
   jobForm.department = project.department || ''
   jobForm.headcount = project.headcount || 1
   jobForm.recruiter = project.recruiter || ''
@@ -798,6 +868,7 @@ function openEditModal(project: Project) {
   jobForm.experience_years = formatExpRequirement(project.job_config)
   jobForm.education_level = project.job_config?.education_level || '本科'
   jobForm.job_description = project.job_config?.job_description || ''
+  Object.assign(sourcingFilters, emptySourcingFilters(), project.job_config?.sourcing_filters || {})
 
   // 修复空数组短路 bug：若 core_criteria 为 [] 则正确读取 required_skills
   const existingSkills = (project.job_config?.core_criteria && project.job_config.core_criteria.length > 0)
@@ -816,8 +887,12 @@ function openEditModal(project: Project) {
 
 // 职位标题变化时，使旧草稿和旧方向失效
 watch(() => jobForm.title, (newTitle, oldTitle) => {
-  if (oldTitle && newTitle !== oldTitle) {
+  const savedTitle = isEditing.value ? projectStore.projects.find(item => item.id === currentEditProjectId.value)?.job_config?.title : ''
+  if (oldTitle && newTitle !== oldTitle && newTitle !== savedTitle) {
     aiDraft.value = ''
+    jobForm.direction = ''
+    skillDraft.value = []
+    skillDirectionPromptVisible.value = false
     currentDraftDirection.value = ''
     directionPromptVisible.value = false
     activeConflicts.value = []
@@ -938,12 +1013,17 @@ async function saveJob() {
     const expText = String(jobForm.experience_years ?? '').trim()
     const expYears = parseExperienceYears(expText)
 
+    const priorConfig = isEditing.value && currentEditProjectId.value
+      ? projectStore.projects.find(p => p.id === currentEditProjectId.value)?.job_config : undefined
     const jobConfig = {
+      ...(priorConfig || {}),
       title: jobForm.title.trim(),
+      direction: jobForm.direction.trim(),
       requirements: [],
       required_skills: skills,
       experience_years: expYears,
       experience_text: expText,
+      sourcing_filters: Object.fromEntries(Object.entries(sourcingFilters).map(([key, value]) => [key, value.trim()]).filter(([, value]) => value)),
       education_level: jobForm.education_level,
       job_description: jobForm.job_description.trim(),
       city: jobForm.city,
@@ -1106,6 +1186,18 @@ onUnmounted(() => {
 </script>
 
 <style scoped>
+.sourcing-filter-section { margin: 12px 0 20px; padding: 16px; border: 1px solid #e2e8f0; border-radius: 12px; background: #f8fafc; }
+.sourcing-filter-section h3 { margin: 0 0 5px; font-size: 15px; }
+.sourcing-filter-section p { margin: 0 0 15px; color: #64748b; font-size: 12px; }
+.sourcing-filter-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 14px; }
+.sourcing-filter-grid :deep(.el-select), .sourcing-filter-grid :deep(.el-input) { width: 100%; }
+.skill-suggestion-preview { width: 100%; margin-top: 10px; padding: 12px; border: 1px solid #c7d2fe; border-radius: 10px; background: #f8faff; }
+.skill-suggestion-heading { display: flex; justify-content: space-between; gap: 8px; margin-bottom: 9px; }
+.skill-suggestion-heading span { color: #64748b; font-size: 12px; }
+.skill-suggestion-row, .skill-direction-custom { display: flex; align-items: center; gap: 8px; margin-top: 7px; }
+.skill-direction-list { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 9px; }
+.skill-suggestion-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 10px; }
+@media (max-width: 700px) { .sourcing-filter-grid { grid-template-columns: 1fr; } }
 .job-management-view {
   display: flex;
   flex-direction: column;
@@ -1325,40 +1417,6 @@ onUnmounted(() => {
 }
 
 /* 列定义与内容排版 */
-.col-sourcing {
-  width: 90px;
-  min-width: 90px;
-  text-align: center;
-}
-
-.sourcing-pill-btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 5px;
-  padding: 6px 14px;
-  font-size: 13px;
-  font-weight: 600;
-  color: #ffffff;
-  background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%);
-  border: none;
-  border-radius: 20px;
-  cursor: pointer;
-  box-shadow: 0 2px 6px rgba(37, 99, 235, 0.25);
-  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
-  white-space: nowrap;
-}
-
-.sourcing-pill-btn:hover {
-  background: linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%);
-  box-shadow: 0 4px 10px rgba(37, 99, 235, 0.35);
-  transform: translateY(-1px);
-}
-
-.sourcing-pill-btn:active {
-  transform: translateY(0);
-}
-
 .col-title {
   min-width: 200px;
 }
