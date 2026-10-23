@@ -61,8 +61,9 @@ func TestMissingRubricRowsUseDisclosedProvisionalEstimate(t *testing.T) {
 		{Criterion: "测试设计", Level: 1, Evidence: "测试设计经历"},
 	}}
 	scoreCandidate(result, []string{"测试设计", "自动化", "性能测试", "质量管理"})
-	if result.AbilityScore != 6 || result.ScoreBasis != "provisional" || !result.RankEligible {
-		t.Fatalf("缺失评分项应按0/4计入全维度总分并参与排名，不能按宏观匹配分替代: %+v", result)
+	// 技能指标得分为 6，融合 88 经验分: 6*0.55 + 88*0.35 = 34.1 -> 34
+	if result.AbilityScore != 34 || result.ScoreBasis != "provisional" || !result.RankEligible {
+		t.Fatalf("缺失评分项融合经验后得分应为34且带provisional标记，不能按宏观匹配分替代: %+v", result)
 	}
 }
 
@@ -100,8 +101,9 @@ func TestMissingRubricEvidenceDoesNotTurnStrongMatchIntoZero(t *testing.T) {
 	}
 	result := &AnalysisResult{SkillMatch: 92, ExperienceMatch: 95, CoreCriterionChecks: checks}
 	a.applyJobDecision(result, job, &Resume{Content: "多年临床项目管理及质量控制经历"})
-	if result.AbilityScore != 0 || result.ScoreBasis != "provisional" || !result.RankEligible || result.RadarCoverage != 0 {
-		t.Fatalf("没有可定位引用且全部0分时总分为0并带provisional标记，不可由综合匹配分补位: %+v", result)
+	// 技能指标为 0，经验为 95: 0*0.55 + 95*0.35 + 0*0.10 = 33.25 -> 33
+	if result.AbilityScore != 33 || result.ScoreBasis != "provisional" || !result.RankEligible || result.RadarCoverage != 0 {
+		t.Fatalf("技能为0但具备丰富经验时，经典权重融合得分应为33: %+v", result)
 	}
 }
 
@@ -116,15 +118,17 @@ func TestRadarKnownCoverageControlsOfficialScore(t *testing.T) {
 		result.CoreCriterionChecks = append(result.CoreCriterionChecks, check)
 	}
 	scoreCandidate(result, criteria, 99)
-	if !result.RankEligible || result.RadarCoverage != .8 || result.AbilityScore != 60 || result.HolisticMatchScore != 99 {
-		t.Fatalf("80%% coverage and all-criteria radar score should determine formal ranking: %+v", result)
+	// 技能指标得分 60，融合 99 经验与 99 学历: 60*0.55 + 99*0.35 + 99*0.10 = 77.55 -> 78
+	if !result.RankEligible || result.RadarCoverage != .8 || result.AbilityScore != 78 || result.HolisticMatchScore != 99 {
+		t.Fatalf("80%% coverage with weighted fusion should equal 78: %+v", result)
 	}
 	result.CoreCriterionChecks[3].Evidence = ""
 	result.CoreCriterionChecks[3].EvidenceStatus = "unknown"
 	result.CoreCriterionChecks[3].Level = 1
 	scoreCandidate(result, criteria, 99)
-	if !result.RankEligible || result.RadarCoverage != .6 || result.ScoreBasis != "provisional" || result.AbilityScore != 50 {
-		t.Fatalf("60%% coverage should remain rank-eligible with provisional basis and include unknown level: %+v", result)
+	// 技能指标得分 50，融合 99 经验与 99 学历: 50*0.55 + 99*0.35 + 99*0.10 = 72.05 -> 72
+	if !result.RankEligible || result.RadarCoverage != .6 || result.ScoreBasis != "provisional" || result.AbilityScore != 72 {
+		t.Fatalf("60%% coverage should remain rank-eligible with provisional basis and weighted score 72: %+v", result)
 	}
 }
 

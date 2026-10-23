@@ -48,7 +48,7 @@
                   <span v-if="!selectedProjectId" class="overview-candidate-project">{{ item.jobTitle || item.projectName }}</span>
                   <span v-if="item.skills?.length" class="overview-skill-list"><span v-for="skill in item.skills.slice(0, 2)" :key="skill" class="overview-skill">{{ skill }}</span></span>
                   <span class="overview-candidate-footer">
-                    <span class="overview-candidate-score">{{ item.analysisStatus === 'done' && !item.radarStale ? `岗位 ${item.abilityScore}` : item.radarStale ? '待复核' : '待分析' }}</span>
+                    <span class="overview-candidate-score">{{ item.analysisStatus === 'done' && !item.radarStale ? `综合 ${item.abilityScore}` : item.radarStale ? '待复核' : '待分析' }}</span>
                     <span class="overview-candidate-time" :title="item.lastFollowUpAt || item.createdAt">{{ activityLabel(item) }}</span>
                   </span>
                   <span class="overview-candidate-stage">{{ stageLabels[item.stage] || item.stage }}</span>

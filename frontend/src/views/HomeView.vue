@@ -251,7 +251,7 @@
                   <div v-if="resumeStore.selectedResume.status === 'done' && resumeStore.selectedResume.analysis" class="hero-score-section">
                     <div class="hero-score-box" :class="!resumeStore.selectedResume.analysis.radarStale ? getScoreClass(resumeStore.selectedResume.score) : ''">
                       <strong class="hero-score-num">{{ !resumeStore.selectedResume.analysis.radarStale ? (animatedDetailScore || resumeStore.selectedResume.score) : (resumeStore.selectedResume.analysis.abilityScore ?? resumeStore.selectedResume.score ?? '—') }}</strong>
-                      <span class="hero-score-label">{{ resumeStore.selectedResume.analysis.radarStale ? '待复核 · 旧分参考' : radarCoverageRatio < 1 ? `岗位评分 · 覆盖 ${Math.round(radarCoverageRatio * 100)}%` : '岗位依据分' }}</span>
+                      <span class="hero-score-label">{{ resumeStore.selectedResume.analysis.radarStale ? '待复核 · 旧分参考' : '综合评分' }}</span>
                     </div>
                     <div class="hero-decision-badge-wrap">
                       <span class="hero-rec-badge" :class="!resumeStore.selectedResume.analysis.radarStale ? resumeStore.selectedResume.analysis.recommendation : ''">
@@ -342,7 +342,7 @@
                   <el-icon><Histogram /></el-icon>
                   <span>能力维度拆解</span>
                   <span class="subtab-badge info">
-                    {{ !resumeStore.selectedResume.analysis.radarStale ? `岗位 ${resumeStore.selectedResume.analysis.abilityScore ?? resumeStore.selectedResume.score} 分` : '待复核' }}
+                    {{ !resumeStore.selectedResume.analysis.radarStale ? `综合 ${resumeStore.selectedResume.analysis.abilityScore ?? resumeStore.selectedResume.score} 分` : '待复核' }}
                   </span>
                 </button>
 
@@ -485,7 +485,7 @@
                           <span v-if="radarCoverageRatio >= 0.8" class="eligible-badge">（达核实门槛 ≥80%）</span>
                           <span v-else class="eligible-badge">（含待核查项评分，已计入总分与排名）</span>
                         </span>
-                        <span class="bounds-text" v-if="radarScoreBounds">全维度得分区间: {{ radarScoreBounds }}</span>
+                        <span class="bounds-text" v-if="radarScoreBounds">技能维度区间: {{ radarScoreBounds }}</span>
                         <span v-if="resumeStore.selectedResume.analysis.holisticMatchScore" class="bounds-text">综合匹配参考：{{ resumeStore.selectedResume.analysis.holisticMatchScore }} 分</span>
                       </div>
                       <p v-if="!resumeStore.selectedResume.analysis.radarStale && missingRadarMetrics.length" class="score-explanation">待核查指标：{{ missingRadarMetrics.join('、') }}</p>
