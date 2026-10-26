@@ -31,6 +31,10 @@
             </el-col>
           </el-row>
 
+          <el-alert v-if="selectedJob && selectedJob.degree === '大专' && strictCriteria.minEducation === '本科'"
+            type="warning" :closable="false" show-icon style="margin-bottom: 16px"
+            title="注意：当前 51job 职位的招聘要求为【大专】，但您在【岗位专属硬性条件】中设置了【本科及以上】。本次扫描的大专候选人将被拦截排除。若需录入大专候选人，请前往【岗位专属硬性条件】将最低学历调整为【大专及以上】。" />
+
           <el-form-item label="导入的平台状态">
             <el-checkbox-group v-model="statuses" :disabled="running">
               <el-checkbox :value="1">待处理</el-checkbox>
@@ -172,11 +176,12 @@ const emit = defineEmits<{ 'update:modelValue': [value: boolean]; completed: [] 
 const visible = computed({ get: () => props.modelValue, set: value => emit('update:modelValue', value) })
 
 const activeTab = ref('sync')
-const jobs = ref<Array<{ jobId: string; title: string }>>([])
+const jobs = ref<Array<{ jobId: string; title: string; workArea?: string; degree?: string; workYear?: string; salary?: string }>>([])
 const mappings = ref<any[]>([])
 const accountScope = ref('')
 const jobId = ref('')
 const projectId = ref('')
+const selectedJob = computed(() => jobs.value.find(j => j.jobId === jobId.value))
 const statuses = ref<number[]>([1, 2, 3, 4])
 const loading = ref(false)
 const running = ref(false)
@@ -370,7 +375,14 @@ async function runSingleBatch() {
     await api.Bind51JobTalentManagementJob(accountScope.value, jobId.value, projectId.value)
     const result = await api.RunTalentManagementNextBatch(accountScope.value, jobId.value)
     await loadSyncTask()
-    summary.value = `单批完成：新增 ${result.addedCount || 0} · 待补全 ${result.pendingDocumentCount || 0} · 重复 ${result.duplicateCount || 0}`
+    if (result.interceptedCount > 0) {
+      summary.value = `单批完成：新增 ${result.addedCount || 0} · 拦截排除 ${result.interceptedCount} 人（可在【淘汰审计记录】查看） · 重复 ${result.duplicateCount || 0}`
+      if (!result.addedCount) {
+        ElMessage.warning(`本次扫描的候选人均不符合岗位硬性要求（${result.interceptReason || '学历不达标'}），已自动拦截并记录在【淘汰审计记录】`)
+      }
+    } else {
+      summary.value = `单批完成：新增 ${result.addedCount || 0} · 待补全 ${result.pendingDocumentCount || 0} · 重复 ${result.duplicateCount || 0}`
+    }
     progress.value = result.hasMore ? '本状态仍有下一页，可继续同步' : '本状态已无更多，已自动推进游标'
     emit('completed')
   } catch (error: any) {
@@ -386,7 +398,7 @@ async function start() {
   running.value = true
   stopRequested.value = false
   summary.value = ''
-  const totals = { added: 0, duplicate: 0, pending: 0, failed: 0 }
+  const totals = { added: 0, duplicate: 0, pending: 0, failed: 0, intercepted: 0 }
   try {
     const api: any = await import('../../wailsjs/go/main/App')
     await api.Bind51JobTalentManagementJob(accountScope.value, jobId.value, projectId.value)
@@ -399,6 +411,7 @@ async function start() {
         totals.duplicate += result.duplicateCount || 0
         totals.pending += result.pendingDocumentCount || 0
         totals.failed += result.failedCount || 0
+        totals.intercepted += result.interceptedCount || 0
         emit('completed')
         if (!result.hasMore) break
         page++
@@ -406,7 +419,14 @@ async function start() {
       if (stopRequested.value) break
     }
     await loadSyncTask()
-    summary.value = `新增 ${totals.added} · 重复 ${totals.duplicate} · 待补全 ${totals.pending} · 失败 ${totals.failed}`
+    if (totals.intercepted > 0) {
+      summary.value = `新增 ${totals.added} · 拦截排除 ${totals.intercepted} · 重复 ${totals.duplicate} · 待补全 ${totals.pending}`
+      if (totals.added === 0) {
+        ElMessage.warning(`本次扫描的候选人均不符合岗位硬性要求，已全部拦截并存入【淘汰审计记录】中`)
+      }
+    } else {
+      summary.value = `新增 ${totals.added} · 重复 ${totals.duplicate} · 待补全 ${totals.pending} · 失败 ${totals.failed}`
+    }
     progress.value = stopRequested.value ? '已暂停，可再次点击继续同步' : '本次导入完成'
   } catch (error: any) {
     progress.value = '导入暂停'
