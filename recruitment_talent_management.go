@@ -14,8 +14,12 @@ import (
 )
 
 type TalentManagementJob struct {
-	JobID string `json:"jobId"`
-	Title string `json:"title"`
+	JobID    string `json:"jobId"`
+	Title    string `json:"title"`
+	WorkArea string `json:"workArea"`
+	Degree   string `json:"degree"`
+	WorkYear string `json:"workYear"`
+	Salary   string `json:"salary"`
 }
 
 type TalentManagementCatalog struct {
@@ -26,10 +30,14 @@ type TalentManagementCatalog struct {
 }
 
 type talentManagementCandidate struct {
-	CandidateID string `json:"candidateId"`
-	JobID       string `json:"jobId"`
-	RecordID    string `json:"recordId"`
-	Name        string `json:"name"`
+	CandidateID       string `json:"candidateId"`
+	JobID             string `json:"jobId"`
+	RecordID          string `json:"recordId"`
+	Name              string `json:"name"`
+	ResumeText        string `json:"resumeText"`
+	HasAttachment     bool   `json:"hasAttachment"`
+	DocumentsComplete bool   `json:"documentsComplete"`
+	DocumentStatus    string `json:"documentStatus"`
 }
 
 type talentManagementPage struct {
@@ -124,10 +132,20 @@ func resolveTalentManagementImportScript() string {
 	return ""
 }
 
+// Open51JobManagementBrowser 启动或呼出 51job 专属浏览器至前台，导航至人才管理页面供 HR 登录或查看
+func (a *App) Open51JobManagementBrowser() error {
+	a.EnsurePlatformBrowser("51job")
+	time.Sleep(300 * time.Millisecond)
+	return a.OpenURL("https://ehire.51job.com/Revision/talent/management")
+}
+
 // Get51JobTalentManagementCatalog reads the actual logged-in account and job IDs.
 // A title alone must never determine a local project mapping.
 func (a *App) Get51JobTalentManagementCatalog() (TalentManagementCatalog, error) {
 	result := TalentManagementCatalog{Status: "error", Jobs: []TalentManagementJob{}}
+	// 确保 51job 专用浏览器已就绪
+	_ = a.EnsurePlatformBrowser("51job")
+
 	script := resolveTalentManagementImportScript()
 	if script == "" {
 		return result, fmt.Errorf("缺少 51job 人才管理导入脚本")
@@ -233,30 +251,67 @@ func (a *App) Import51JobTalentManagementPage(accountScope, jobID string, status
 		return result, fmt.Errorf("51job 职位、账号或分页回执不一致")
 	}
 	result.Total, result.HasMore = page.Total, page.HasMore
+
+	criteria, _ := a.GetTalentManagementStrictCriteria(projectID)
+	hasStrictFilter := criteria != nil && (criteria.MinEducation != "" || criteria.MinWorkYears > 0 || (criteria.RejectNonLocalWillingness && criteria.TargetCity != ""))
+
 	records := make([]ApplicationRecord, 0, len(page.Candidates))
 	for _, candidate := range page.Candidates {
 		if candidate.CandidateID == "" || candidate.RecordID == "" || candidate.JobID != jobID {
 			return result, fmt.Errorf("平台候选人标识不完整")
 		}
-		completed := false
-		record := ApplicationRecord{Platform: "51job", PlatformAccount: accountScope, ApplicationID: candidate.RecordID,
-			PlatformCandidateID: candidate.CandidateID, PlatformJobID: jobID, CandidateName: candidate.Name,
-			PlatformStatus: []string{"", "待处理", "合适", "面试", "待定"}[statusIndex], DocumentsComplete: &completed,
-			DocumentStatus: "简历详情待补全"}
-		body, readErr := runTalentManagementAdapter(35*time.Second, "--mode", "detail", "--job-id", jobID,
-			"--candidate-id", candidate.CandidateID, "--record-id", candidate.RecordID,
-			"--status-index", fmt.Sprint(statusIndex), "--page-index", fmt.Sprint(pageIndex))
-		if readErr == nil {
-			var detail talentManagementDetail
-			if json.Unmarshal(body, &detail) == nil && detail.Status == "ok" && detail.AccountScope == accountScope &&
-				detail.JobID == jobID && detail.CandidateID == candidate.CandidateID && detail.RecordID == candidate.RecordID {
-				record.ResumeText = detail.ResumeText
-				record.DocumentsComplete = &detail.DocumentsComplete
-				record.DocumentStatus = detail.DocumentStatus
-				if strings.TrimSpace(detail.Name) != "" {
-					record.CandidateName = detail.Name
+		candidateName := candidate.Name
+		completed := candidate.DocumentsComplete
+		resumeText := candidate.ResumeText
+		documentStatus := candidate.DocumentStatus
+
+		// 硬性条件第一层：导入源头拦截
+		if hasStrictFilter && resumeText != "" {
+			decision, _, reasonLabel, evidence := EvaluateCandidateStrictCriteria(resumeText, *criteria)
+			if decision == "UNFIT" {
+				// 记录淘汰审计日志
+				nowStr := time.Now().Format("2006-01-02 15:04:05")
+				auditID := recruitmentID("tmaudit")
+				_, _ = db.Exec(`INSERT INTO talent_management_audit_logs
+					(id, project_id, platform, platform_account, platform_job_id, candidate_id, record_id, candidate_name, rule_code, reason_label, evidence, platform_receipt, action_status, created_at)
+					VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+					auditID, projectID, "51job", accountScope, jobID, candidate.CandidateID, candidate.RecordID, candidateName, "EDU_BELOW_MIN", reasonLabel, evidence, "导入源头识别硬性条件不符已自动拦截排除", "archived", nowStr)
+
+				// 登记到 applications 为 unfit_archived 状态，避免后续定时任务重复抓取
+				nowIso := time.Now().UTC().Format(time.RFC3339Nano)
+				appID := fmt.Sprintf("51job_%s_%s", accountScope, candidate.RecordID)
+				recordJson, _ := json.Marshal(map[string]interface{}{
+					"platform": "51job", "platform_account": accountScope, "application_id": candidate.RecordID,
+					"platform_candidate_id": candidate.CandidateID, "platform_job_id": jobID, "candidate_name": candidateName,
+					"status": "unfit_archived", "unfit_reason": evidence,
+				})
+				_, _ = db.Exec(`INSERT INTO applications (id, platform, platform_account, platform_application_id, platform_candidate_id, platform_job_id, project_id, status, applied_at, raw_json, created_at, updated_at)
+					VALUES (?, '51job', ?, ?, ?, ?, ?, 'unfit_archived', ?, ?, ?, ?)
+					ON CONFLICT(platform, platform_account, platform_application_id) DO UPDATE SET status='unfit_archived', updated_at=?`,
+					appID, accountScope, candidate.RecordID, candidate.CandidateID, jobID, projectID, nowIso, string(recordJson), nowIso, nowIso, nowIso)
+
+				// 若已授权合规确认且为人选“待处理”状态，联动 51job 平台点击不合适
+				if criteria.ComplianceConfirmed && statusIndex == 1 {
+					go func(scope, pJobId, cId, rId, reason string) {
+						_, _ = a.ExecuteStrictRejectCandidate(scope, pJobId, cId, rId, reason)
+					}(accountScope, jobID, candidate.CandidateID, candidate.RecordID, reasonLabel)
 				}
+				// 排除！不加入常规入库 records 列表
+				continue
 			}
+		}
+
+		record := ApplicationRecord{
+			Platform:            "51job",
+			PlatformAccount:     accountScope,
+			ApplicationID:       candidate.RecordID,
+			PlatformCandidateID: candidate.CandidateID,
+			PlatformJobID:       jobID,
+			CandidateName:       candidateName,
+			PlatformStatus:      []string{"", "待处理", "合适", "面试", "待定"}[statusIndex],
+			DocumentsComplete:   &completed,
+			DocumentStatus:      documentStatus,
+			ResumeText:          resumeText,
 		}
 		records = append(records, record)
 	}
@@ -739,4 +794,129 @@ func (a *App) runScheduledTalentManagementSync() {
 		_, _ = a.RunTalentManagementNextBatch(catalog.AccountScope, jid)
 		time.Sleep(2 * time.Second)
 	}
+}
+
+// OneClickFilterTalentPool 对指定职位分库执行“一键筛选”，根据岗位专属硬性条件自动排除不合格简历
+func (a *App) OneClickFilterTalentPool(projectID string) (int, error) {
+	if strings.TrimSpace(projectID) == "" {
+		return 0, fmt.Errorf("请先选择具体的职位分库")
+	}
+	criteria, err := a.GetTalentManagementStrictCriteria(projectID)
+	if err != nil || criteria == nil || (criteria.MinEducation == "" && criteria.MinWorkYears <= 0 && (!criteria.RejectNonLocalWillingness || criteria.TargetCity == "")) {
+		return 0, fmt.Errorf("当前职位尚未配置硬性条件，请先在【51job 人才管理】中设置学历或年限要求")
+	}
+
+	db, err := a.getRecruitmentDB()
+	if err != nil {
+		return 0, err
+	}
+
+	// 查出该职位下所有当前在库（未归档）的候选人
+	rows, err := db.Query(`SELECT pc.id, c.id, c.display_name, COALESCE(rv.content, ''), COALESCE(rv.raw_json, '')
+		FROM project_candidates pc
+		JOIN candidates c ON c.id = pc.candidate_id
+		LEFT JOIN resume_versions rv ON rv.id = (
+			SELECT pcr.resume_version_id FROM project_candidate_resumes pcr
+			JOIN resume_versions rv2 ON rv2.id = pcr.resume_version_id
+			WHERE pcr.project_candidate_id = pc.id ORDER BY rv2.created_at DESC, rv2.id DESC LIMIT 1
+		)
+		WHERE pc.project_id = ? AND pc.archived_at = ''`, projectID)
+	if err != nil {
+		return 0, err
+	}
+	defer rows.Close()
+
+	type unfitCandidate struct {
+		pcID                string
+		candidateID         string
+		name                string
+		reasonLabel         string
+		evidence            string
+		sourcePlatform      string
+		platformCandidateID string
+	}
+
+	var unfitness []unfitCandidate
+	for rows.Next() {
+		var pcID, cID, name, content, rawJson string
+		if err := rows.Scan(&pcID, &cID, &name, &content, &rawJson); err != nil {
+			return 0, err
+		}
+		platform := ""
+		platformCandidateID := ""
+		resumeContent := content
+		if rawJson != "" {
+			var resume Resume
+			if json.Unmarshal([]byte(rawJson), &resume) == nil {
+				platform = resume.SourcePlatform
+				platformCandidateID = resume.PlatformCandidateID
+				if strings.TrimSpace(resume.Content) != "" {
+					resumeContent = resume.Content
+				}
+			}
+		}
+		if strings.TrimSpace(resumeContent) == "" {
+			continue
+		}
+		decision, _, reasonLabel, evidence := EvaluateCandidateStrictCriteria(resumeContent, *criteria)
+		if decision == "UNFIT" {
+			unfitness = append(unfitness, unfitCandidate{
+				pcID:                pcID,
+				candidateID:         cID,
+				name:                name,
+				reasonLabel:         reasonLabel,
+				evidence:            evidence,
+				sourcePlatform:      platform,
+				platformCandidateID: platformCandidateID,
+			})
+		}
+	}
+	rows.Close()
+
+	if len(unfitness) == 0 {
+		return 0, nil
+	}
+
+	pcIDs := make([]string, 0, len(unfitness))
+	for _, u := range unfitness {
+		pcIDs = append(pcIDs, u.pcID)
+	}
+
+	// 批量归档移出人才库
+	archivedCount, err := a.ArchiveTalentCandidates(pcIDs)
+	if err != nil {
+		return 0, err
+	}
+
+	// 写入审计日志与平台联动
+	nowStr := time.Now().Format("2006-01-02 15:04:05")
+	for _, u := range unfitness {
+		accountID := ""
+		platformJobID := ""
+		var recordID, stage string
+		_ = db.QueryRow(`SELECT platform_account, platform_job_id, platform_application_id, status FROM applications
+			WHERE platform=? AND platform_candidate_id=? AND project_id=?`, u.sourcePlatform, u.platformCandidateID, projectID).Scan(&accountID, &platformJobID, &recordID, &stage)
+
+		receipt := "人才库一键筛选识别不符合硬性条件已移入淘汰归档"
+		auditID := recruitmentID("tmaudit")
+		_, _ = db.Exec(`INSERT INTO talent_management_audit_logs
+			(id, project_id, platform, platform_account, platform_job_id, candidate_id, record_id, candidate_name, rule_code, reason_label, evidence, platform_receipt, action_status, created_at)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			auditID, projectID, u.sourcePlatform, accountID, platformJobID, u.candidateID, recordID, u.name, "EDU_BELOW_MIN", u.reasonLabel, u.evidence, receipt, "archived", nowStr)
+
+		// 更新 applications 状态
+		if recordID != "" {
+			_, _ = db.Exec(`UPDATE applications SET status='unfit_archived', updated_at=? WHERE platform=? AND platform_application_id=?`,
+				time.Now().UTC().Format(time.RFC3339Nano), u.sourcePlatform, recordID)
+		}
+
+		// 若已授权合规确认且属于待处理状态，联动平台执行淘汰
+		if criteria.ComplianceConfirmed && u.sourcePlatform == "51job" && accountID != "" && platformJobID != "" && recordID != "" && (stage == "待处理" || stage == "") {
+			go func(acc, pJob, cId, rId, reason string) {
+				_, _ = a.ExecuteStrictRejectCandidate(acc, pJob, cId, rId, reason)
+			}(accountID, platformJobID, u.platformCandidateID, recordID, u.reasonLabel)
+		}
+	}
+
+	return archivedCount, nil
 }

@@ -9,12 +9,15 @@
           </template>
         </el-alert>
 
+        <el-alert v-if="!jobs.length && !loading" type="warning" :closable="false" show-icon style="margin-bottom: 16px"
+          title="未检测到已登录的 51job 企业职位。请点击下方【打开 51job 浏览器】登录企业账号，登录完成后点击【重新读取职位】即可。" />
+
         <el-form label-position="top">
           <el-row :gutter="16">
             <el-col :span="12">
               <el-form-item label="51job 企业职位">
                 <el-select v-model="jobId" filterable style="width: 100%" :disabled="running" placeholder="选择已登录企业的职位">
-                  <el-option v-for="job in jobs" :key="job.jobId" :value="job.jobId" :label="`${job.title} · ${job.jobId}`" />
+                  <el-option v-for="job in jobs" :key="job.jobId" :value="job.jobId" :label="formatJobOptionLabel(job)" />
                 </el-select>
               </el-form-item>
             </el-col>
@@ -70,6 +73,9 @@
             仅在完整资料分析后，有可定位确凿证据违反硬性条件时才执行淘汰。信息缺失、矛盾或低分绝不自动拒绝，年龄与性别仅展示不用于淘汰。
           </template>
         </el-alert>
+
+        <el-alert v-if="!jobs.length && !loading" type="warning" :closable="false" show-icon style="margin-bottom: 16px"
+          title="未检测到已登录的 51job 企业职位。请点击下方【打开 51job 浏览器】登录企业账号，登录完成后点击【重新读取职位】即可。" />
 
         <el-form label-position="top">
           <el-row :gutter="16">
@@ -145,6 +151,7 @@
     </el-tabs>
 
     <template #footer>
+      <el-button type="warning" plain :disabled="running" @click="openBrowser">打开 51job 浏览器</el-button>
       <el-button :loading="loading" :disabled="running" @click="load">重新读取职位</el-button>
       <el-button v-if="running" @click="stopRequested = true">本页结束后暂停</el-button>
       <el-button v-if="!running && activeTab === 'sync'" :disabled="!jobId || !projectId" @click="runSingleBatch">
@@ -246,6 +253,24 @@ function syncMappedProject() {
   const mapped = mappings.value.find(item => item.platform === '51job' &&
     item.platformAccount === accountScope.value && item.platformJobId === jobId.value)
   projectId.value = mapped?.projectId || props.defaultProjectId || ''
+}
+
+function formatJobOptionLabel(job: any) {
+  if (!job) return ''
+  const loc = job.workArea ? ` · ${job.workArea}` : ''
+  const details = [job.degree, job.workYear, job.salary].filter(Boolean).join(' | ')
+  const extra = details ? ` | ${details}` : ''
+  return `${job.title}${loc} (ID: ${job.jobId}${extra})`
+}
+
+async function openBrowser() {
+  try {
+    const api: any = await import('../../wailsjs/go/main/App')
+    await api.Open51JobManagementBrowser()
+    ElMessage.success('已为您呼出 51job 专用浏览器，请在浏览器中登录企业账号')
+  } catch (error: any) {
+    ElMessage.error(error?.message || String(error))
+  }
 }
 
 async function loadSyncTask() {
