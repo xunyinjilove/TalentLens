@@ -32,6 +32,16 @@
           <el-icon><ChatRound /></el-icon><span>批量打招呼</span>
         </el-button>
 
+        <el-button
+          class="strict-filter-btn"
+          :disabled="!selectedProjectId"
+          :loading="filteringStrict"
+          @click="triggerOneClickFilter()"
+          :title="selectedProjectId ? '对照当前职位硬性条件（学历、年限、城市），一键识别并排除不合规简历' : '请先选择左侧具体职位分库'"
+        >
+          <el-icon><Filter /></el-icon><span>一键筛选</span>
+        </el-button>
+
         <el-dropdown trigger="click" @command="handleLibraryAction">
           <el-button class="library-tools-btn" aria-label="导入与核对，展开更多操作">
             <el-icon><FolderOpened /></el-icon><span>导入与核对</span>
@@ -874,7 +884,8 @@ import {
   Loading,
   Document,
   Calendar,
-  Edit
+  Edit,
+  Filter
 } from '@element-plus/icons-vue'
 import { useProjectStore, type Project } from '../composables/useProjectStore'
 import { useRecruitmentStore, stageLabels, type TalentCandidate } from '../composables/useRecruitmentStore'
@@ -1033,6 +1044,41 @@ function startBatchOutreach(ids?: string[]) {
     outreachCandidateIds.value = []
   }
   showOutreach.value = true
+}
+
+const filteringStrict = ref(false)
+
+async function triggerOneClickFilter() {
+  if (!selectedProjectId.value) {
+    ElMessage.warning('请先在左侧选择具体的职位分库')
+    return
+  }
+  filteringStrict.value = true
+  try {
+    const api: any = await import('../../wailsjs/go/main/App')
+    const count = await api.OneClickFilterTalentPool(selectedProjectId.value)
+    if (count > 0) {
+      ElMessage.success(`已为您自动识别并排除 ${count} 位不合规候选人（可在 51job 审计记录中查看）`)
+      await refresh()
+    } else {
+      ElMessage.info('当前分库中的候选人均符合岗位硬性要求，无需排除')
+    }
+  } catch (error: any) {
+    const msg = error?.message || String(error)
+    if (msg.includes('尚未配置硬性条件')) {
+      ElMessageBox.confirm(
+        '当前职位尚未配置硬性条件，是否现在打开【51job 人才管理】配置最低学历或工作年限？',
+        '未设置硬性条件',
+        { confirmButtonText: '去设置', cancelButtonText: '取消', type: 'info' }
+      ).then(() => {
+        showTalentImportDialog.value = true
+      }).catch(() => {})
+    } else {
+      ElMessage.error(msg)
+    }
+  } finally {
+    filteringStrict.value = false
+  }
 }
 const importing = ref(false)
 const inboxOpen = ref(false)
@@ -1714,6 +1760,18 @@ onMounted(() => {
   color: var(--wb-brand);
   border-color: var(--wb-brand);
   background-color: var(--wb-brand-soft);
+}
+
+.strict-filter-btn {
+  color: #d97706;
+  border-color: #fde68a;
+  background-color: #fef3c7;
+}
+
+.strict-filter-btn:hover:not(:disabled) {
+  color: #b45309;
+  border-color: #f59e0b;
+  background-color: #fde68a;
 }
 
 .library-tools-btn,

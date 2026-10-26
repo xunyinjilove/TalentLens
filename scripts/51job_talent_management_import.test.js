@@ -5,10 +5,10 @@ const { normalizeCatalog, normalizeCandidate, rejectCandidate } = require('./51j
 test('catalog requires a scoped operator and stable platform job IDs', () => {
   assert.throws(() => normalizeCatalog({ positions: [{ jobid: '7', jobname: '职位' }] }), /操作员身份/);
   assert.deepEqual(normalizeCatalog({ hruid: '42', coid: 'company1', positions: [
-    { jobid: '7', jobname: '职位' },
+    { jobid: '7', jobname: '职位', workArea: '上海', degree: '本科', workYear: '2年及以上', salary: '18-36万/年' },
     { jobid: '7', jobname: '职位' },
     { jobname: '全部职位' }
-  ] }), { accountScope: 'co:company1:hr:42', jobs: [{ jobId: '7', title: '职位' }] });
+  ] }), { accountScope: 'co:company1:hr:42', jobs: [{ jobId: '7', title: '职位', workArea: '上海', degree: '本科', workYear: '2年及以上', salary: '18-36万/年' }] });
 });
 
 test('candidate identity is rejected when any platform ID or selected job differs', () => {

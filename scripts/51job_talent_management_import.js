@@ -16,7 +16,11 @@ function normalizeCatalog(state) {
     const title = String(raw?.jobname || '').trim();
     if (!jobId || !title || seen.has(jobId)) continue;
     seen.add(jobId);
-    jobs.push({ jobId, title });
+    const workArea = String(raw?.workArea || raw?.jobArea || '').trim();
+    const degree = String(raw?.degree || '').trim();
+    const workYear = String(raw?.workYear || '').trim();
+    const salary = String(raw?.salary || '').trim();
+    jobs.push({ jobId, title, workArea, degree, workYear, salary });
   }
   if (!jobs.length) throw new Error('当前企业账号没有可核验 ID 的人才管理职位');
   return { accountScope: `co:${company}:hr:${scope}`, jobs };
@@ -27,24 +31,45 @@ function normalizeCandidate(raw, expectedJobId) {
   const jobId = String(raw?.jobid || '').trim();
   const recordId = String(raw?.cvlogid || '').trim();
   if (!candidateId || !jobId || !recordId || jobId !== expectedJobId) return null;
+  const hasAttachment = String(raw?.resume_has_enclosure || '') === '1';
+  const name = String(raw?.username || raw?.base_info?.resume_name || raw?.base_info?.name || '').trim();
+  const resumeText = JSON.stringify(raw);
   return {
     candidateId,
     jobId,
     recordId,
     companyId: String(raw?.coid || '').trim(),
-    name: String(raw?.username || raw?.base_info?.resume_name || raw?.base_info?.name || '').trim(),
-    hasAttachment: String(raw?.resume_has_enclosure || '') === '1',
+    name,
+    hasAttachment,
     platformStatus: String(raw?.recruit_stage || ''),
+    resumeText,
+    documentsComplete: !hasAttachment,
+    documentStatus: hasAttachment ? '附件存在但平台受限未授权，保持待补全保护' : '结构化简历完整',
     raw
   };
 }
 
 async function connectManagementPage() {
-  const browser = await puppeteer.connect({
-    browserURL: 'http://127.0.0.1:9503',
-    defaultViewport: null,
-    protocolTimeout: 60000
-  });
+  let browser;
+  try {
+    browser = await puppeteer.connect({
+      browserURL: 'http://127.0.0.1:9503',
+      defaultViewport: null,
+      protocolTimeout: 60000
+    });
+  } catch (err) {
+    throw new Error('51job 专用浏览器端口 (9503) 未连接，请先点击【打开 51job 浏览器】并登录企业账号');
+  }
+  try {
+    const session = await browser.target().createCDPSession();
+    const { windowId } = await session.send('Browser.getWindowForTarget');
+    if (windowId) {
+      await session.send('Browser.setWindowBounds', { windowId, bounds: { windowState: 'minimized' } });
+    }
+    await session.detach().catch(() => {});
+  } catch {
+    // Ignore minimization error if platform unsupported
+  }
   // Avoid calling browser.pages() directly because idle/sleeping tabs or background
   // web-workers can trigger CDP Network.enable timeouts.
   const targets = browser.targets();
@@ -92,6 +117,10 @@ async function openBackgroundManagementPage(browser) {
   const session = await browser.target().createCDPSession();
   let page;
   try {
+    const { windowId } = await session.send('Browser.getWindowForTarget').catch(() => ({}));
+    if (windowId) {
+      await session.send('Browser.setWindowBounds', { windowId, bounds: { windowState: 'minimized' } }).catch(() => {});
+    }
     const { targetId } = await session.send('Target.createTarget', {
       url: 'https://ehire.51job.com/Revision/talent/management', background: true
     });
