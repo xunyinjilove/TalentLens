@@ -1631,6 +1631,12 @@ async function launchPlatformBrowser(cfg, browserPath, profileDir, dependencies 
     }
   }
 
+  // 51job must keep using the same profile. A fallback profile has separate
+  // cookies and makes an already logged-in account look logged out.
+  if (cfg.code === '51job') {
+    throw new Error('51job 专用浏览器连接失败；请检查已打开的 51job 窗口后重试，不会另开需要重新登录的窗口');
+  }
+
   // Chromium forwards a second launch to an already-running profile. If that
   // window was opened without CDP, its port cannot be enabled in place.
   // A persistent fallback profile lets HR log in without closing that window.
@@ -1663,7 +1669,9 @@ async function scrapePlatform(platformKey, browserPath, targetCount, keywordPlan
     message: `${cfg.icon} 正在连接【${cfg.name}】企业端后台通道...`
   });
 
-  const profileDir = path.join(options.dataDir, '..', cfg.profileFolder);
+  const profileDir = cfg.code === '51job'
+    ? path.join(options.dataDir, cfg.profileFolder)
+    : path.join(options.dataDir, '..', cfg.profileFolder);
   if (!fs.existsSync(profileDir)) fs.mkdirSync(profileDir, { recursive: true });
 
   let browser = null;

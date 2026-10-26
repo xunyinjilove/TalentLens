@@ -21,20 +21,11 @@ async function scrape51JobManagementJobs() {
     const pages = await browser.pages();
     let page = pages.find(p => p.url().includes('job-manage'));
 
-    if (!page) {
-      // Look for an existing ehire tab to navigate or use background page
-      const ehirePage = pages.find(p => p.url().includes('ehire.51job.com'));
-      if (ehirePage) {
-        page = await browser.newPage();
-        await page.goto('https://ehire.51job.com/Revision/job-manage', { waitUntil: 'domcontentloaded', timeout: 15000 });
-      } else {
-        return {
-          status: 'needs_action',
-          message: '未找到已登录的 51job 页面，请先在 Edge 浏览器中打开 51job [职位管理]',
-          jobs: []
-        };
-      }
-    }
+    if (!page) return {
+      status: 'needs_action',
+      message: '没有已打开的 51job 职位管理页面；请先在专用浏览器中打开该页面，再手动同步',
+      jobs: []
+    };
 
     // Wait a brief moment for dynamic elements if needed
     await page.waitForSelector('body', { timeout: 5000 }).catch(() => {});

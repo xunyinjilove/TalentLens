@@ -24,6 +24,9 @@ type ApplicationRecord struct {
 	ProfileURL          string `json:"profileUrl"`
 	ResumeText          string `json:"resumeText"`
 	AppliedAt           string `json:"appliedAt"`
+	DocumentsComplete   *bool  `json:"documentsComplete,omitempty"`
+	DocumentStatus      string `json:"documentStatus,omitempty"`
+	PlatformStatus      string `json:"platformStatus,omitempty"`
 }
 
 type ApplicationImportResult struct {
@@ -35,6 +38,7 @@ type ApplicationImportResult struct {
 	DuplicateCount  int    `json:"duplicateCount"`
 	UnassignedCount int    `json:"unassignedCount"`
 	FailedCount     int    `json:"failedCount"`
+	PendingDocumentCount int `json:"pendingDocumentCount"`
 }
 
 type ImportedApplication struct {
@@ -132,9 +136,9 @@ func (a *App) createApplicationResume(record ApplicationRecord, projectID string
 	}
 	content := strings.TrimSpace(record.ResumeText)
 	status := "pending"
-	if content == "" {
+	if content == "" || (record.DocumentsComplete != nil && !*record.DocumentsComplete) {
 		status = "pending_document"
-		content = "平台投递记录已导入，尚未取得可评估的完整简历。"
+		if content == "" { content = "平台投递记录已导入，尚未取得可评估的完整简历。" }
 	}
 	resume := &Resume{ID: applicationResumeID(record), ProjectID: projectID, FileName: record.CandidateName,
 		Content: content, FileType: ".txt", FileSize: int64(len(content)), URL: record.ProfileURL,
@@ -155,14 +159,47 @@ func (a *App) ingestApplicationRecords(platform string, records []ApplicationRec
 		return result, err
 	}
 	for _, record := range records {
-		if record.Platform != platform || strings.TrimSpace(record.ApplicationID) == "" || strings.TrimSpace(record.CandidateName) == "" {
+		if strings.TrimSpace(record.CandidateName) == "" {
+			record.CandidateName = "候选人"
+			if record.PlatformCandidateID != "" {
+				record.CandidateName = "候选人_" + record.PlatformCandidateID
+			}
+		}
+		if record.Platform != platform || strings.TrimSpace(record.ApplicationID) == "" {
 			result.FailedCount++
 			continue
 		}
-		var exists int
-		err = db.QueryRow(`SELECT 1 FROM applications WHERE platform=? AND platform_account=? AND platform_application_id=?`,
-			platform, record.PlatformAccount, record.ApplicationID).Scan(&exists)
+		var appID string
+		var assignedProject sql.NullString
+		var appStatus string
+		err = db.QueryRow(`SELECT id, project_id, status FROM applications WHERE platform=? AND platform_account=? AND platform_application_id=?`,
+			platform, record.PlatformAccount, record.ApplicationID).Scan(&appID, &assignedProject, &appStatus)
 		if err == nil {
+			resumeID := applicationResumeID(record)
+			resumePath := filepath.Join(a.getDataDir(), "resumes", resumeID+".json")
+			// 若原记录因缺少附件处于 pending_document，且本次同步已获得完整资料，补齐内容并入队分析
+			if (record.DocumentsComplete == nil || *record.DocumentsComplete) && strings.TrimSpace(record.ResumeText) != "" {
+				if rawResume, readErr := os.ReadFile(resumePath); readErr == nil {
+					var existingResume Resume
+					if json.Unmarshal(rawResume, &existingResume) == nil && existingResume.Status == "pending_document" {
+						existingResume.Content = strings.TrimSpace(record.ResumeText)
+						existingResume.FileSize = int64(len(existingResume.Content))
+						existingResume.Status = "pending"
+						a.saveResume(&existingResume)
+						targetProj := assignedProject.String
+						if targetProj == "" && record.PlatformJobID != "" {
+							_ = db.QueryRow(`SELECT project_id FROM platform_job_mappings WHERE platform=? AND platform_account=? AND platform_job_id=?`,
+								platform, record.PlatformAccount, record.PlatformJobID).Scan(&targetProj)
+						}
+						if targetProj != "" {
+							_, _ = db.Exec(`UPDATE applications SET project_id=?, status='assigned' WHERE id=?`, targetProj, appID)
+							a.queueImportedAnalysis(targetProj, resumeID)
+						}
+						result.AddedCount++
+						continue
+					}
+				}
+			}
 			result.DuplicateCount++
 			continue
 		}
@@ -203,7 +240,11 @@ func (a *App) ingestApplicationRecords(platform string, records []ApplicationRec
 		}
 		result.AddedCount++
 		if status == "assigned" && strings.TrimSpace(record.ResumeText) != "" {
-			a.queueImportedAnalysis(projectID, applicationResumeID(record))
+			if record.DocumentsComplete == nil || *record.DocumentsComplete {
+				a.queueImportedAnalysis(projectID, applicationResumeID(record))
+			} else {
+				result.PendingDocumentCount++
+			}
 		}
 	}
 	if result.FailedCount > 0 {
@@ -253,7 +294,7 @@ func (a *App) AssignApplication(applicationID, projectID string) error {
 		return err
 	}
 	_, err = db.Exec(`UPDATE applications SET project_id=?,status='assigned' WHERE id=? AND status='unassigned'`, projectID, applicationID)
-	if err == nil && strings.TrimSpace(record.ResumeText) != "" {
+	if err == nil && strings.TrimSpace(record.ResumeText) != "" && (record.DocumentsComplete == nil || *record.DocumentsComplete) {
 		a.queueImportedAnalysis(projectID, applicationResumeID(record))
 	}
 	return err

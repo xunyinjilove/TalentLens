@@ -844,22 +844,6 @@ function goToTalentPool(projectId: string) {
   router.push({ path: '/talent', query: { project: projectId } })
 }
 
-// 自动静默同步 51job [职位管理] 岗位城市（后台无感同步，不打扰用户）
-async function autoSync51JobCities() {
-  try {
-    const api: any = await import('../../wailsjs/go/main/App')
-    const res = await api.Sync51JobJobManagementCities()
-    if (res.jobs && res.jobs.length) {
-      cached51JobJobs.value = res.jobs
-    }
-    if (res.success && res.updatedCount > 0) {
-      await projectStore.loadProjects()
-    }
-  } catch {
-    // 静默处理网络或登录异常
-  }
-}
-
 // 快速异步拉取 51job 职位管理列表缓存
 async function ensure51JobJobsCache() {
   if (cached51JobJobs.value.length > 0) return
@@ -1256,7 +1240,6 @@ onMounted(async () => {
     tableResponsiveRef.value.addEventListener('wheel', handleTableWheel, { passive: false })
   }
   await load()
-  void autoSync51JobCities()
   const editId = String(route.query.edit || '')
   if (!editId) return
   const project = projectStore.projects.find(item => item.id === editId)
