@@ -175,9 +175,48 @@ func (a *App) ingestApplicationRecords(platform string, records []ApplicationRec
 		err = db.QueryRow(`SELECT id, project_id, status FROM applications WHERE platform=? AND platform_account=? AND platform_application_id=?`,
 			platform, record.PlatformAccount, record.ApplicationID).Scan(&appID, &assignedProject, &appStatus)
 		if err == nil {
+			targetProj := assignedProject.String
+			if targetProj == "" && record.PlatformJobID != "" {
+				_ = db.QueryRow(`SELECT project_id FROM platform_job_mappings WHERE platform=? AND platform_account=? AND platform_job_id=?`,
+					platform, record.PlatformAccount, record.PlatformJobID).Scan(&targetProj)
+			}
 			resumeID := applicationResumeID(record)
 			resumePath := filepath.Join(a.getDataDir(), "resumes", resumeID+".json")
-			// 若原记录因缺少附件处于 pending_document，且本次同步已获得完整资料，补齐内容并入队分析
+
+			// 检查是否已经在目标项目中真正建有人才库关联（检查 project_candidates）
+			hasActiveProjectCandidate := false
+			if targetProj != "" {
+				var count int
+				_ = db.QueryRow(`SELECT COUNT(*) FROM project_candidates pc
+					JOIN project_candidate_resumes pcr ON pcr.project_candidate_id=pc.id
+					JOIN resume_versions rv ON rv.id=pcr.resume_version_id
+					WHERE pc.project_id=? AND rv.legacy_resume_id=? AND pc.archived_at=''`, targetProj, resumeID).Scan(&count)
+				hasActiveProjectCandidate = count > 0
+			}
+
+			// 情况 A：若原记录之前被判定为 unfit_archived，或者之前尚未在当前目标专属库生成有效简历：
+			// 既然该记录通过了当前岗位的硬性条件判定进入了 records，必须为其在目标专属库建档入库！
+			if (!hasActiveProjectCandidate || appStatus == "unfit_archived") && targetProj != "" && strings.TrimSpace(record.ResumeText) != "" {
+				if err := a.createApplicationResume(record, targetProj); err == nil {
+					nowIso := time.Now().UTC().Format(time.RFC3339Nano)
+					_, _ = db.Exec(`UPDATE applications SET project_id=?, status='assigned', updated_at=? WHERE id=?`, targetProj, nowIso, appID)
+					// 若 project_candidates 之前存在被归档记录，解除归档恢复为活跃
+					_, _ = db.Exec(`UPDATE project_candidates SET archived_at='', updated_at=?
+						WHERE project_id=? AND id IN (
+							SELECT pcr.project_candidate_id FROM project_candidate_resumes pcr
+							JOIN resume_versions rv ON rv.id=pcr.resume_version_id
+							WHERE rv.legacy_resume_id=?
+						)`, nowIso, targetProj, resumeID)
+
+					if record.DocumentsComplete == nil || *record.DocumentsComplete {
+						a.queueImportedAnalysis(targetProj, resumeID)
+					}
+					result.AddedCount++
+					continue
+				}
+			}
+
+			// 情况 B：若原记录因缺少附件处于 pending_document，且本次同步已获得完整资料，补齐内容并入队分析
 			if (record.DocumentsComplete == nil || *record.DocumentsComplete) && strings.TrimSpace(record.ResumeText) != "" {
 				if rawResume, readErr := os.ReadFile(resumePath); readErr == nil {
 					var existingResume Resume
@@ -186,11 +225,6 @@ func (a *App) ingestApplicationRecords(platform string, records []ApplicationRec
 						existingResume.FileSize = int64(len(existingResume.Content))
 						existingResume.Status = "pending"
 						a.saveResume(&existingResume)
-						targetProj := assignedProject.String
-						if targetProj == "" && record.PlatformJobID != "" {
-							_ = db.QueryRow(`SELECT project_id FROM platform_job_mappings WHERE platform=? AND platform_account=? AND platform_job_id=?`,
-								platform, record.PlatformAccount, record.PlatformJobID).Scan(&targetProj)
-						}
 						if targetProj != "" {
 							_, _ = db.Exec(`UPDATE applications SET project_id=?, status='assigned' WHERE id=?`, targetProj, appID)
 							a.queueImportedAnalysis(targetProj, resumeID)

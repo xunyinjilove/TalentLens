@@ -68,11 +68,13 @@ type talentManagementDetail struct {
 
 type TalentManagementPageImport struct {
 	ApplicationImportResult
-	JobID       string `json:"jobId"`
-	StatusIndex int    `json:"statusIndex"`
-	PageIndex   int    `json:"pageIndex"`
-	Total       int    `json:"total"`
-	HasMore     bool   `json:"hasMore"`
+	JobID            string `json:"jobId"`
+	StatusIndex      int    `json:"statusIndex"`
+	PageIndex        int    `json:"pageIndex"`
+	Total            int    `json:"total"`
+	HasMore          bool   `json:"hasMore"`
+	InterceptedCount int    `json:"interceptedCount"`
+	InterceptReason  string `json:"interceptReason"`
 }
 
 type TalentManagementSyncTask struct {
@@ -255,6 +257,8 @@ func (a *App) Import51JobTalentManagementPage(accountScope, jobID string, status
 	criteria, _ := a.GetTalentManagementStrictCriteria(projectID)
 	hasStrictFilter := criteria != nil && (criteria.MinEducation != "" || criteria.MinWorkYears > 0 || (criteria.RejectNonLocalWillingness && criteria.TargetCity != ""))
 
+	interceptedCount := 0
+	lastInterceptReason := ""
 	records := make([]ApplicationRecord, 0, len(page.Candidates))
 	for _, candidate := range page.Candidates {
 		if candidate.CandidateID == "" || candidate.RecordID == "" || candidate.JobID != jobID {
@@ -269,6 +273,8 @@ func (a *App) Import51JobTalentManagementPage(accountScope, jobID string, status
 		if hasStrictFilter && resumeText != "" {
 			decision, _, reasonLabel, evidence := EvaluateCandidateStrictCriteria(resumeText, *criteria)
 			if decision == "UNFIT" {
+				interceptedCount++
+				lastInterceptReason = evidence
 				// 记录淘汰审计日志
 				nowStr := time.Now().Format("2006-01-02 15:04:05")
 				auditID := recruitmentID("tmaudit")
@@ -317,6 +323,8 @@ func (a *App) Import51JobTalentManagementPage(accountScope, jobID string, status
 	}
 	imported, err := a.ingestApplicationRecords("51job", records)
 	result.ApplicationImportResult = imported
+	result.InterceptedCount = interceptedCount
+	result.InterceptReason = lastInterceptReason
 	return result, err
 }
 
@@ -640,7 +648,41 @@ func (a *App) SetTalentManagementStrictCriteria(criteria TalentManagementStrictC
 		reject_non_local_willingness=excluded.reject_non_local_willingness, target_city=excluded.target_city,
 		compliance_confirmed=excluded.compliance_confirmed, updated_at=excluded.updated_at`,
 		criteria.ProjectID, criteria.MinEducation, criteria.MinWorkYears, rejectCity, criteria.TargetCity, compliance, now)
-	return err
+	if err != nil {
+		return err
+	}
+
+	// 智能自愈：若 HR 调整了硬性条件（如将本科调整为大专或不限），自动将此前因该条件归档但现在符合条件的候选人恢复到人才库活跃状态
+	rows, err := db.Query(`SELECT pc.id, COALESCE(rv.content, ''), COALESCE(rv.raw_json, '')
+		FROM project_candidates pc
+		LEFT JOIN project_candidate_resumes pcr ON pcr.project_candidate_id = pc.id
+		LEFT JOIN resume_versions rv ON rv.id = pcr.resume_version_id
+		WHERE pc.project_id = ? AND pc.archived_at <> ''`, criteria.ProjectID)
+	if err == nil {
+		nowIso := time.Now().UTC().Format(time.RFC3339Nano)
+		for rows.Next() {
+			var pcID, content, rawJson string
+			if rows.Scan(&pcID, &content, &rawJson) == nil {
+				resumeContent := content
+				if rawJson != "" {
+					var r Resume
+					if json.Unmarshal([]byte(rawJson), &r) == nil && strings.TrimSpace(r.Content) != "" {
+						resumeContent = r.Content
+					}
+				}
+				if strings.TrimSpace(resumeContent) != "" {
+					decision, _, _, _ := EvaluateCandidateStrictCriteria(resumeContent, criteria)
+					if decision != "UNFIT" {
+						// 恢复到人才库
+						_, _ = db.Exec(`UPDATE project_candidates SET archived_at='', updated_at=? WHERE id=?`, nowIso, pcID)
+					}
+				}
+			}
+		}
+		rows.Close()
+	}
+
+	return nil
 }
 
 // ListTalentManagementAuditLogs 查询某岗位的淘汰审计日志（按时间倒序）
