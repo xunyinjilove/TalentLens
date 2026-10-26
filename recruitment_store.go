@@ -243,6 +243,48 @@ CREATE TABLE IF NOT EXISTS talent_management_filter_items (
   created_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_tm_filter_items_run ON talent_management_filter_items(run_id);
+CREATE TABLE IF NOT EXISTS talent_management_sync_tasks (
+  platform TEXT NOT NULL,
+  platform_account TEXT NOT NULL,
+  platform_job_id TEXT NOT NULL,
+  project_id TEXT NOT NULL REFERENCES projects(id),
+  status_index INTEGER NOT NULL DEFAULT 1,
+  page_index INTEGER NOT NULL DEFAULT 1,
+  total_candidates INTEGER NOT NULL DEFAULT 0,
+  imported_candidates INTEGER NOT NULL DEFAULT 0,
+  state TEXT NOT NULL DEFAULT 'idle',
+  auto_sync_enabled INTEGER NOT NULL DEFAULT 0,
+  last_sync_at TEXT NOT NULL DEFAULT '',
+  last_error TEXT NOT NULL DEFAULT '',
+  updated_at TEXT NOT NULL,
+  PRIMARY KEY(platform, platform_account, platform_job_id)
+);
+CREATE TABLE IF NOT EXISTS talent_management_strict_criteria (
+  project_id TEXT PRIMARY KEY REFERENCES projects(id) ON DELETE CASCADE,
+  min_education TEXT NOT NULL DEFAULT '',
+  min_work_years REAL NOT NULL DEFAULT 0,
+  reject_non_local_willingness INTEGER NOT NULL DEFAULT 0,
+  target_city TEXT NOT NULL DEFAULT '',
+  compliance_confirmed INTEGER NOT NULL DEFAULT 0,
+  updated_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS talent_management_audit_logs (
+  id TEXT PRIMARY KEY,
+  project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  platform TEXT NOT NULL,
+  platform_account TEXT NOT NULL,
+  platform_job_id TEXT NOT NULL,
+  candidate_id TEXT NOT NULL,
+  record_id TEXT NOT NULL,
+  candidate_name TEXT NOT NULL,
+  rule_code TEXT NOT NULL,
+  reason_label TEXT NOT NULL,
+  evidence TEXT NOT NULL,
+  platform_receipt TEXT NOT NULL DEFAULT '',
+  action_status TEXT NOT NULL DEFAULT '',
+  created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_tm_audit_project ON talent_management_audit_logs(project_id);
 `
 
 func (a *App) getRecruitmentDB() (*sql.DB, error) {

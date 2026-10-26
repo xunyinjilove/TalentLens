@@ -140,23 +140,22 @@ test('persistent CDP timeout reports a resumable error without closing existing 
   assert.equal(attempts, 2);
 });
 
-test('occupied browser profile falls back to a separate persistent search profile', async () => {
+test('51job occupied profile does not start a second logged-out profile', async () => {
   const launches = [];
-  const browser = { pages: async () => { throw Error('unrelated page must remain untouched'); } };
-  const result = await agent.launchPlatformBrowser(
-    { code: '51job', name: '前程无忧', debugPort: 9503, homeUrl: 'https://ehire.51job.com/Revision/talent/search' },
-    'msedge.exe', 'C:\\TalentLens\\51job_isolated_profile',
-    {
-      connect: async cfg => cfg.debugPort === 9603 && launches.length === 2 ? browser : null,
-      spawn: (_path, args) => { launches.push(args); return { unref() {} }; },
-      wait: async () => {}
-    }
+  await assert.rejects(
+    agent.launchPlatformBrowser(
+      { code: '51job', name: '前程无忧', debugPort: 9503, homeUrl: 'https://ehire.51job.com/Revision/talent/search' },
+      'msedge.exe', 'C:\\TalentLens\\51job_isolated_profile',
+      {
+        connect: async () => null,
+        spawn: (_path, args) => { launches.push(args); return { unref() {} }; },
+        wait: async () => {}
+      }
+    ),
+    /不会另开需要重新登录的窗口/
   );
-  assert.equal(result.browser, browser);
-  assert.equal(result.reused, false);
-  assert.equal(launches.length, 2);
-  assert.ok(launches[1].some(arg => arg === '--remote-debugging-port=9603'));
-  assert.ok(launches[1].some(arg => arg.includes('51job_isolated_profile_automation')));
+  assert.equal(launches.length, 1);
+  assert.ok(launches[0].some(arg => arg === '--remote-debugging-port=9503'));
 });
 
 test('search opens its own background tab and leaves existing pages untouched', async () => {

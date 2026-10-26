@@ -609,6 +609,7 @@ func (a *App) startup(ctx context.Context) {
 		log.Printf("[OnFileDrop] 成功添加 %d 个文件", added)
 	})
 
+	a.startTalentManagementScheduler()
 	log.Println("TalentLens 已启动")
 }
 
@@ -5293,7 +5294,8 @@ func (a *App) EnsurePlatformBrowser(platform string) bool {
 			return true
 		}
 	}
-	return true
+	log.Printf("[EnsurePlatformBrowser] %s 专用浏览器启动后端口未就绪", platform)
+	return false
 }
 
 // MinimizePlatformBrowser 将指定平台（51job, boss, zhaopin, liepin）的专用独立浏览器窗口最小化

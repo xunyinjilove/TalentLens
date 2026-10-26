@@ -195,7 +195,7 @@ func (a *App) Preview51JobTalentManagementFilter(projectID string, cfg TalentMan
 
 // Run51JobTalentManagementFilter Phase 2: 确认后全自动连续执行（点不合适 + 勾选原因 + 保留人选导入待分析）
 func (a *App) Run51JobTalentManagementFilter(projectID string, cfg TalentManagementFilterConfig) (TalentManagementFilterRun, error) {
-	return a.execute51JobTalentManagementFilterInternal(projectID, cfg, "execute")
+	return TalentManagementFilterRun{Status: "error"}, fmt.Errorf("旧版卡片文字筛选无法核验职位、候选人身份和完整附件，已停用自动点击；请使用按职位 ID 绑定的人才管理导入")
 }
 
 // Stop51JobTalentManagementFilter 随时优雅停止当前正在执行的自动筛选任务
