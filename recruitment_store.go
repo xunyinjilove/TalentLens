@@ -107,6 +107,21 @@ CREATE TABLE IF NOT EXISTS analysis_jobs (
   created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
   UNIQUE(project_candidate_id, resume_version_id, rule_version)
 );
+CREATE TABLE IF NOT EXISTS project_reanalysis_runs (
+  id TEXT PRIMARY KEY, project_id TEXT NOT NULL REFERENCES projects(id),
+  status TEXT NOT NULL, total INTEGER NOT NULL DEFAULT 0,
+  completed INTEGER NOT NULL DEFAULT 0, failed INTEGER NOT NULL DEFAULT 0,
+  skipped_json TEXT NOT NULL DEFAULT '{}', last_error TEXT NOT NULL DEFAULT '',
+  created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS project_reanalysis_runs_project
+  ON project_reanalysis_runs(project_id,created_at DESC);
+CREATE TABLE IF NOT EXISTS project_reanalysis_items (
+  run_id TEXT NOT NULL REFERENCES project_reanalysis_runs(id),
+  resume_id TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'pending',
+  error TEXT NOT NULL DEFAULT '', updated_at TEXT NOT NULL,
+  PRIMARY KEY(run_id,resume_id)
+);
 CREATE TABLE IF NOT EXISTS platform_job_mappings (
   platform TEXT NOT NULL, platform_account TEXT NOT NULL DEFAULT '',
   platform_job_id TEXT NOT NULL, project_id TEXT NOT NULL REFERENCES projects(id),
