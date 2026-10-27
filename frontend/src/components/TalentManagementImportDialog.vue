@@ -1,6 +1,14 @@
 <template>
-  <el-dialog v-model="visible" title="51job 人才管理 · 职位接入与合规初筛" width="760px" :close-on-click-modal="!running">
-    <el-tabs v-model="activeTab" style="margin-top: -10px">
+  <el-dialog
+    v-model="visible"
+    title="51job 人才管理 · 职位接入与合规初筛"
+    width="760px"
+    top="4vh"
+    :close-on-click-modal="!running"
+    :close-on-press-escape="!running"
+  >
+    <div class="dialog-scroll-body" style="max-height: 68vh; overflow-y: auto; overflow-x: hidden; padding-right: 8px;">
+      <el-tabs v-model="activeTab" style="margin-top: -10px">
       <!-- Tab 1: 职位导入与每小时自动同步 -->
       <el-tab-pane label="职位导入与自动调度" name="sync">
         <el-alert type="info" :closable="false" show-icon style="margin-bottom: 16px">
@@ -78,10 +86,14 @@
           </template>
         </el-alert>
 
-        <el-alert v-if="!jobs.length && !loading" type="warning" :closable="false" show-icon style="margin-bottom: 16px"
-          title="未检测到已登录的 51job 企业职位。请点击下方【打开 51job 浏览器】登录企业账号，登录完成后点击【重新读取职位】即可。" />
-
         <el-form label-position="top">
+          <el-form-item label="当前配置针对的本地职位专属库">
+            <el-select v-model="projectId" filterable style="width: 100%" placeholder="请选择需要配置硬性条件的职位专属库">
+              <el-option v-for="project in projects" :key="project.id" :value="project.id"
+                :label="`${project.job_config?.title || project.name} · ${project.name}`" />
+            </el-select>
+          </el-form-item>
+
           <el-row :gutter="16">
             <el-col :span="12">
               <el-form-item label="最低学历硬性要求">
@@ -182,9 +194,12 @@
             </div>
           </el-form-item>
 
-          <el-button type="primary" :disabled="!projectId" :loading="savingCriteria" @click="saveCriteria">
-            保存岗位硬性条件
-          </el-button>
+          <div style="display: flex; gap: 12px; align-items: center">
+            <el-button type="primary" :disabled="!projectId" :loading="savingCriteria" @click="saveCriteria">
+              保存岗位硬性条件
+            </el-button>
+            <span v-if="!projectId" style="font-size: 12px; color: #f59e0b">请先选择上方职位专属库后保存</span>
+          </div>
         </el-form>
       </el-tab-pane>
 
@@ -213,16 +228,26 @@
         </el-table>
       </el-tab-pane>
     </el-tabs>
+    </div>
 
     <template #footer>
-      <el-button type="warning" plain :disabled="running" @click="openBrowser">打开 51job 浏览器</el-button>
-      <el-button :loading="loading" :disabled="running" @click="load">重新读取职位</el-button>
-      <el-button v-if="running" @click="stopRequested = true">本页结束后暂停</el-button>
-      <el-button v-if="!running && activeTab === 'sync'" :disabled="!jobId || !projectId" @click="runSingleBatch">
-        执行单批 (50人)
-      </el-button>
-      <el-button type="primary" :loading="running" :disabled="!jobId || !projectId || !statuses.length"
-        @click="start">连续导入并同步</el-button>
+      <div style="display: flex; justify-content: space-between; align-items: center; width: 100%">
+        <div style="display: flex; gap: 8px">
+          <el-button type="warning" plain :disabled="running" @click="openBrowser">打开 51job 浏览器</el-button>
+          <el-button :loading="loading" :disabled="running" @click="load">重新读取职位</el-button>
+        </div>
+        <div style="display: flex; gap: 8px">
+          <el-button :disabled="running" @click="visible = false">关闭</el-button>
+          <el-button v-if="running" @click="stopRequested = true">本页结束后暂停</el-button>
+          <el-button v-if="!running && activeTab === 'sync'" :disabled="!jobId || !projectId" @click="runSingleBatch">
+            执行单批 (50人)
+          </el-button>
+          <el-button v-if="activeTab === 'sync'" type="primary" :loading="running" :disabled="!jobId || !projectId || !statuses.length"
+            @click="start">连续导入并同步</el-button>
+          <el-button v-if="activeTab === 'criteria'" type="primary" :disabled="!projectId" :loading="savingCriteria"
+            @click="saveCriteria">保存硬性条件</el-button>
+        </div>
+      </div>
     </template>
   </el-dialog>
 </template>
@@ -426,13 +451,16 @@ async function confirmClearAuditLogs() {
 }
 
 async function saveCriteria() {
-  if (!projectId.value) return
+  if (!projectId.value) {
+    ElMessage.warning('请先在上方选择需要保存硬性条件的本地职位专属库')
+    return
+  }
   savingCriteria.value = true
   try {
     const api: any = await import('../../wailsjs/go/main/App')
     strictCriteria.value.projectId = projectId.value
     await api.SetTalentManagementStrictCriteria(strictCriteria.value)
-    ElMessage.success('岗位专属硬性条件已保存')
+    ElMessage.success('岗位专属硬性条件已成功保存！')
   } catch (e: any) {
     ElMessage.error(e?.message || '保存硬性条件失败')
   } finally {

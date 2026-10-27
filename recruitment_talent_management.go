@@ -166,6 +166,14 @@ func (a *App) Get51JobTalentManagementCatalog() (TalentManagementCatalog, error)
 	// 确保 51job 专用浏览器已就绪
 	_ = a.EnsurePlatformBrowser("51job")
 
+	// 快速探测 9503 端口是否在线，避免长时间超时卡死
+	client := http.Client{Timeout: 800 * time.Millisecond}
+	resp, err := client.Get("http://127.0.0.1:9503/json/version")
+	if err != nil || resp.StatusCode != 200 {
+		return result, fmt.Errorf("51job 专用浏览器端口 (9503) 未连接，请先点击【打开 51job 浏览器】登录企业账号")
+	}
+	_ = resp.Body.Close()
+
 	script := resolveTalentManagementImportScript()
 	if script == "" {
 		return result, fmt.Errorf("缺少 51job 人才管理导入脚本")

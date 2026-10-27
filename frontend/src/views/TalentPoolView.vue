@@ -43,13 +43,13 @@
 
         <el-button
           class="analyze-all-btn"
-          :disabled="!selectedProjectId || analyzingAll"
+          :disabled="filtered.length === 0 || analyzingAll"
           :loading="analyzingAll"
           @click="triggerAnalyzeAll()"
-          :title="selectedProjectId ? '一键批量分析当前职位分库中所有待分析或失败的简历' : '请先选择左侧具体职位分库'"
+          :title="filtered.length > 0 ? `一键批量分析当前检索到的 ${filtered.length} 位候选人简历` : '当前列表暂无可分析的候选人'"
         >
           <el-icon v-if="!analyzingAll"><Cpu /></el-icon>
-          <span>{{ analyzingAll ? `分析中 (${analyzedCount}/${totalToAnalyze})` : `一键全部分析${unanalyzedCount > 0 ? ` (${unanalyzedCount})` : ''}` }}</span>
+          <span>{{ analyzingAll ? `分析中 (${analyzedCount}/${totalToAnalyze})` : `一键全部分析${filtered.length > 0 ? ` (${filtered.length})` : ''}` }}</span>
         </el-button>
 
         <el-dropdown trigger="click" @command="handleLibraryAction">
@@ -804,6 +804,7 @@
       :job-title="selectedProject?.job_config?.title || selectedProject?.name"
       @filtered="refresh"
     />
+    <AIConfigGuide v-model="showAIConfigGuide" />
 
     <!-- 待分配投递抽屉 -->
     <el-drawer v-model="inboxOpen" title="主动投递 · 待分配" size="500px">
@@ -910,6 +911,7 @@ import BossSearchDialog from '../components/BossSearchDialog.vue'
 import TopTenOutreachDialog from '../components/TopTenOutreachDialog.vue'
 import TalentManagementImportDialog from '../components/TalentManagementImportDialog.vue'
 import OneClickFilterDialog from '../components/OneClickFilterDialog.vue'
+import AIConfigGuide from '../components/AIConfigGuide.vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { getCandidateSurname } from '../utils/candidate'
 
@@ -1073,6 +1075,7 @@ function startBatchOutreach(ids?: string[]) {
 }
 
 const showOneClickFilterDialog = ref(false)
+const showAIConfigGuide = ref(false)
 const filteringStrict = ref(false)
 const analyzingAll = ref(false)
 const analyzedCount = ref(0)
@@ -1097,31 +1100,56 @@ function triggerOneClickFilter() {
 }
 
 async function triggerAnalyzeAll() {
-  if (!selectedProjectId.value) {
-    ElMessage.warning('请先在左侧选择具体的职位分库')
-    return
-  }
-  const toAnalyze = unanalyzedCandidates.value
-  if (!toAnalyze.length) {
-    ElMessage.info('当前分库暂无待分析或失败的简历')
+  const targets = filtered.value
+  if (!targets.length) {
+    ElMessage.info('当前筛选检索列表暂无可分析的候选人')
     return
   }
 
   try {
-    analyzingAll.value = true
-    totalToAnalyze.value = toAnalyze.length
-    analyzedCount.value = 0
-
     const api: any = await import('../../wailsjs/go/main/App')
     const cfg = await api.GetConfig()
-    if (!cfg?.ai?.api_key) {
-      ElMessage.warning('请先在【设置】中配置 AI API Key 后再执行简历分析')
-      analyzingAll.value = false
+    if (!cfg?.ai?.api_key || cfg.ai.api_key.trim().length < 10) {
+      showAIConfigGuide.value = true
       return
     }
 
-    ElMessage.success(`已开始对当前分库的 ${toAnalyze.length} 位候选人启动全部分析`)
-    await api.StartProjectAnalysis(selectedProjectId.value, cfg.ai)
+    // 检查是否有待分析、解析异常、或未评分候选人
+    const unanalyzed = targets.filter(c => {
+      const status = c.analysisStatus
+      return status === 'pending' || status === 'pending_document' || status === 'error' || (!c.abilityScore && status !== 'done') || c.radarStale
+    })
+
+    let targetsToAnalyze: TalentCandidate[] = unanalyzed
+    if (unanalyzed.length === 0) {
+      try {
+        await ElMessageBox.confirm(
+          `当前检索到的 ${targets.length} 位候选人均已完成评估。是否确认对这 ${targets.length} 份简历全部重新进行 AI 深度分析？`,
+          '全部重新分析确认',
+          {
+            confirmButtonText: '全部重新分析',
+            cancelButtonText: '取消',
+            type: 'warning'
+          }
+        )
+        targetsToAnalyze = targets
+      } catch {
+        return
+      }
+    }
+
+    const resumeIDs = targetsToAnalyze.map(c => c.resumeId || c.projectCandidateId).filter(Boolean)
+    if (!resumeIDs.length) {
+      ElMessage.warning('候选人未关联有效简历文件，无法进行分析')
+      return
+    }
+
+    analyzingAll.value = true
+    totalToAnalyze.value = resumeIDs.length
+    analyzedCount.value = 0
+
+    ElMessage.success(`已开始对检索到的 ${resumeIDs.length} 位候选人启动 AI 深度分析`)
+    await api.StartBatchAnalysis(resumeIDs, cfg.ai, null)
   } catch (err: any) {
     ElMessage.error(err?.message || '启动分析失败')
     analyzingAll.value = false
@@ -1702,15 +1730,15 @@ onMounted(async () => {
   try {
     const runtime: any = await import('../../wailsjs/runtime/runtime')
     runtime.EventsOn('batch:progress', (data: any) => {
-      if (data && (!data.projectId || data.projectId === selectedProjectId.value)) {
+      if (data && (!data.projectId || !selectedProjectId.value || data.projectId === selectedProjectId.value)) {
         analyzedCount.value = data.current || 0
         totalToAnalyze.value = data.total || totalToAnalyze.value
       }
     })
     runtime.EventsOn('batch:completed', async (data: any) => {
-      if (data && (!data.projectId || data.projectId === selectedProjectId.value)) {
+      if (data && (!data.projectId || !selectedProjectId.value || data.projectId === selectedProjectId.value)) {
         analyzingAll.value = false
-        ElMessage.success('当前分库简历分析完成！')
+        ElMessage.success('简历深度分析完成！')
         await refresh()
       }
     })
