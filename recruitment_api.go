@@ -158,6 +158,9 @@ func (a *App) ListTalentCandidates(projectID string) ([]TalentCandidate, error) 
 			var resume Resume
 			if json.Unmarshal([]byte(raw), &resume) == nil {
 				sourceResume = resume
+				if item.ResumeID == "" && sourceResume.ID != "" {
+					item.ResumeID = sourceResume.ID
+				}
 				item.ProfileURL = resume.URL
 				item.Source = recruitmentSourceFromURL(resume.URL)
 				if item.AnalysisStatus == "" {

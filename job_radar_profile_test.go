@@ -253,3 +253,43 @@ func TestSavingUpdatedSkillsMarksOldEvaluationsStaleAndPreservesOldConclusion(t 
 		t.Fatalf("old score and conclusion must be preserved while pending review: score=%d analysis=%+v", got.Score, got.Analysis)
 	}
 }
+
+func TestStartBatchAnalysisSupportsCrossProjectCandidates(t *testing.T) {
+	a := NewApp()
+	a.dataDirOverride = t.TempDir()
+
+	p1 := a.CreateProject("销售经理", "销售", 1, "HR", "", &JobConfig{
+		Title:          "销售经理",
+		RequiredSkills: []string{"大客户销售", "商务谈判"},
+	})
+	p2 := a.CreateProject("Go工程师", "技术", 1, "HR", "", &JobConfig{
+		Title:          "Go工程师",
+		RequiredSkills: []string{"Go并发编程", "微服务架构"},
+	})
+
+	r1 := &Resume{
+		ID:        "resume_test_1",
+		ProjectID: p1.ID,
+		FileName:  "candidate1.pdf",
+		Content:   "5年大客户销售与商务谈判经验",
+	}
+	r2 := &Resume{
+		ID:        "resume_test_2",
+		ProjectID: p2.ID,
+		FileName:  "candidate2.pdf",
+		Content:   "3年Go高并发开发与微服务落地经验",
+	}
+	a.saveResume(r1)
+	a.saveResume(r2)
+
+	cfg := &AIConfig{
+		APIKey:  "test_key_12345",
+		BaseURL: "http://127.0.0.1:9999",
+	}
+
+	// 验证批量分析支持跨岗位多项目 ID 集合，绝不抛出“一批简历只能属于同一个职位专属分库”错误
+	err := a.StartBatchAnalysis([]string{r1.ID, r2.ID}, cfg, nil)
+	if err != nil {
+		t.Fatalf("cross project batch analysis must succeed without single-project error, got: %v", err)
+	}
+}

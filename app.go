@@ -3497,6 +3497,13 @@ func (a *App) TestAIConnection(cfg *AIConfig) (bool, string) {
 	return true, "连接成功！AI 服务正常"
 }
 
+// emitEvent 安全触发 Wails 前端事件，在 a.ctx 为空（如独立测试环境）时静默跳过，避免 panic
+func (a *App) emitEvent(name string, data ...interface{}) {
+	if a != nil && a.ctx != nil {
+		runtime.EventsEmit(a.ctx, name, data...)
+	}
+}
+
 // AnalyzeResume 分析单个简历
 func (a *App) AnalyzeResume(resumeID string, cfg *AIConfig, jobCfg *JobConfig) (*AnalysisResult, error) {
 	// 校验 AI 配置
@@ -3555,7 +3562,7 @@ func (a *App) AnalyzeResume(resumeID string, cfg *AIConfig, jobCfg *JobConfig) (
 	// 更新状态为分析中
 	resume.Status = "analyzing"
 	a.saveResume(&resume)
-	runtime.EventsEmit(a.ctx, "analysis:progress", map[string]interface{}{
+	a.emitEvent("analysis:progress", map[string]interface{}{
 		"id":       resumeID,
 		"status":   "analyzing",
 		"progress": 10,
@@ -3581,14 +3588,14 @@ func (a *App) AnalyzeResume(resumeID string, cfg *AIConfig, jobCfg *JobConfig) (
 
 	// 构建 Prompt - 进度 30%
 	prompt := a.buildAnalysisPrompt(&resume, jobCfg)
-	runtime.EventsEmit(a.ctx, "analysis:progress", map[string]interface{}{
+	a.emitEvent("analysis:progress", map[string]interface{}{
 		"id":       resumeID,
 		"status":   "analyzing",
 		"progress": 30,
 	})
 
 	// 调用 AI - 进度 50%
-	runtime.EventsEmit(a.ctx, "analysis:progress", map[string]interface{}{
+	a.emitEvent("analysis:progress", map[string]interface{}{
 		"id":       resumeID,
 		"status":   "analyzing",
 		"progress": 50,
@@ -3604,7 +3611,7 @@ func (a *App) AnalyzeResume(resumeID string, cfg *AIConfig, jobCfg *JobConfig) (
 			a.saveResume(&resume)
 		}
 		a.logError(resume.FileName, err.Error(), prompt, "")
-		runtime.EventsEmit(a.ctx, "analysis:error", map[string]interface{}{
+		a.emitEvent("analysis:error", map[string]interface{}{
 			"id":    resumeID,
 			"error": err.Error(),
 		})
@@ -3612,13 +3619,13 @@ func (a *App) AnalyzeResume(resumeID string, cfg *AIConfig, jobCfg *JobConfig) (
 	}
 
 	// 解析 AI 返回结果 - 进度 80%
-	runtime.EventsEmit(a.ctx, "analysis:progress", map[string]interface{}{
+	a.emitEvent("analysis:progress", map[string]interface{}{
 		"id":       resumeID,
 		"status":   "analyzing",
 		"progress": 80,
 	})
 	// 提炼履历能力雷达画像与岗位评分卡核验 - 进度 85%
-	runtime.EventsEmit(a.ctx, "analysis:progress", map[string]interface{}{
+	a.emitEvent("analysis:progress", map[string]interface{}{
 		"id":       resumeID,
 		"status":   "analyzing",
 		"progress": 85,
@@ -3641,7 +3648,7 @@ func (a *App) AnalyzeResume(resumeID string, cfg *AIConfig, jobCfg *JobConfig) (
 	}
 
 	// 更新简历状态 - 进度 100%
-	runtime.EventsEmit(a.ctx, "analysis:progress", map[string]interface{}{
+	a.emitEvent("analysis:progress", map[string]interface{}{
 		"id":       resumeID,
 		"status":   "analyzing",
 		"progress": 100,
@@ -3664,7 +3671,7 @@ func (a *App) AnalyzeResume(resumeID string, cfg *AIConfig, jobCfg *JobConfig) (
 	a.saveResume(&resume)
 
 	// 发送完成事件
-	runtime.EventsEmit(a.ctx, "analysis:completed", map[string]interface{}{
+	a.emitEvent("analysis:completed", map[string]interface{}{
 		"id":       resumeID,
 		"score":    analysis.OverallScore,
 		"analysis": analysis,
@@ -3717,54 +3724,79 @@ func (a *App) analyzeModelWithFormatRetry(cfg *AIConfig, prompt string) (*Analys
 }
 
 // StartBatchAnalysis 批量分析简历
+// StartBatchAnalysis 批量分析简历，支持单职位专属库及跨岗位检索结果的批量智能分析
 func (a *App) StartBatchAnalysis(resumeIDs []string, cfg *AIConfig, jobCfg *JobConfig) error {
 	if cfg == nil || cfg.APIKey == "" || cfg.BaseURL == "" {
 		return fmt.Errorf("AI 未配置: 请先在设置中填写 API Key 和 Base URL")
 	}
-	if len(resumeIDs) > 0 {
-		projectID := ""
-		for i, id := range resumeIDs {
-			data, err := readJSONFile(filepath.Join(a.getDataDir(), "resumes", id+".json"))
-			if err != nil {
-				return fmt.Errorf("简历不存在: %w", err)
-			}
-			var record struct {
-				ProjectID string `json:"project_id"`
-			}
-			if err := json.Unmarshal(data, &record); err != nil {
-				return fmt.Errorf("读取简历所属职位失败: %w", err)
-			}
-			if i == 0 {
-				projectID = record.ProjectID
-			} else if record.ProjectID != projectID {
-				return fmt.Errorf("一批简历只能属于同一个职位专属分库")
+	if len(resumeIDs) == 0 {
+		return nil
+	}
+
+	// 预先建立 projectID -> *Project 的缓存映射，支持跨岗位/多项目批量分析
+	projectCache := make(map[string]*Project)
+	resumeProjectMap := make(map[string]string)
+	resolvedResumeIDs := make([]string, 0, len(resumeIDs))
+
+	for _, id := range resumeIDs {
+		resolvedID := id
+		data, err := readJSONFile(filepath.Join(a.getDataDir(), "resumes", resolvedID+".json"))
+		if err != nil {
+			// 容错：尝试从 project_candidates 查找对应的 legacy_resume_id
+			if db := a.activeRecruitmentDB(); db != nil {
+				var legacyID string
+				_ = db.QueryRow(`SELECT COALESCE(rv.legacy_resume_id, '') FROM project_candidate_resumes pcr
+					JOIN resume_versions rv ON rv.id = pcr.resume_version_id
+					WHERE pcr.project_candidate_id = ? LIMIT 1`, id).Scan(&legacyID)
+				if legacyID != "" {
+					resolvedID = legacyID
+					data, err = readJSONFile(filepath.Join(a.getDataDir(), "resumes", resolvedID+".json"))
+				}
 			}
 		}
-		if projectID != "" {
-			project, err := a.ensureBatchJobRadar(projectID, cfg)
+
+		if err != nil {
+			log.Printf("[StartBatchAnalysis] 简历记录无法读取 (ID: %s): %v", id, err)
+			continue
+		}
+
+		var record struct {
+			ProjectID string `json:"project_id"`
+		}
+		if err := json.Unmarshal(data, &record); err != nil {
+			log.Printf("[StartBatchAnalysis] 读取简历所属职位失败 (ID: %s): %v", resolvedID, err)
+			continue
+		}
+
+		resolvedResumeIDs = append(resolvedResumeIDs, resolvedID)
+		resumeProjectMap[resolvedID] = record.ProjectID
+		if record.ProjectID != "" && projectCache[record.ProjectID] == nil {
+			project, err := a.ensureBatchJobRadar(record.ProjectID, cfg)
 			if err != nil {
-				return err
+				log.Printf("[StartBatchAnalysis] 预置岗位雷达画像失败 (项目: %s): %v", record.ProjectID, err)
+			} else {
+				projectCache[record.ProjectID] = project
 			}
-			jobCfg = &project.JobConfig
 		}
 	}
+
 	go func() {
-		total := len(resumeIDs)
+		total := len(resolvedResumeIDs)
 		if total == 0 {
-			runtime.EventsEmit(a.ctx, "batch:completed", map[string]interface{}{
+			a.emitEvent("batch:completed", map[string]interface{}{
 				"total": 0,
 			})
 			return
 		}
 
-		// 工业级 Worker Pool 并发控制：并发度设为 3
+		// 工业级 Worker Pool 并发控制：并发度设为 3，避免大模型限流
 		const maxWorkers = 3
 		sem := make(chan struct{}, maxWorkers)
 		var wg sync.WaitGroup
 		var processedCount int32
 		var failedCount int32
 
-		for _, id := range resumeIDs {
+		for _, id := range resolvedResumeIDs {
 			wg.Add(1)
 			sem <- struct{}{} // 申请工作槽位
 
@@ -3774,17 +3806,24 @@ func (a *App) StartBatchAnalysis(resumeIDs []string, cfg *AIConfig, jobCfg *JobC
 					wg.Done()
 				}()
 
-				_, err := a.AnalyzeResume(resumeID, cfg, jobCfg)
+				pID := resumeProjectMap[resumeID]
+				thisJobCfg := jobCfg
+				if pID != "" && projectCache[pID] != nil {
+					thisJobCfg = &projectCache[pID].JobConfig
+				}
+
+				_, err := a.AnalyzeResume(resumeID, cfg, thisJobCfg)
 				if err != nil {
 					atomic.AddInt32(&failedCount, 1)
 					log.Printf("分析简历 %s 失败: %v", resumeID, err)
 				}
 
 				curr := atomic.AddInt32(&processedCount, 1)
-				runtime.EventsEmit(a.ctx, "batch:progress", map[string]interface{}{
-					"current":  curr,
-					"total":    total,
-					"resumeId": resumeID,
+				a.emitEvent("batch:progress", map[string]interface{}{
+					"current":   curr,
+					"total":     total,
+					"resumeId":  resumeID,
+					"projectId": pID,
 				})
 			}(id)
 		}
@@ -3792,7 +3831,7 @@ func (a *App) StartBatchAnalysis(resumeIDs []string, cfg *AIConfig, jobCfg *JobC
 		// 等待所有简历分析任务完成
 		wg.Wait()
 
-		runtime.EventsEmit(a.ctx, "batch:completed", map[string]interface{}{
+		a.emitEvent("batch:completed", map[string]interface{}{
 			"total":  total,
 			"failed": atomic.LoadInt32(&failedCount),
 		})

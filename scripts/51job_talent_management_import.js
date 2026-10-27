@@ -55,7 +55,7 @@ async function connectManagementPage() {
     browser = await puppeteer.connect({
       browserURL: 'http://127.0.0.1:9503',
       defaultViewport: null,
-      protocolTimeout: 30000
+      protocolTimeout: 8000
     });
   } catch (err) {
     throw new Error('51job 专用浏览器端口 (9503) 未连接，请先点击【打开 51job 浏览器】并登录企业账号');
@@ -148,7 +148,8 @@ async function openBackgroundManagementPage(browser) {
   try {
     await page.waitForFunction(() => {
       const u = window.location.href.toLowerCase();
-      if (u.includes('login') || u.includes('navigate.aspx') || u.includes('passport')) {
+      if (u.includes('login') || u.includes('navigate.aspx') || u.includes('passport') ||
+          u.includes('default.aspx') || (!u.includes('/talent/') && !u.includes('/revision/'))) {
         return 'LOGIN_REDIRECT';
       }
       const components = Array.from(document.querySelectorAll('*')).map(element => element.__vue__).filter(Boolean);
@@ -156,7 +157,7 @@ async function openBackgroundManagementPage(browser) {
       const menu = components.find(vm => vm.$options?.name === 'EhMenuPositions');
       return Boolean(management?.$data?.hruid && management?.$data?.jobParams?.coid &&
         menu?.$props?.positionListsAll?.length);
-    }, { timeout: 12000 }).then(async (handle) => {
+    }, { timeout: 6000 }).then(async (handle) => {
       const val = await handle.jsonValue().catch(() => null);
       if (val === 'LOGIN_REDIRECT') {
         throw new Error('51job 尚未登录或会话已过期，请先点击【打开 51job 浏览器】登录企业账号');
