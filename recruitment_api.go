@@ -445,22 +445,40 @@ func (a *App) ArchiveTalentCandidates(projectCandidateIDs []string) (int, error)
 			continue
 		}
 		seen[id] = true
-		result, err := tx.Exec("UPDATE project_candidates SET archived_at=?,updated_at=? WHERE id=? AND archived_at=''", now, now, id)
+
+		// 查找对应的 project_candidates 记录（支持 projectCandidateId, candidateId, legacy_resume_id 匹配）
+		rows, err := tx.Query(`SELECT id FROM project_candidates
+			WHERE (id=? OR candidate_id=? OR id IN (
+				SELECT pcr.project_candidate_id FROM project_candidate_resumes pcr
+				JOIN resume_versions rv ON rv.id=pcr.resume_version_id
+				WHERE rv.legacy_resume_id=? OR rv.id=?
+			)) AND (archived_at='' OR archived_at IS NULL)`, id, id, id, id)
 		if err != nil {
 			return 0, err
 		}
-		changed, err := result.RowsAffected()
-		if err != nil {
-			return 0, err
+		var matchedIDs []string
+		for rows.Next() {
+			var pcID string
+			if err := rows.Scan(&pcID); err == nil {
+				matchedIDs = append(matchedIDs, pcID)
+			}
 		}
-		if changed == 0 {
-			return 0, fmt.Errorf("简历不存在或已移出人才库: %s", id)
+		rows.Close()
+
+		if len(matchedIDs) == 0 {
+			continue
 		}
-		if _, err := tx.Exec(`INSERT INTO follow_up_events(id,project_candidate_id,event_type,note,actor,created_at)
-			VALUES(?,?,'archived','从人才库移除，保留统一档案及沟通记录','HR',?)`, recruitmentID("followup"), id, now); err != nil {
-			return 0, err
+
+		for _, pcID := range matchedIDs {
+			if _, err := tx.Exec("UPDATE project_candidates SET archived_at=?,updated_at=? WHERE id=?", now, now, pcID); err != nil {
+				return 0, err
+			}
+			if _, err := tx.Exec(`INSERT INTO follow_up_events(id,project_candidate_id,event_type,note,actor,created_at)
+				VALUES(?,?,'archived','从人才库移除，保留统一档案及沟通记录','HR',?)`, recruitmentID("followup"), pcID, now); err != nil {
+				return 0, err
+			}
+			count++
 		}
-		count++
 	}
 	if count == 0 {
 		return 0, fmt.Errorf("请选择要移出人才库的简历")

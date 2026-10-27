@@ -953,11 +953,19 @@ async function archiveCandidates(ids: string[]) {
     return
   }
   try {
+    const idSet = new Set(ids)
+    // 乐观剔除：界面瞬时更新反馈
+    recruitment.candidates = recruitment.candidates.filter(c =>
+      !idSet.has(c.projectCandidateId) && !idSet.has(c.id) && !idSet.has(c.resumeId)
+    )
+    selectedCandidateIds.value = selectedCandidateIds.value.filter(id => !idSet.has(id))
+
     const removed = await recruitment.archiveCandidates(ids)
-    selectedCandidateIds.value = selectedCandidateIds.value.filter(id => !ids.includes(id))
-    ElMessage.success(`已从人才库删除 ${removed} 条岗位简历`)
+    ElMessage.success(`已从人才库删除 ${removed || ids.length} 条岗位简历`)
+    await refresh()
   } catch (err: any) {
     ElMessage.error(err?.message || String(err))
+    await refresh()
   }
 }
 
@@ -1071,7 +1079,12 @@ const analyzedCount = ref(0)
 const totalToAnalyze = ref(0)
 
 const unanalyzedCandidates = computed(() => {
-  return (recruitment.candidates || []).filter(c => c.analysisStatus === 'pending' || c.analysisStatus === 'error')
+  return (recruitment.candidates || []).filter(c => {
+    const matchProject = !selectedProjectId.value || c.projectId === selectedProjectId.value
+    if (!matchProject) return false
+    const status = c.analysisStatus
+    return status === 'pending' || status === 'pending_document' || status === 'error' || (!c.abilityScore && status !== 'done')
+  })
 })
 const unanalyzedCount = computed(() => unanalyzedCandidates.value.length)
 
