@@ -35,11 +35,21 @@
         <el-button
           class="strict-filter-btn"
           :disabled="!selectedProjectId"
-          :loading="filteringStrict"
           @click="triggerOneClickFilter()"
-          :title="selectedProjectId ? '对照当前职位硬性条件（学历、年限、城市），一键识别并排除不合规简历' : '请先选择左侧具体职位分库'"
+          :title="selectedProjectId ? '打开一键智能筛选专属界面，按多维硬性门槛排查并淘汰不合规简历' : '请先选择左侧具体职位分库'"
         >
           <el-icon><Filter /></el-icon><span>一键筛选</span>
+        </el-button>
+
+        <el-button
+          class="analyze-all-btn"
+          :disabled="!selectedProjectId || analyzingAll"
+          :loading="analyzingAll"
+          @click="triggerAnalyzeAll()"
+          :title="selectedProjectId ? '一键批量分析当前职位分库中所有待分析或失败的简历' : '请先选择左侧具体职位分库'"
+        >
+          <el-icon v-if="!analyzingAll"><Cpu /></el-icon>
+          <span>{{ analyzingAll ? `分析中 (${analyzedCount}/${totalToAnalyze})` : `一键全部分析${unanalyzedCount > 0 ? ` (${unanalyzedCount})` : ''}` }}</span>
         </el-button>
 
         <el-dropdown trigger="click" @command="handleLibraryAction">
@@ -788,6 +798,12 @@
       :default-project-id="selectedProjectId"
       @completed="refresh"
     />
+    <OneClickFilterDialog
+      v-model="showOneClickFilterDialog"
+      :project-id="selectedProjectId"
+      :job-title="selectedProject?.job_config?.title || selectedProject?.name"
+      @filtered="refresh"
+    />
 
     <!-- 待分配投递抽屉 -->
     <el-drawer v-model="inboxOpen" title="主动投递 · 待分配" size="500px">
@@ -885,13 +901,15 @@ import {
   Document,
   Calendar,
   Edit,
-  Filter
+  Filter,
+  Cpu
 } from '@element-plus/icons-vue'
 import { useProjectStore, type Project } from '../composables/useProjectStore'
 import { useRecruitmentStore, stageLabels, type TalentCandidate } from '../composables/useRecruitmentStore'
 import BossSearchDialog from '../components/BossSearchDialog.vue'
 import TopTenOutreachDialog from '../components/TopTenOutreachDialog.vue'
 import TalentManagementImportDialog from '../components/TalentManagementImportDialog.vue'
+import OneClickFilterDialog from '../components/OneClickFilterDialog.vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { getCandidateSurname } from '../utils/candidate'
 
@@ -1046,38 +1064,54 @@ function startBatchOutreach(ids?: string[]) {
   showOutreach.value = true
 }
 
+const showOneClickFilterDialog = ref(false)
 const filteringStrict = ref(false)
+const analyzingAll = ref(false)
+const analyzedCount = ref(0)
+const totalToAnalyze = ref(0)
 
-async function triggerOneClickFilter() {
+const unanalyzedCandidates = computed(() => {
+  return (recruitment.candidates || []).filter(c => c.analysisStatus === 'pending' || c.analysisStatus === 'error')
+})
+const unanalyzedCount = computed(() => unanalyzedCandidates.value.length)
+
+function triggerOneClickFilter() {
   if (!selectedProjectId.value) {
     ElMessage.warning('请先在左侧选择具体的职位分库')
     return
   }
-  filteringStrict.value = true
+  showOneClickFilterDialog.value = true
+}
+
+async function triggerAnalyzeAll() {
+  if (!selectedProjectId.value) {
+    ElMessage.warning('请先在左侧选择具体的职位分库')
+    return
+  }
+  const toAnalyze = unanalyzedCandidates.value
+  if (!toAnalyze.length) {
+    ElMessage.info('当前分库暂无待分析或失败的简历')
+    return
+  }
+
   try {
+    analyzingAll.value = true
+    totalToAnalyze.value = toAnalyze.length
+    analyzedCount.value = 0
+
     const api: any = await import('../../wailsjs/go/main/App')
-    const count = await api.OneClickFilterTalentPool(selectedProjectId.value)
-    if (count > 0) {
-      ElMessage.success(`已为您自动识别并排除 ${count} 位不合规候选人（可在 51job 审计记录中查看）`)
-      await refresh()
-    } else {
-      ElMessage.info('当前分库中的候选人均符合岗位硬性要求，无需排除')
+    const cfg = await api.GetConfig()
+    if (!cfg?.ai?.api_key) {
+      ElMessage.warning('请先在【设置】中配置 AI API Key 后再执行简历分析')
+      analyzingAll.value = false
+      return
     }
-  } catch (error: any) {
-    const msg = error?.message || String(error)
-    if (msg.includes('尚未配置硬性条件')) {
-      ElMessageBox.confirm(
-        '当前职位尚未配置硬性条件，是否现在打开【51job 人才管理】配置最低学历或工作年限？',
-        '未设置硬性条件',
-        { confirmButtonText: '去设置', cancelButtonText: '取消', type: 'info' }
-      ).then(() => {
-        showTalentImportDialog.value = true
-      }).catch(() => {})
-    } else {
-      ElMessage.error(msg)
-    }
-  } finally {
-    filteringStrict.value = false
+
+    ElMessage.success(`已开始对当前分库的 ${toAnalyze.length} 位候选人启动全部分析`)
+    await api.StartProjectAnalysis(selectedProjectId.value, cfg.ai)
+  } catch (err: any) {
+    ElMessage.error(err?.message || '启动分析失败')
+    analyzingAll.value = false
   }
 }
 const importing = ref(false)
@@ -1646,11 +1680,28 @@ async function retryAnalysis(resumeId: string) {
   }
 }
 
-onMounted(() => {
+onMounted(async () => {
   void projects.loadProjects()
   void refresh()
   void loadInbox()
   void loadDuplicates()
+
+  try {
+    const runtime: any = await import('../../wailsjs/runtime/runtime')
+    runtime.EventsOn('batch:progress', (data: any) => {
+      if (data && (!data.projectId || data.projectId === selectedProjectId.value)) {
+        analyzedCount.value = data.current || 0
+        totalToAnalyze.value = data.total || totalToAnalyze.value
+      }
+    })
+    runtime.EventsOn('batch:completed', async (data: any) => {
+      if (data && (!data.projectId || data.projectId === selectedProjectId.value)) {
+        analyzingAll.value = false
+        ElMessage.success('当前分库简历分析完成！')
+        await refresh()
+      }
+    })
+  } catch (e) {}
 })
 </script>
 
@@ -1772,6 +1823,18 @@ onMounted(() => {
   color: #b45309;
   border-color: #f59e0b;
   background-color: #fde68a;
+}
+
+.analyze-all-btn {
+  color: #2563eb;
+  border-color: #bfdbfe;
+  background-color: #eff6ff;
+}
+
+.analyze-all-btn:hover:not(:disabled) {
+  color: #1d4ed8;
+  border-color: #3b82f6;
+  background-color: #dbeafe;
 }
 
 .library-tools-btn,

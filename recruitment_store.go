@@ -263,9 +263,16 @@ CREATE TABLE IF NOT EXISTS talent_management_strict_criteria (
   project_id TEXT PRIMARY KEY REFERENCES projects(id) ON DELETE CASCADE,
   min_education TEXT NOT NULL DEFAULT '',
   min_work_years REAL NOT NULL DEFAULT 0,
+  min_age INTEGER NOT NULL DEFAULT 0,
+  max_age INTEGER NOT NULL DEFAULT 0,
+  max_expected_salary INTEGER NOT NULL DEFAULT 0,
+  gender TEXT NOT NULL DEFAULT '',
+  job_seeking_status TEXT NOT NULL DEFAULT '',
+  major_keywords TEXT NOT NULL DEFAULT '',
   reject_non_local_willingness INTEGER NOT NULL DEFAULT 0,
   target_city TEXT NOT NULL DEFAULT '',
   compliance_confirmed INTEGER NOT NULL DEFAULT 0,
+  auto_reject_platform INTEGER NOT NULL DEFAULT 0,
   updated_at TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS talent_management_audit_logs (
@@ -310,6 +317,9 @@ func (a *App) getRecruitmentDB() (*sql.DB, error) {
 		err = ensureTalentArchiveColumn(db)
 	}
 	if err == nil {
+		err = ensureStrictCriteriaColumns(db)
+	}
+	if err == nil {
 		_, err = db.Exec(`INSERT OR IGNORE INTO project_candidate_resumes(project_candidate_id,resume_version_id,created_at)
 			SELECT pc.id,rv.id,rv.created_at FROM project_candidates pc JOIN resume_versions rv ON rv.candidate_id=pc.candidate_id
 			WHERE json_valid(rv.raw_json) AND json_extract(rv.raw_json,'$.project_id')=pc.project_id`)
@@ -351,6 +361,47 @@ func ensureTalentArchiveColumn(db *sql.DB) error {
 	}
 	_, err = db.Exec("ALTER TABLE project_candidates ADD COLUMN archived_at TEXT NOT NULL DEFAULT ''")
 	return err
+}
+
+func ensureStrictCriteriaColumns(db *sql.DB) error {
+	rows, err := db.Query("PRAGMA table_info(talent_management_strict_criteria)")
+	if err != nil {
+		return err
+	}
+	existing := make(map[string]bool)
+	for rows.Next() {
+		var id, notNull, primaryKey int
+		var name, columnType string
+		var defaultValue sql.NullString
+		if err = rows.Scan(&id, &name, &columnType, &notNull, &defaultValue, &primaryKey); err != nil {
+			rows.Close()
+			return err
+		}
+		existing[name] = true
+	}
+	rows.Close()
+
+	cols := []struct {
+		name string
+		typ  string
+	}{
+		{"min_age", "INTEGER NOT NULL DEFAULT 0"},
+		{"max_age", "INTEGER NOT NULL DEFAULT 0"},
+		{"max_expected_salary", "INTEGER NOT NULL DEFAULT 0"},
+		{"gender", "TEXT NOT NULL DEFAULT ''"},
+		{"job_seeking_status", "TEXT NOT NULL DEFAULT ''"},
+		{"major_keywords", "TEXT NOT NULL DEFAULT ''"},
+		{"auto_reject_platform", "INTEGER NOT NULL DEFAULT 0"},
+	}
+
+	for _, c := range cols {
+		if !existing[c.name] {
+			if _, err := db.Exec(fmt.Sprintf("ALTER TABLE talent_management_strict_criteria ADD COLUMN %s %s", c.name, c.typ)); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }
 
 func (a *App) closeRecruitmentDB() {

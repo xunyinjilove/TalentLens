@@ -232,4 +232,114 @@ func TestOneClickFilterTalentPool(t *testing.T) {
 	if auditLogs[0].CandidateName != "张大专" {
 		t.Fatalf("审计日志候选人期望为张大专，实际为 %s", auditLogs[0].CandidateName)
 	}
+
+	// 测试清空审计日志
+	if err := app.ClearTalentManagementAuditLogs(project.ID); err != nil {
+		t.Fatalf("ClearTalentManagementAuditLogs failed: %v", err)
+	}
+	clearedLogs, err := app.ListTalentManagementAuditLogs(project.ID)
+	if err != nil || len(clearedLogs) != 0 {
+		t.Fatalf("清空后审计日志数量 = %d, expected 0", len(clearedLogs))
+	}
+}
+
+func TestEvaluateCandidateStrictCriteria_NewDimensions(t *testing.T) {
+	criteria := TalentManagementStrictCriteria{
+		MinEducation:      "本科",
+		MinAge:            25,
+		MaxAge:            35,
+		MaxExpectedSalary: 15, // 15k/月
+		Gender:            "女",
+		JobSeekingStatus:  "离职",
+		MajorKeywords:     "药学,医学",
+	}
+
+	// 1. 年龄超标 (38岁)
+	c1 := map[string]interface{}{
+		"topdegree":  "本科",
+		"displayage": "38岁",
+		"sex":        "女",
+		"highestdegree": map[string]interface{}{
+			"degreemajor": "临床药学",
+		},
+		"job_hunting_status": "离职-随时到岗",
+		"jobintention": []interface{}{
+			map[string]interface{}{"displayexpectsalary": "10-12千/月"},
+		},
+	}
+	b1, _ := json.Marshal(c1)
+	decision, rule, _, _ := EvaluateCandidateStrictCriteria(string(b1), criteria)
+	if decision != "UNFIT" || rule != "AGE_MISMATCH" {
+		t.Errorf("c1 expected AGE_MISMATCH, got %s, %s", decision, rule)
+	}
+
+	// 2. 薪资超标 (20k/月 > 15k)
+	c2 := map[string]interface{}{
+		"topdegree":  "本科",
+		"displayage": "28岁",
+		"sex":        "女",
+		"highestdegree": map[string]interface{}{
+			"degreemajor": "临床药学",
+		},
+		"job_hunting_status": "离职-随时到岗",
+		"jobintention": []interface{}{
+			map[string]interface{}{"displayexpectsalary": "18-20千/月"},
+		},
+	}
+	b2, _ := json.Marshal(c2)
+	decision, rule, _, _ = EvaluateCandidateStrictCriteria(string(b2), criteria)
+	if decision != "UNFIT" || rule != "SALARY_MISMATCH" {
+		t.Errorf("c2 expected SALARY_MISMATCH, got %s, %s", decision, rule)
+	}
+
+	// 3. 性别不匹配 (男)
+	c3 := map[string]interface{}{
+		"topdegree":  "本科",
+		"displayage": "28岁",
+		"sex":        "男",
+		"highestdegree": map[string]interface{}{
+			"degreemajor": "药学",
+		},
+		"job_hunting_status": "离职-随时到岗",
+	}
+	b3, _ := json.Marshal(c3)
+	decision, rule, _, _ = EvaluateCandidateStrictCriteria(string(b3), criteria)
+	if decision != "UNFIT" || rule != "GENDER_MISMATCH" {
+		t.Errorf("c3 expected GENDER_MISMATCH, got %s, %s", decision, rule)
+	}
+
+	// 4. 专业不匹配 (计算机)
+	c4 := map[string]interface{}{
+		"topdegree":  "本科",
+		"displayage": "28岁",
+		"sex":        "女",
+		"highestdegree": map[string]interface{}{
+			"degreemajor": "计算机科学与技术",
+		},
+		"job_hunting_status": "离职-随时到岗",
+	}
+	b4, _ := json.Marshal(c4)
+	decision, rule, _, _ = EvaluateCandidateStrictCriteria(string(b4), criteria)
+	if decision != "UNFIT" || rule != "MAJOR_MISMATCH" {
+		t.Errorf("c4 expected MAJOR_MISMATCH, got %s, %s", decision, rule)
+	}
+
+	// 5. 全部满足
+	c5 := map[string]interface{}{
+		"topdegree":  "本科",
+		"displayage": "28岁",
+		"sex":        "女",
+		"highestdegree": map[string]interface{}{
+			"degreemajor": "中药学",
+		},
+		"job_hunting_status": "离职-随时到岗",
+		"jobintention": []interface{}{
+			map[string]interface{}{"displayexpectsalary": "8-10千/月"},
+		},
+	}
+	b5, _ := json.Marshal(c5)
+	decision, _, _, _ = EvaluateCandidateStrictCriteria(string(b5), criteria)
+	if decision != "KEEP_MATCHED" {
+		t.Errorf("c5 expected KEEP_MATCHED, got %s", decision)
+	}
 }

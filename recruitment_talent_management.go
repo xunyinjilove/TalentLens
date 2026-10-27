@@ -9,6 +9,8 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -97,10 +99,25 @@ type TalentManagementStrictCriteria struct {
 	ProjectID                 string  `json:"projectId"`
 	MinEducation              string  `json:"minEducation"`              // 大专 / 本科 / 硕士 / 博士 / ""
 	MinWorkYears              float64 `json:"minWorkYears"`              // 0 表示不限
+	MinAge                    int     `json:"minAge"`                    // 最小年龄 (0 表示不限)
+	MaxAge                    int     `json:"maxAge"`                    // 最大年龄 (0 表示不限)
+	MaxExpectedSalary         int     `json:"maxExpectedSalary"`         // 期望薪资上限 (0 表示不限，单位：千元/月，如 15 代表 15k)
+	Gender                    string  `json:"gender"`                    // 性别: "" (不限) / "男" / "女"
+	JobSeekingStatus          string  `json:"jobSeekingStatus"`          // 求职状态: "" (不限) / "离职" 等
+	MajorKeywords             string  `json:"majorKeywords"`             // 专业关键词 (逗号分隔，如 "医学,药学,市场营销")
 	RejectNonLocalWillingness bool    `json:"rejectNonLocalWillingness"` // 明确拒绝在目标城市工作
 	TargetCity                string  `json:"targetCity"`                // 目标工作城市
 	ComplianceConfirmed       bool    `json:"complianceConfirmed"`       // HR 确认合规授权
+	AutoRejectPlatform        bool    `json:"autoRejectPlatform"`        // 是否联动 51job 自动标记不合适
 	UpdatedAt                 string  `json:"updatedAt"`
+}
+
+type OneClickFilterResult struct {
+	TotalChecked          int      `json:"totalChecked"`
+	UnfitCount            int      `json:"unfitCount"`
+	PlatformRejectedCount int      `json:"platformRejectedCount"`
+	ActiveRemainingCount  int      `json:"activeRemainingCount"`
+	Details               []string `json:"details"`
 }
 
 type TalentManagementAuditLog struct {
@@ -514,65 +531,343 @@ func parseWorkYears(raw string) (float64, bool) {
 	return 0, false
 }
 
+func parseCandidateAge(raw string) int {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return 0
+	}
+	var age int
+	if _, err := fmt.Sscanf(raw, "%d岁", &age); err == nil && age > 0 {
+		return age
+	}
+	if _, err := fmt.Sscanf(raw, "%d", &age); err == nil && age > 0 {
+		return age
+	}
+	re := regexp.MustCompile(`(\d{2})\s*岁`)
+	if m := re.FindStringSubmatch(raw); len(m) > 1 {
+		if a, err := strconv.Atoi(m[1]); err == nil && a >= 16 && a <= 80 {
+			return a
+		}
+	}
+	return 0
+}
+
+func parseCandidateSalaryK(raw string) (maxK float64, ok bool) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return 0, false
+	}
+	reWan := regexp.MustCompile(`(?:[-~到至]|^)\s*(\d+(?:\.\d+)?)\s*万`)
+	if m := reWan.FindStringSubmatch(raw); len(m) > 1 {
+		if v, err := strconv.ParseFloat(m[1], 64); err == nil {
+			return v * 10, true
+		}
+	}
+	reK := regexp.MustCompile(`(?:[-~到至]|^)\s*(\d+(?:\.\d+)?)\s*[kK千]`)
+	if m := reK.FindStringSubmatch(raw); len(m) > 1 {
+		if v, err := strconv.ParseFloat(m[1], 64); err == nil {
+			return v, true
+		}
+	}
+	reYuan := regexp.MustCompile(`(?:[-~到至]|^)\s*(\d{4,6})`)
+	if m := reYuan.FindStringSubmatch(raw); len(m) > 1 {
+		if v, err := strconv.ParseFloat(m[1], 64); err == nil {
+			return v / 1000.0, true
+		}
+	}
+	return 0, false
+}
+
+type candidateProfileSummary struct {
+	Degree           string
+	School           string
+	Major            string
+	WorkYears        float64
+	WorkYearsKnown   bool
+	Age              int
+	SalaryMaxK       float64
+	SalaryKnown      bool
+	Gender           string
+	JobSeekingStatus string
+	IntentCities     []string
+}
+
+func extractCandidateProfile(resumeText string) candidateProfileSummary {
+	var summary candidateProfileSummary
+	trimmed := strings.TrimSpace(resumeText)
+	if trimmed == "" {
+		return summary
+	}
+
+	var data map[string]interface{}
+	if err := json.Unmarshal([]byte(trimmed), &data); err == nil && data != nil {
+		baseInfo, _ := data["base_info"].(map[string]interface{})
+		if baseInfo != nil {
+			if deg, ok := baseInfo["top_degree_value"].(string); ok {
+				summary.Degree = deg
+			}
+			if sch, ok := baseInfo["top_school_name"].(string); ok {
+				summary.School = sch
+			}
+			if maj, ok := baseInfo["top_major_value"].(string); ok {
+				summary.Major = maj
+			}
+			if wy, ok := baseInfo["work_year_value"].(string); ok {
+				if y, ok2 := parseWorkYears(wy); ok2 {
+					summary.WorkYears = y
+					summary.WorkYearsKnown = true
+				}
+			}
+			if ageStr, ok := baseInfo["age"].(string); ok {
+				summary.Age = parseCandidateAge(ageStr)
+			}
+			if gen, ok := baseInfo["sex"].(string); ok {
+				summary.Gender = strings.TrimSpace(gen)
+			}
+			if sit, ok := baseInfo["current_situation"].(string); ok {
+				summary.JobSeekingStatus = strings.TrimSpace(sit)
+			}
+		}
+
+		if summary.Degree == "" {
+			if deg, ok := data["topdegree"].(string); ok {
+				summary.Degree = deg
+			} else if degObj, ok := data["highestdegree"].(map[string]interface{}); ok {
+				if d, ok2 := degObj["degree"].(string); ok2 {
+					summary.Degree = d
+				}
+				if m, ok2 := degObj["degreemajor"].(string); ok2 && summary.Major == "" {
+					summary.Major = m
+				}
+				if s, ok2 := degObj["degreeschool"].(string); ok2 && summary.School == "" {
+					summary.School = s
+				}
+			}
+		}
+
+		if !summary.WorkYearsKnown {
+			if wy, ok := data["workyear"].(string); ok {
+				if y, ok2 := parseWorkYears(wy); ok2 {
+					summary.WorkYears = y
+					summary.WorkYearsKnown = true
+				}
+			} else if wyNum, ok := data["workyear"].(float64); ok {
+				summary.WorkYears = wyNum
+				summary.WorkYearsKnown = true
+			}
+		}
+
+		if summary.Age == 0 {
+			if aStr, ok := data["displayage"].(string); ok {
+				summary.Age = parseCandidateAge(aStr)
+			} else if aNum, ok := data["displayage"].(float64); ok {
+				summary.Age = int(aNum)
+			}
+		}
+
+		if summary.Gender == "" {
+			if g, ok := data["sex"].(string); ok {
+				summary.Gender = strings.TrimSpace(g)
+			}
+		}
+
+		if summary.JobSeekingStatus == "" {
+			if s, ok := data["job_hunting_status"].(string); ok {
+				summary.JobSeekingStatus = strings.TrimSpace(s)
+			} else if s2, ok := data["currentsituation"].(string); ok {
+				summary.JobSeekingStatus = strings.TrimSpace(s2)
+			}
+		}
+
+		if optIntention, ok := data["optimal_job_intention"].(map[string]interface{}); ok && optIntention != nil {
+			if area, ok2 := optIntention["intention_area"].(string); ok2 && strings.TrimSpace(area) != "" {
+				summary.IntentCities = append(summary.IntentCities, strings.TrimSpace(area))
+			}
+		}
+
+		if intentions, ok := data["jobintention"].([]interface{}); ok && len(intentions) > 0 {
+			for _, item := range intentions {
+				if m, ok2 := item.(map[string]interface{}); ok2 {
+					if sal, ok3 := m["displayexpectsalary"].(string); ok3 {
+						if maxK, ok4 := parseCandidateSalaryK(sal); ok4 {
+							if !summary.SalaryKnown || maxK > summary.SalaryMaxK {
+								summary.SalaryMaxK = maxK
+								summary.SalaryKnown = true
+							}
+						}
+					}
+					if areas, ok3 := m["expectarea"].([]interface{}); ok3 {
+						for _, a := range areas {
+							if aObj, ok4 := a.(map[string]interface{}); ok4 {
+								if pc, ok5 := aObj["provincecity"].(string); ok5 && strings.TrimSpace(pc) != "" {
+									summary.IntentCities = append(summary.IntentCities, strings.TrimSpace(pc))
+								}
+							}
+						}
+					}
+				}
+			}
+		}
+
+		if summary.Major == "" {
+			if edus, ok := data["education"].([]interface{}); ok {
+				for _, e := range edus {
+					if em, ok2 := e.(map[string]interface{}); ok2 {
+						if maj, ok3 := em["major"].(string); ok3 && strings.TrimSpace(maj) != "" {
+							summary.Major = strings.TrimSpace(maj)
+							break
+						}
+					}
+				}
+			}
+		}
+	} else {
+		lines := strings.Split(trimmed, "\n")
+		for _, line := range lines {
+			if summary.Age == 0 {
+				summary.Age = parseCandidateAge(line)
+			}
+			if !summary.WorkYearsKnown {
+				if y, ok := parseWorkYears(line); ok {
+					summary.WorkYears = y
+					summary.WorkYearsKnown = true
+				}
+			}
+			if summary.Degree == "" {
+				for _, deg := range []string{"博士", "硕士", "研究生", "本科", "大专", "专科", "中专", "高中"} {
+					if strings.Contains(line, deg) {
+						summary.Degree = deg
+						break
+					}
+				}
+			}
+			if summary.Gender == "" {
+				if strings.Contains(line, "男") {
+					summary.Gender = "男"
+				} else if strings.Contains(line, "女") {
+					summary.Gender = "女"
+				}
+			}
+			if !summary.SalaryKnown {
+				if maxK, ok := parseCandidateSalaryK(line); ok {
+					summary.SalaryMaxK = maxK
+					summary.SalaryKnown = true
+				}
+			}
+		}
+	}
+
+	return summary
+}
+
 // EvaluateCandidateStrictCriteria 仅在拥有确凿可定位证据时判定不符合硬性条件。
-// 信息缺失、来源冲突、低分、年龄及性别绝不自动淘汰。
 func EvaluateCandidateStrictCriteria(resumeText string, criteria TalentManagementStrictCriteria) (decision, ruleCode, reasonLabel, evidence string) {
 	if strings.TrimSpace(resumeText) == "" {
-		return "KEEP_UNKNOWN", "", "", "资料不完整，保持待人工复核"
-	}
-	var data map[string]interface{}
-	if err := json.Unmarshal([]byte(resumeText), &data); err != nil {
-		return "KEEP_UNKNOWN", "", "", "简历格式无法解析，保持待人工复核"
+		return "KEEP_UNKNOWN", "", "", "简历内容为空，保持待人工复核"
 	}
 
-	baseInfo, _ := data["base_info"].(map[string]interface{})
-	if baseInfo == nil {
-		return "KEEP_UNKNOWN", "", "", "缺少基本信息，保持待人工复核"
-	}
-
+	prof := extractCandidateProfile(resumeText)
 	hasUnknown := false
 	var unknownReason string
 
 	// 1. 最低学历硬性条件
 	minEduRank := parseEducationRank(criteria.MinEducation)
 	if minEduRank > 0 {
-		topDegreeVal, _ := baseInfo["top_degree_value"].(string)
-		candRank := parseEducationRank(topDegreeVal)
+		candRank := parseEducationRank(prof.Degree)
 		if candRank == 0 {
 			hasUnknown = true
 			unknownReason = "最高学历未填或无法解析，保持待人工复核"
 		} else if candRank < minEduRank {
-			school, _ := baseInfo["top_school_name"].(string)
-			major, _ := baseInfo["top_major_value"].(string)
-			evidence = fmt.Sprintf("最高学历为【%s】，未达到岗位最低硬性要求【%s】（毕业院校: %s, 专业: %s）", topDegreeVal, criteria.MinEducation, school, major)
+			evidence = fmt.Sprintf("最高学历为【%s】，未达到岗位最低硬性要求【%s】", prof.Degree, criteria.MinEducation)
+			if prof.School != "" || prof.Major != "" {
+				evidence += fmt.Sprintf("（毕业院校: %s, 专业: %s）", prof.School, prof.Major)
+			}
 			return "UNFIT", "EDU_BELOW_MIN", "学历不达标", evidence
 		}
 	}
 
 	// 2. 最低工作年限硬性条件
 	if criteria.MinWorkYears > 0 {
-		workYearVal, _ := baseInfo["work_year_value"].(string)
-		years, ok := parseWorkYears(workYearVal)
-		if !ok {
+		if !prof.WorkYearsKnown {
 			hasUnknown = true
 			if unknownReason == "" {
 				unknownReason = "工作年限信息缺失，保持待人工复核"
 			}
-		} else if years < criteria.MinWorkYears {
-			evidence = fmt.Sprintf("工作年限为【%.1f年】（%s），未达到岗位最低硬性要求【%.1f年】", years, workYearVal, criteria.MinWorkYears)
+		} else if prof.WorkYears < criteria.MinWorkYears {
+			evidence = fmt.Sprintf("工作年限为【%.1f年】，未达到岗位最低硬性要求【%.1f年】", prof.WorkYears, criteria.MinWorkYears)
 			return "UNFIT", "EXP_BELOW_MIN", "年限不达标", evidence
 		}
 	}
 
-	// 3. 目标城市工作意愿
+	// 3. 年龄区间硬性限制
+	if criteria.MinAge > 0 && prof.Age > 0 && prof.Age < criteria.MinAge {
+		evidence = fmt.Sprintf("年龄为【%d岁】，低于岗位要求的最低年龄【%d岁】", prof.Age, criteria.MinAge)
+		return "UNFIT", "AGE_MISMATCH", "年龄偏小", evidence
+	}
+	if criteria.MaxAge > 0 && prof.Age > 0 && prof.Age > criteria.MaxAge {
+		evidence = fmt.Sprintf("年龄为【%d岁】，超过岗位要求的最高年龄【%d岁】", prof.Age, criteria.MaxAge)
+		return "UNFIT", "AGE_MISMATCH", "年龄超出上限", evidence
+	}
+
+	// 4. 期望薪资上限
+	if criteria.MaxExpectedSalary > 0 && prof.SalaryKnown && prof.SalaryMaxK > 0 {
+		if prof.SalaryMaxK > float64(criteria.MaxExpectedSalary) {
+			evidence = fmt.Sprintf("期望薪资约为【%.1f千/月】，超出岗位期望薪资上限【%d千/月】", prof.SalaryMaxK, criteria.MaxExpectedSalary)
+			return "UNFIT", "SALARY_MISMATCH", "期望薪资超出预算", evidence
+		}
+	}
+
+	// 5. 性别要求限制
+	if criteria.Gender != "" && criteria.Gender != "不限" && prof.Gender != "" {
+		if prof.Gender != criteria.Gender {
+			evidence = fmt.Sprintf("候选人性别为【%s】，岗位要求为【%s】", prof.Gender, criteria.Gender)
+			return "UNFIT", "GENDER_MISMATCH", "性别不匹配", evidence
+		}
+	}
+
+	// 6. 求职状态限制
+	if criteria.JobSeekingStatus != "" && criteria.JobSeekingStatus != "不限" && prof.JobSeekingStatus != "" {
+		if strings.Contains(criteria.JobSeekingStatus, "离职") && !strings.Contains(prof.JobSeekingStatus, "离职") {
+			evidence = fmt.Sprintf("当前求职状态为【%s】，未达到【离职-随时到岗】要求", prof.JobSeekingStatus)
+			return "UNFIT", "STATUS_MISMATCH", "求职状态不符合", evidence
+		}
+	}
+
+	// 7. 专业背景/关键词匹配
+	if strings.TrimSpace(criteria.MajorKeywords) != "" {
+		rawKws := strings.FieldsFunc(criteria.MajorKeywords, func(r rune) bool {
+			return r == ',' || r == '，' || r == '、' || r == ' ' || r == ';' || r == '；'
+		})
+		if len(rawKws) > 0 {
+			matched := false
+			fullTarget := prof.Major + " " + prof.Degree + " " + prof.School + " " + resumeText
+			for _, kw := range rawKws {
+				kw = strings.TrimSpace(kw)
+				if kw != "" && strings.Contains(fullTarget, kw) {
+					matched = true
+					break
+				}
+			}
+			if !matched {
+				evidence = fmt.Sprintf("专业背景中未找到指定关键词【%s】（候选人专业: %s）", criteria.MajorKeywords, prof.Major)
+				return "UNFIT", "MAJOR_MISMATCH", "专业背景不符合", evidence
+			}
+		}
+	}
+
+	// 8. 目标城市工作意愿
 	if criteria.RejectNonLocalWillingness && strings.TrimSpace(criteria.TargetCity) != "" {
 		targetCity := strings.TrimSpace(criteria.TargetCity)
-		optIntention, _ := data["optimal_job_intention"].(map[string]interface{})
-		if optIntention != nil {
-			intentArea, _ := optIntention["intention_area"].(string)
-			intentArea = strings.TrimSpace(intentArea)
-			if intentArea != "" && !strings.Contains(intentArea, targetCity) && !strings.Contains(targetCity, intentArea) {
-				evidence = fmt.Sprintf("期望工作城市仅包含【%s】，明确表示不在目标城市【%s】工作", intentArea, targetCity)
+		if len(prof.IntentCities) > 0 {
+			hasTarget := false
+			for _, city := range prof.IntentCities {
+				if strings.Contains(city, targetCity) || strings.Contains(targetCity, city) {
+					hasTarget = true
+					break
+				}
+			}
+			if !hasTarget {
+				evidence = fmt.Sprintf("期望工作城市仅包含【%s】，明确表示不愿在目标城市【%s】工作", strings.Join(prof.IntentCities, "、"), targetCity)
 				return "UNFIT", "INTENT_CITY_MISMATCH", "无目标城市工作意愿", evidence
 			}
 		}
@@ -591,10 +886,12 @@ func (a *App) GetTalentManagementStrictCriteria(projectID string) (*TalentManage
 		return nil, err
 	}
 	var c TalentManagementStrictCriteria
-	var rejectCity, compliance int
-	err = db.QueryRow(`SELECT project_id, min_education, min_work_years, reject_non_local_willingness, target_city, compliance_confirmed, updated_at
+	var rejectCity, compliance, autoReject int
+	err = db.QueryRow(`SELECT project_id, min_education, min_work_years, min_age, max_age, max_expected_salary,
+		gender, job_seeking_status, major_keywords, reject_non_local_willingness, target_city, compliance_confirmed, auto_reject_platform, updated_at
 		FROM talent_management_strict_criteria WHERE project_id=?`, projectID).Scan(
-		&c.ProjectID, &c.MinEducation, &c.MinWorkYears, &rejectCity, &c.TargetCity, &compliance, &c.UpdatedAt)
+		&c.ProjectID, &c.MinEducation, &c.MinWorkYears, &c.MinAge, &c.MaxAge, &c.MaxExpectedSalary,
+		&c.Gender, &c.JobSeekingStatus, &c.MajorKeywords, &rejectCity, &c.TargetCity, &compliance, &autoReject, &c.UpdatedAt)
 	if err == sql.ErrNoRows {
 		p := a.GetProject(projectID)
 		targetCity := ""
@@ -612,6 +909,7 @@ func (a *App) GetTalentManagementStrictCriteria(projectID string) (*TalentManage
 			RejectNonLocalWillingness: false,
 			TargetCity:                targetCity,
 			ComplianceConfirmed:       false,
+			AutoRejectPlatform:        true,
 			UpdatedAt:                 time.Now().Format("2006-01-02 15:04:05"),
 		}
 		return &c, nil
@@ -621,6 +919,7 @@ func (a *App) GetTalentManagementStrictCriteria(projectID string) (*TalentManage
 	}
 	c.RejectNonLocalWillingness = rejectCity == 1
 	c.ComplianceConfirmed = compliance == 1
+	c.AutoRejectPlatform = autoReject == 1
 	return &c, nil
 }
 
@@ -641,13 +940,21 @@ func (a *App) SetTalentManagementStrictCriteria(criteria TalentManagementStrictC
 	if criteria.ComplianceConfirmed {
 		compliance = 1
 	}
+	autoReject := 0
+	if criteria.AutoRejectPlatform {
+		autoReject = 1
+	}
 	now := time.Now().Format("2006-01-02 15:04:05")
-	_, err = db.Exec(`INSERT INTO talent_management_strict_criteria(project_id, min_education, min_work_years, reject_non_local_willingness, target_city, compliance_confirmed, updated_at)
-		VALUES(?,?,?,?,?,?,?)
+	_, err = db.Exec(`INSERT INTO talent_management_strict_criteria(project_id, min_education, min_work_years, min_age, max_age, max_expected_salary,
+		gender, job_seeking_status, major_keywords, reject_non_local_willingness, target_city, compliance_confirmed, auto_reject_platform, updated_at)
+		VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)
 		ON CONFLICT(project_id) DO UPDATE SET min_education=excluded.min_education, min_work_years=excluded.min_work_years,
+		min_age=excluded.min_age, max_age=excluded.max_age, max_expected_salary=excluded.max_expected_salary,
+		gender=excluded.gender, job_seeking_status=excluded.job_seeking_status, major_keywords=excluded.major_keywords,
 		reject_non_local_willingness=excluded.reject_non_local_willingness, target_city=excluded.target_city,
-		compliance_confirmed=excluded.compliance_confirmed, updated_at=excluded.updated_at`,
-		criteria.ProjectID, criteria.MinEducation, criteria.MinWorkYears, rejectCity, criteria.TargetCity, compliance, now)
+		compliance_confirmed=excluded.compliance_confirmed, auto_reject_platform=excluded.auto_reject_platform, updated_at=excluded.updated_at`,
+		criteria.ProjectID, criteria.MinEducation, criteria.MinWorkYears, criteria.MinAge, criteria.MaxAge, criteria.MaxExpectedSalary,
+		criteria.Gender, criteria.JobSeekingStatus, criteria.MajorKeywords, rejectCity, criteria.TargetCity, compliance, autoReject, now)
 	if err != nil {
 		return err
 	}
@@ -673,8 +980,8 @@ func (a *App) SetTalentManagementStrictCriteria(criteria TalentManagementStrictC
 				if strings.TrimSpace(resumeContent) != "" {
 					decision, _, _, _ := EvaluateCandidateStrictCriteria(resumeContent, criteria)
 					if decision != "UNFIT" {
-						// 恢复到人才库
-						_, _ = db.Exec(`UPDATE project_candidates SET archived_at='', updated_at=? WHERE id=?`, nowIso, pcID)
+						// 恢复到人才库活跃状态，同时将 stage 从 rejected 恢复为 new
+						_, _ = db.Exec(`UPDATE project_candidates SET archived_at='', stage='new', updated_at=? WHERE id=?`, nowIso, pcID)
 					}
 				}
 			}
@@ -683,6 +990,20 @@ func (a *App) SetTalentManagementStrictCriteria(criteria TalentManagementStrictC
 	}
 
 	return nil
+}
+
+// ClearTalentManagementAuditLogs 清空指定岗位的淘汰审计日志（若 projectID 为空则清空全部）
+func (a *App) ClearTalentManagementAuditLogs(projectID string) error {
+	db, err := a.getRecruitmentDB()
+	if err != nil {
+		return err
+	}
+	if strings.TrimSpace(projectID) == "" {
+		_, err = db.Exec(`DELETE FROM talent_management_audit_logs`)
+	} else {
+		_, err = db.Exec(`DELETE FROM talent_management_audit_logs WHERE project_id=?`, projectID)
+	}
+	return err
 }
 
 // ListTalentManagementAuditLogs 查询某岗位的淘汰审计日志（按时间倒序）
@@ -838,19 +1159,19 @@ func (a *App) runScheduledTalentManagementSync() {
 	}
 }
 
-// OneClickFilterTalentPool 对指定职位分库执行“一键筛选”，根据岗位专属硬性条件自动排除不合格简历
-func (a *App) OneClickFilterTalentPool(projectID string) (int, error) {
+// OneClickFilterTalentPoolWithConfig 执行专属分库一键筛选，支持实时参数与双向联动
+func (a *App) OneClickFilterTalentPoolWithConfig(projectID string, criteria TalentManagementStrictCriteria, saveAsDefault bool) (*OneClickFilterResult, error) {
 	if strings.TrimSpace(projectID) == "" {
-		return 0, fmt.Errorf("请先选择具体的职位分库")
+		return nil, fmt.Errorf("请先选择具体的职位分库")
 	}
-	criteria, err := a.GetTalentManagementStrictCriteria(projectID)
-	if err != nil || criteria == nil || (criteria.MinEducation == "" && criteria.MinWorkYears <= 0 && (!criteria.RejectNonLocalWillingness || criteria.TargetCity == "")) {
-		return 0, fmt.Errorf("当前职位尚未配置硬性条件，请先在【51job 人才管理】中设置学历或年限要求")
+
+	if saveAsDefault {
+		_ = a.SetTalentManagementStrictCriteria(criteria)
 	}
 
 	db, err := a.getRecruitmentDB()
 	if err != nil {
-		return 0, err
+		return nil, err
 	}
 
 	// 查出该职位下所有当前在库（未归档）的候选人
@@ -864,25 +1185,24 @@ func (a *App) OneClickFilterTalentPool(projectID string) (int, error) {
 		)
 		WHERE pc.project_id = ? AND pc.archived_at = ''`, projectID)
 	if err != nil {
-		return 0, err
+		return nil, err
 	}
 	defer rows.Close()
 
-	type unfitCandidate struct {
+	type candidateRecord struct {
 		pcID                string
 		candidateID         string
 		name                string
-		reasonLabel         string
-		evidence            string
-		sourcePlatform      string
+		resumeContent       string
+		platform            string
 		platformCandidateID string
 	}
 
-	var unfitness []unfitCandidate
+	var allCandidates []candidateRecord
 	for rows.Next() {
 		var pcID, cID, name, content, rawJson string
 		if err := rows.Scan(&pcID, &cID, &name, &content, &rawJson); err != nil {
-			return 0, err
+			return nil, err
 		}
 		platform := ""
 		platformCandidateID := ""
@@ -897,68 +1217,146 @@ func (a *App) OneClickFilterTalentPool(projectID string) (int, error) {
 				}
 			}
 		}
-		if strings.TrimSpace(resumeContent) == "" {
-			continue
-		}
-		decision, _, reasonLabel, evidence := EvaluateCandidateStrictCriteria(resumeContent, *criteria)
-		if decision == "UNFIT" {
-			unfitness = append(unfitness, unfitCandidate{
-				pcID:                pcID,
-				candidateID:         cID,
-				name:                name,
-				reasonLabel:         reasonLabel,
-				evidence:            evidence,
-				sourcePlatform:      platform,
-				platformCandidateID: platformCandidateID,
-			})
-		}
+		allCandidates = append(allCandidates, candidateRecord{
+			pcID:                pcID,
+			candidateID:         cID,
+			name:                name,
+			resumeContent:       resumeContent,
+			platform:            platform,
+			platformCandidateID: platformCandidateID,
+		})
 	}
 	rows.Close()
 
+	result := &OneClickFilterResult{
+		TotalChecked: len(allCandidates),
+		Details:      make([]string, 0),
+	}
+
+	if len(allCandidates) == 0 {
+		return result, nil
+	}
+
+	type unfitItem struct {
+		rec         candidateRecord
+		ruleCode    string
+		reasonLabel string
+		evidence    string
+	}
+	var unfitness []unfitItem
+
+	for _, cand := range allCandidates {
+		if strings.TrimSpace(cand.resumeContent) == "" {
+			continue
+		}
+		decision, ruleCode, reasonLabel, evidence := EvaluateCandidateStrictCriteria(cand.resumeContent, criteria)
+		if decision == "UNFIT" {
+			unfitness = append(unfitness, unfitItem{
+				rec:         cand,
+				ruleCode:    ruleCode,
+				reasonLabel: reasonLabel,
+				evidence:    evidence,
+			})
+		}
+	}
+
+	result.UnfitCount = len(unfitness)
+	result.ActiveRemainingCount = result.TotalChecked - result.UnfitCount
+
 	if len(unfitness) == 0 {
-		return 0, nil
+		return result, nil
 	}
 
 	pcIDs := make([]string, 0, len(unfitness))
 	for _, u := range unfitness {
-		pcIDs = append(pcIDs, u.pcID)
+		pcIDs = append(pcIDs, u.rec.pcID)
 	}
 
-	// 批量归档移出人才库
-	archivedCount, err := a.ArchiveTalentCandidates(pcIDs)
-	if err != nil {
-		return 0, err
-	}
+	// 1. 本地批量归档移出人才库
+	_, _ = a.ArchiveTalentCandidates(pcIDs)
 
-	// 写入审计日志与平台联动
+	nowIso := time.Now().UTC().Format(time.RFC3339Nano)
 	nowStr := time.Now().Format("2006-01-02 15:04:05")
+
 	for _, u := range unfitness {
+		// 更新本地候选人阶段为 rejected
+		_, _ = db.Exec(`UPDATE project_candidates SET stage='rejected', updated_at=? WHERE id=?`, nowIso, u.rec.pcID)
+
 		accountID := ""
 		platformJobID := ""
-		var recordID, stage string
-		_ = db.QueryRow(`SELECT platform_account, platform_job_id, platform_application_id, status FROM applications
-			WHERE platform=? AND platform_candidate_id=? AND project_id=?`, u.sourcePlatform, u.platformCandidateID, projectID).Scan(&accountID, &platformJobID, &recordID, &stage)
+		var recordID string
+		_ = db.QueryRow(`SELECT platform_account, platform_job_id, platform_application_id FROM applications
+			WHERE platform=? AND (candidate_id=? OR platform_candidate_id=?) AND project_id=?`,
+			u.rec.platform, u.rec.candidateID, u.rec.platformCandidateID, projectID).Scan(&accountID, &platformJobID, &recordID)
 
-		receipt := "人才库一键筛选识别不符合硬性条件已移入淘汰归档"
+		if recordID != "" {
+			_, _ = db.Exec(`UPDATE applications SET status='unfit_archived', updated_at=? WHERE platform=? AND platform_application_id=?`,
+				nowIso, u.rec.platform, recordID)
+		}
+
+		receipt := "已移入本地淘汰归档"
+		platformSuccess := false
+
+		// 2. 联动 51job 平台点击不合适
+		if (criteria.AutoRejectPlatform || criteria.ComplianceConfirmed) && u.rec.platform == "51job" && accountID != "" && platformJobID != "" && recordID != "" {
+			platformReason := "其他原因"
+			switch u.ruleCode {
+			case "EDU_BELOW_MIN":
+				platformReason = "学历不匹配"
+			case "EXP_BELOW_MIN":
+				platformReason = "工作年限不匹配"
+			case "AGE_MISMATCH":
+				platformReason = "其他原因"
+			case "SALARY_MISMATCH":
+				platformReason = "其他原因"
+			case "INTENT_CITY_MISMATCH":
+				platformReason = "工作地点不匹配"
+			}
+
+			rejectOut, rejectErr := runTalentManagementAdapter(30*time.Second, "--mode", "reject", "--job-id", platformJobID,
+				"--candidate-id", u.rec.platformCandidateID, "--record-id", recordID, "--reason-label", platformReason)
+			if rejectErr == nil {
+				platformSuccess = true
+				result.PlatformRejectedCount++
+				var resp struct {
+					Receipt string `json:"receipt"`
+				}
+				_ = json.Unmarshal(rejectOut, &resp)
+				receipt = resp.Receipt
+				if receipt == "" {
+					receipt = "已在 51job 标记不合适（" + platformReason + "）"
+				}
+			} else {
+				receipt = "本地已淘汰；51job 平台点击未完成: " + rejectErr.Error()
+			}
+		}
+
+		// 3. 记录淘汰审计日志
 		auditID := recruitmentID("tmaudit")
+		actionStatus := "archived"
+		if platformSuccess {
+			actionStatus = "rejected"
+		}
 		_, _ = db.Exec(`INSERT INTO talent_management_audit_logs
 			(id, project_id, platform, platform_account, platform_job_id, candidate_id, record_id, candidate_name, rule_code, reason_label, evidence, platform_receipt, action_status, created_at)
 			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-			auditID, projectID, u.sourcePlatform, accountID, platformJobID, u.candidateID, recordID, u.name, "EDU_BELOW_MIN", u.reasonLabel, u.evidence, receipt, "archived", nowStr)
+			auditID, projectID, u.rec.platform, accountID, platformJobID, u.rec.candidateID, recordID, u.rec.name, u.ruleCode, u.reasonLabel, u.evidence, receipt, actionStatus, nowStr)
 
-		// 更新 applications 状态
-		if recordID != "" {
-			_, _ = db.Exec(`UPDATE applications SET status='unfit_archived', updated_at=? WHERE platform=? AND platform_application_id=?`,
-				time.Now().UTC().Format(time.RFC3339Nano), u.sourcePlatform, recordID)
-		}
-
-		// 若已授权合规确认且属于待处理状态，联动平台执行淘汰
-		if criteria.ComplianceConfirmed && u.sourcePlatform == "51job" && accountID != "" && platformJobID != "" && recordID != "" && (stage == "待处理" || stage == "") {
-			go func(acc, pJob, cId, rId, reason string) {
-				_, _ = a.ExecuteStrictRejectCandidate(acc, pJob, cId, rId, reason)
-			}(accountID, platformJobID, u.platformCandidateID, recordID, u.reasonLabel)
-		}
+		result.Details = append(result.Details, fmt.Sprintf("%s: %s (%s)", u.rec.name, u.reasonLabel, receipt))
 	}
 
-	return archivedCount, nil
+	return result, nil
+}
+
+// OneClickFilterTalentPool 兼容旧接口
+func (a *App) OneClickFilterTalentPool(projectID string) (int, error) {
+	criteria, err := a.GetTalentManagementStrictCriteria(projectID)
+	if err != nil || criteria == nil {
+		return 0, fmt.Errorf("未能获取到职位硬性条件")
+	}
+	res, err := a.OneClickFilterTalentPoolWithConfig(projectID, *criteria, false)
+	if err != nil {
+		return 0, err
+	}
+	return res.UnfitCount, nil
 }

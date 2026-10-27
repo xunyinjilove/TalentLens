@@ -101,6 +101,52 @@
             </el-col>
           </el-row>
 
+          <el-row :gutter="16">
+            <el-col :span="12">
+              <el-form-item label="年龄区间要求（岁）">
+                <div style="display: flex; align-items: center; gap: 8px">
+                  <el-input-number v-model="strictCriteria.minAge" :min="0" :max="80" placeholder="最小" style="width: 48%" />
+                  <span style="color: #94a3b8">至</span>
+                  <el-input-number v-model="strictCriteria.maxAge" :min="0" :max="80" placeholder="最大" style="width: 48%" />
+                </div>
+              </el-form-item>
+            </el-col>
+            <el-col :span="12">
+              <el-form-item label="期望薪资上限（千元/月）">
+                <el-input-number v-model="strictCriteria.maxExpectedSalary" :min="0" :max="200" placeholder="如 15 代表 15k/月，0 为不限" style="width: 100%" />
+              </el-form-item>
+            </el-col>
+          </el-row>
+
+          <el-row :gutter="16">
+            <el-col :span="12">
+              <el-form-item label="性别要求">
+                <el-select v-model="strictCriteria.gender" style="width: 100%" placeholder="性别要求">
+                  <el-option label="不限" value="" />
+                  <el-option label="仅限男性" value="男" />
+                  <el-option label="仅限女性" value="女" />
+                </el-select>
+              </el-form-item>
+            </el-col>
+            <el-col :span="12">
+              <el-form-item label="求职状态限制">
+                <el-select v-model="strictCriteria.jobSeekingStatus" style="width: 100%" placeholder="求职状态">
+                  <el-option label="不限" value="" />
+                  <el-option label="仅离职（随时到岗）" value="离职" />
+                  <el-option label="在职（考虑机会）" value="在职" />
+                </el-select>
+              </el-form-item>
+            </el-col>
+          </el-row>
+
+          <el-form-item label="专业背景关键词匹配（满足其一即可通过）">
+            <el-input
+              v-model="strictCriteria.majorKeywords"
+              placeholder="如：医学, 药学, 市场营销, 生物制药（逗号分隔，留空表示不限专业）"
+              clearable
+            />
+          </el-form-item>
+
           <el-form-item label="工作城市意向限制">
             <div style="display: flex; align-items: center; gap: 12px; width: 100%">
               <el-checkbox v-model="strictCriteria.rejectNonLocalWillingness">
@@ -114,7 +160,18 @@
             </div>
           </el-form-item>
 
-          <el-form-item style="margin-top: 24px">
+          <el-form-item>
+            <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 6px; padding: 12px 16px; width: 100%">
+              <el-checkbox v-model="strictCriteria.autoRejectPlatform">
+                <span style="font-weight: 500; color: #1e293b">联动 51job 网页端自动标记【不合适】</span>
+                <span style="font-size: 12px; color: #64748b; display: block; margin-top: 2px">
+                  对来源于 51job 的候选人，在识别为不符合硬性条件时，自动在 51job 企业后台点击标记不合适并提交淘汰理由。
+                </span>
+              </el-checkbox>
+            </div>
+          </el-form-item>
+
+          <el-form-item style="margin-top: 16px">
             <div style="background: #fef2f2; border: 1px solid #fee2e2; border-radius: 6px; padding: 12px 16px; width: 100%">
               <el-checkbox v-model="strictCriteria.complianceConfirmed">
                 <span style="font-weight: 600; color: #991b1b">HR 合规授权确认</span>
@@ -137,7 +194,10 @@
           <span style="font-size: 12px; color: #64748b">
             自动淘汰人选不进入常规人才库列表，全量留存身份、规则、证据与平台回执备查。
           </span>
-          <el-button size="small" :loading="loadingAudit" @click="loadAuditLogs">刷新记录</el-button>
+          <div style="display: flex; gap: 8px">
+            <el-button size="small" type="danger" plain :disabled="!auditLogs.length" @click="confirmClearAuditLogs">清空审计记录</el-button>
+            <el-button size="small" :loading="loadingAudit" @click="loadAuditLogs">刷新记录</el-button>
+          </div>
         </div>
 
         <el-table :data="auditLogs" size="small" max-height="360" empty-text="暂无淘汰审计记录">
@@ -169,7 +229,7 @@
 
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 
 const props = defineProps<{ modelValue: boolean; projects: any[]; defaultProjectId?: string }>()
 const emit = defineEmits<{ 'update:modelValue': [value: boolean]; completed: [] }>()
@@ -199,9 +259,16 @@ const strictCriteria = ref({
   projectId: '',
   minEducation: '',
   minWorkYears: 0,
+  minAge: 0,
+  maxAge: 0,
+  maxExpectedSalary: 0,
+  gender: '',
+  jobSeekingStatus: '',
+  majorKeywords: '',
   rejectNonLocalWillingness: false,
   targetCity: '',
   complianceConfirmed: false,
+  autoRejectPlatform: true,
   updatedAt: ''
 })
 
@@ -319,7 +386,39 @@ async function loadCriteria() {
   try {
     const api: any = await import('../../wailsjs/go/main/App')
     const c = await api.GetTalentManagementStrictCriteria(projectId.value)
-    if (c) strictCriteria.value = c
+    if (c) {
+      strictCriteria.value = {
+        projectId: projectId.value,
+        minEducation: c.minEducation || '',
+        minWorkYears: c.minWorkYears || 0,
+        minAge: c.minAge || 0,
+        maxAge: c.maxAge || 0,
+        maxExpectedSalary: c.maxExpectedSalary || 0,
+        gender: c.gender || '',
+        jobSeekingStatus: c.jobSeekingStatus || '',
+        majorKeywords: c.majorKeywords || '',
+        rejectNonLocalWillingness: Boolean(c.rejectNonLocalWillingness),
+        targetCity: c.targetCity || '',
+        complianceConfirmed: Boolean(c.complianceConfirmed),
+        autoRejectPlatform: c.autoRejectPlatform !== false,
+        updatedAt: c.updatedAt || ''
+      }
+    }
+  } catch (e) {}
+}
+
+async function confirmClearAuditLogs() {
+  if (!projectId.value) return
+  try {
+    await ElMessageBox.confirm('确定要清空本岗位的全部淘汰审计记录吗？清空后记录不可恢复。', '清空确认', {
+      confirmButtonText: '确定清空',
+      cancelButtonText: '取消',
+      type: 'warning'
+    })
+    const api: any = await import('../../wailsjs/go/main/App')
+    await api.ClearTalentManagementAuditLogs(projectId.value)
+    ElMessage.success('已清空本岗位的淘汰审计记录')
+    await loadAuditLogs()
   } catch (e) {}
 }
 
