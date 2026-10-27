@@ -26,6 +26,11 @@
       </div>
     </Transition>
 
+    <el-alert v-if="resumeStore.loadError || routeResumeError" type="warning" :closable="false" show-icon
+      style="margin: 8px 20px" :title="resumeStore.loadError || routeResumeError">
+      <el-button size="small" @click="retryAssessmentLoad">重新加载测评</el-button>
+    </el-alert>
+
     <main class="app-main">
       <!-- 左侧面板 -->
       <aside
@@ -629,7 +634,12 @@
               <!-- 状态提示 -->
               <div v-else-if="resumeStore.selectedResume.status === 'pending'" class="status-hint pending">
                 <el-icon><Clock /></el-icon>
-                <span>{{ $t('analysis.pendingHint') }}</span>
+                <span>这份简历待分析。点击下方按钮使用当前配置的大模型生成测评。</span>
+                <el-button size="small" type="primary" :disabled="resumeStore.isAnalyzing" @click="handleStartAnalysis">开始分析</el-button>
+              </div>
+              <div v-else-if="resumeStore.selectedResume.status === 'pending_document'" class="status-hint pending">
+                <el-icon><Clock /></el-icon>
+                <span>资料待补全：{{ resumeStore.selectedResume.errorMessage || '完整简历或附件尚未取得，暂不分析。' }}</span>
               </div>
               <div v-else-if="resumeStore.selectedResume.status === 'analyzing'" class="status-hint analyzing">
                 <el-icon class="spin"><Loading /></el-icon>
@@ -1000,6 +1010,7 @@ import { getCandidateSurname } from '../utils/candidate'
 const { t } = useI18n()
 const router = useRouter()
 const route = useRoute()
+const routeResumeError = ref('')
 const resumeStore = useResumeStore()
 const projectStore = useProjectStore()
 
@@ -2388,17 +2399,26 @@ onMounted(async () => {
 
 function selectTargetResumeFromRoute() {
   const targetId = String(route.query.resume || '').trim()
+  routeResumeError.value = ''
   if (targetId) {
-    const found = resumeStore.resumes.find(r => r.id === targetId || r.fileName.includes(targetId))
+    const found = resumeStore.resumes.find(r => r.id === targetId)
     if (found) {
       resumeStore.selectResume(found.id)
       rightTab.value = 'detail'
       return
     }
+    routeResumeError.value = '这份简历未出现在当前职位测评列表，请核对候选人是否仍在人才库中。'
+    return
   }
   if (!resumeStore.selectedId && resumeStore.resumes.length > 0) {
     resumeStore.selectResume(resumeStore.resumes[0].id)
   }
+}
+
+async function retryAssessmentLoad() {
+  if (!projectId.value) return
+  await resumeStore.loadProjectResumes(projectId.value)
+  selectTargetResumeFromRoute()
 }
 
 watch(() => route.query.resume, (newResumeId) => {

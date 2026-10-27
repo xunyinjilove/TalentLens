@@ -46,7 +46,7 @@ export interface Resume {
   activity_label?: string // 平台原始活跃标签；缺失表示未披露
   contact_status?: 'greeted' | 'resume_requested' | 'resume_received'
   contact_updated_at?: string
-  status: 'pending' | 'analyzing' | 'done' | 'error'
+  status: 'pending' | 'pending_document' | 'analyzing' | 'done' | 'error'
   score?: number
   initial_score?: number
   final_score?: number
@@ -182,6 +182,8 @@ export const useResumeStore = defineStore('resume', () => {
     return resumes.value.filter(r => r.status === 'pending').length
   })
 
+  const loadError = ref('')
+
   const failedCount = computed(() => resumes.value.filter(r => r.status === 'error').length)
   const analysisReadyCount = computed(() => pendingCount.value + failedCount.value)
 
@@ -192,9 +194,12 @@ export const useResumeStore = defineStore('resume', () => {
   // 加载项目下的简历
   async function loadProjectResumes(projectId: string) {
     await loadWailsBindings()
-    if (!isWailsEnv || !WailsApp) return
+    if (!isWailsEnv || !WailsApp) {
+      loadError.value = '无法连接本地简历服务，请重启软件后重试'
+      return
+    }
     try {
-      const result = await WailsApp.GetProjectResumes(projectId)
+      const result = await WailsApp.GetProjectAssessmentResumes(projectId)
       if (result == null || Array.isArray(result)) {
         resumes.value = (result || []).map((r: any) => ({
           id: r.id,
@@ -213,6 +218,7 @@ export const useResumeStore = defineStore('resume', () => {
           contact_status: r.contact_status || undefined,
           contact_updated_at: r.contact_updated_at || undefined,
           status: r.status as Resume['status'],
+          errorMessage: r.error_message || '',
           score: r.score,
           analysis: r.analysis ? (() => {
             const a = r.analysis
@@ -299,10 +305,14 @@ export const useResumeStore = defineStore('resume', () => {
           createdAt: r.created_at
         }))
         if (!resumes.value.some(r => r.id === selectedId.value)) selectedId.value = null
+        loadError.value = ''
         devLog('info', `加载项目简历: ${resumes.value.length} 份`)
       }
     } catch (err: any) {
-      devLog('error', `加载项目简历失败: ${err.message || err}`)
+      resumes.value = []
+      selectedId.value = null
+      loadError.value = `加载项目简历失败：${err?.message || err}`
+      devLog('error', loadError.value)
     }
   }
 
@@ -793,6 +803,7 @@ export const useResumeStore = defineStore('resume', () => {
   return {
     // 状态
     resumes,
+    loadError,
     isAnalyzing,
     selectedId,
     batchProgress,

@@ -977,28 +977,42 @@ func (a *App) SetTalentManagementStrictCriteria(criteria TalentManagementStrictC
 		LEFT JOIN project_candidate_resumes pcr ON pcr.project_candidate_id = pc.id
 		LEFT JOIN resume_versions rv ON rv.id = pcr.resume_version_id
 		WHERE pc.project_id = ? AND pc.archived_at <> ''`, criteria.ProjectID)
-	if err == nil {
-		nowIso := time.Now().UTC().Format(time.RFC3339Nano)
-		for rows.Next() {
-			var pcID, content, rawJson string
-			if rows.Scan(&pcID, &content, &rawJson) == nil {
-				resumeContent := content
-				if rawJson != "" {
-					var r Resume
-					if json.Unmarshal([]byte(rawJson), &r) == nil && strings.TrimSpace(r.Content) != "" {
-						resumeContent = r.Content
-					}
-				}
-				if strings.TrimSpace(resumeContent) != "" {
-					decision, _, _, _ := EvaluateCandidateStrictCriteria(resumeContent, criteria)
-					if decision != "UNFIT" {
-						// 恢复到人才库活跃状态，同时将 stage 从 rejected 恢复为 new
-						_, _ = db.Exec(`UPDATE project_candidates SET archived_at='', stage='new', updated_at=? WHERE id=?`, nowIso, pcID)
-					}
-				}
+	if err != nil {
+		return fmt.Errorf("条件已写入，但核对归档候选人失败: %w", err)
+	}
+	var restoreIDs []string
+	for rows.Next() {
+		var pcID, content, rawJSON string
+		if err := rows.Scan(&pcID, &content, &rawJSON); err != nil {
+			rows.Close()
+			return fmt.Errorf("条件已写入，但读取归档候选人失败: %w", err)
+		}
+		resumeContent := content
+		if rawJSON != "" {
+			var r Resume
+			if json.Unmarshal([]byte(rawJSON), &r) == nil && strings.TrimSpace(r.Content) != "" {
+				resumeContent = r.Content
 			}
 		}
+		if strings.TrimSpace(resumeContent) != "" {
+			decision, _, _, _ := EvaluateCandidateStrictCriteria(resumeContent, criteria)
+			if decision != "UNFIT" {
+				restoreIDs = append(restoreIDs, pcID)
+			}
+		}
+	}
+	if err := rows.Err(); err != nil {
 		rows.Close()
+		return fmt.Errorf("条件已写入，但扫描归档候选人失败: %w", err)
+	}
+	if err := rows.Close(); err != nil {
+		return fmt.Errorf("条件已写入，但关闭归档查询失败: %w", err)
+	}
+	nowISO := time.Now().UTC().Format(time.RFC3339Nano)
+	for _, pcID := range restoreIDs {
+		if _, err := db.Exec(`UPDATE project_candidates SET archived_at='', stage='new', updated_at=? WHERE id=?`, nowISO, pcID); err != nil {
+			return fmt.Errorf("条件已写入，但恢复候选人失败: %w", err)
+		}
 	}
 
 	return nil

@@ -19,6 +19,9 @@
 
         <el-alert v-if="!jobs.length && !loading" type="warning" :closable="false" show-icon style="margin-bottom: 16px"
           title="未检测到已登录的 51job 企业职位。请点击下方【打开 51job 浏览器】登录企业账号，登录完成后点击【重新读取职位】即可。" />
+        <el-alert v-if="catalogStale && jobs.length" type="warning" :closable="false" show-icon style="margin-bottom: 16px"
+          title="当前显示上次读取的职位，尚未核实当前登录账号；重新读取成功前不能导入或启动同步。" />
+        <p v-if="catalogStatus" class="catalog-status" :class="{ stale: catalogStale }">{{ catalogStatus }}</p>
 
         <el-form label-position="top">
           <el-row :gutter="16">
@@ -66,7 +69,7 @@
             </div>
             <div style="margin-top: 10px; display: flex; align-items: center; justify-content: space-between; border-top: 1px dashed #cbd5e1; padding-top: 8px">
               <div style="display: flex; align-items: center; gap: 8px">
-                <el-switch v-model="autoSyncEnabled" @change="toggleAutoSync" :disabled="!jobId || running" />
+                <el-switch v-model="autoSyncEnabled" @change="toggleAutoSync" :disabled="!jobId || running || catalogStale" />
                 <span style="font-size: 12px; color: #334155">软件运行且当前账号登录时，每小时自动检查新增名单</span>
               </div>
               <el-button link type="info" size="small" :disabled="running" @click="resetTask">重置断点</el-button>
@@ -199,6 +202,7 @@
               保存岗位硬性条件
             </el-button>
             <span v-if="!projectId" style="font-size: 12px; color: #f59e0b">请先选择上方职位专属库后保存</span>
+            <span v-if="saveStatus" class="catalog-status">{{ saveStatus }}</span>
           </div>
         </el-form>
       </el-tab-pane>
@@ -239,10 +243,10 @@
         <div style="display: flex; gap: 8px">
           <el-button :disabled="running" @click="visible = false">关闭</el-button>
           <el-button v-if="running" @click="stopRequested = true">本页结束后暂停</el-button>
-          <el-button v-if="!running && activeTab === 'sync'" :disabled="!jobId || !projectId" @click="runSingleBatch">
+          <el-button v-if="!running && activeTab === 'sync'" :disabled="!jobId || !projectId || catalogStale" @click="runSingleBatch">
             执行单批 (50人)
           </el-button>
-          <el-button v-if="activeTab === 'sync'" type="primary" :loading="running" :disabled="!jobId || !projectId || !statuses.length"
+          <el-button v-if="activeTab === 'sync'" type="primary" :loading="running" :disabled="!jobId || !projectId || !statuses.length || catalogStale"
             @click="start">连续导入并同步</el-button>
           <el-button v-if="activeTab === 'criteria'" type="primary" :disabled="!projectId" :loading="savingCriteria"
             @click="saveCriteria">保存硬性条件</el-button>
@@ -269,6 +273,10 @@ const projectId = ref('')
 const selectedJob = computed(() => jobs.value.find(j => j.jobId === jobId.value))
 const statuses = ref<number[]>([1, 2, 3, 4])
 const loading = ref(false)
+const catalogStale = ref(true)
+const catalogStatus = ref('')
+const saveStatus = ref('')
+let loadGeneration = 0
 const running = ref(false)
 const stopRequested = ref(false)
 const progress = ref('')
@@ -325,28 +333,63 @@ const syncTaskTagType = computed(() => {
 })
 
 async function load() {
+  const generation = ++loadGeneration
   loading.value = true
+  catalogStale.value = true
+  catalogStatus.value = '正在核验 51job 登录账号和职位…'
   try {
     const api: any = await import('../../wailsjs/go/main/App')
-    const catalog = await api.Get51JobTalentManagementCatalog()
-    mappings.value = await api.ListPlatformJobMappings() || []
-    jobs.value = catalog.jobs || []
-    accountScope.value = catalog.accountScope || ''
-    if (!jobs.value.some(job => job.jobId === jobId.value)) {
-      jobId.value = jobs.value[0]?.jobId || ''
-    }
-    syncMappedProject()
-    await loadSyncTask()
-    await loadCriteria()
-    await loadAuditLogs()
-    if (jobs.value.length) {
-      ElMessage.success(`成功读取 ${jobs.value.length} 个 51job 在线职位`)
-    }
+    const fresh = await withTimeout((async () => {
+      const catalog = await api.Get51JobTalentManagementCatalog()
+      const nextMappings = await api.ListPlatformJobMappings() || []
+      const nextJobs = catalog.jobs || []
+      const nextJobID = nextJobs.some((job: any) => job.jobId === jobId.value) ? jobId.value : (nextJobs[0]?.jobId || '')
+      const mapping = nextMappings.find((item: any) => item.platform === '51job' &&
+        item.platformAccount === catalog.accountScope && item.platformJobId === nextJobID)
+      const nextProjectID = mapping?.projectId || props.defaultProjectId || ''
+      const [task, criteria, audit] = await Promise.all([
+        nextJobID ? api.GetTalentManagementSyncTask('51job', catalog.accountScope, nextJobID) : Promise.resolve(null),
+        nextProjectID ? api.GetTalentManagementStrictCriteria(nextProjectID) : Promise.resolve(null),
+        nextProjectID ? api.ListTalentManagementAuditLogs(nextProjectID) : Promise.resolve([])
+      ])
+      return { catalog, nextMappings, nextJobs, nextJobID, nextProjectID, task, criteria, audit }
+    })(), 25000, '重新读取职位')
+    if (generation !== loadGeneration) return
+    mappings.value = fresh.nextMappings
+    jobs.value = fresh.nextJobs
+    accountScope.value = fresh.catalog.accountScope || ''
+    jobId.value = fresh.nextJobID
+    projectId.value = fresh.nextProjectID
+    syncTask.value = fresh.task
+    autoSyncEnabled.value = Boolean(fresh.task?.autoSyncEnabled)
+    if (fresh.criteria) applyCriteria(fresh.criteria, fresh.nextProjectID)
+    auditLogs.value = fresh.audit || []
+    catalogStale.value = false
+    catalogStatus.value = `已核验 ${jobs.value.length} 个在线职位 · ${new Date().toLocaleTimeString('zh-CN', { hour12: false })}`
+    ElMessage.success(`成功读取 ${jobs.value.length} 个 51job 在线职位`)
   } catch (error: any) {
-    ElMessage.error(error?.message || String(error))
+    if (generation !== loadGeneration) return
+    catalogStatus.value = classifyCatalogError(error)
+    ElMessage.error(catalogStatus.value)
   } finally {
-    loading.value = false
+    if (generation === loadGeneration) loading.value = false
   }
+}
+
+function withTimeout<T>(promise: Promise<T>, timeoutMS: number, action: string): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const timer = window.setTimeout(() => reject(new Error(`${action}超过 ${Math.round(timeoutMS / 1000)} 秒，请检查浏览器登录或本地数据服务`)), timeoutMS)
+    promise.then(value => { window.clearTimeout(timer); resolve(value) }, error => { window.clearTimeout(timer); reject(error) })
+  })
+}
+
+function classifyCatalogError(error: any): string {
+  const message = String(error?.message || error || '')
+  if (/超时|timeout|超过/.test(message)) return `读取超时：${message}`
+  if (/登录|账号|企业身份/.test(message)) return `51job 登录状态待核实：${message}`
+  if (/浏览器|9503|连接/.test(message)) return `51job 专用浏览器未就绪：${message}`
+  if (/database|sqlite|locked|busy|数据库/.test(message)) return `本地数据库繁忙：${message}`
+  return `职位读取失败：${message || '平台页面尚未加载完成'}`
 }
 
 function syncMappedProject() {
@@ -414,25 +457,34 @@ async function loadCriteria() {
   try {
     const api: any = await import('../../wailsjs/go/main/App')
     const c = await api.GetTalentManagementStrictCriteria(projectId.value)
-    if (c) {
-      strictCriteria.value = {
-        projectId: projectId.value,
-        minEducation: c.minEducation || '',
-        minWorkYears: c.minWorkYears || 0,
-        minAge: c.minAge || 0,
-        maxAge: c.maxAge || 0,
-        maxExpectedSalary: c.maxExpectedSalary || 0,
-        gender: c.gender || '',
-        jobSeekingStatus: c.jobSeekingStatus || '',
-        majorKeywords: c.majorKeywords || '',
-        rejectNonLocalWillingness: Boolean(c.rejectNonLocalWillingness),
-        targetCity: c.targetCity || '',
-        complianceConfirmed: Boolean(c.complianceConfirmed),
-        autoRejectPlatform: c.autoRejectPlatform !== false,
-        updatedAt: c.updatedAt || ''
-      }
-    }
+    if (c) applyCriteria(c, projectId.value)
   } catch (e) {}
+}
+
+function applyCriteria(c: any, selectedProjectID: string) {
+  strictCriteria.value = {
+    projectId: selectedProjectID,
+    minEducation: c.minEducation || '',
+    minWorkYears: c.minWorkYears || 0,
+    minAge: c.minAge || 0,
+    maxAge: c.maxAge || 0,
+    maxExpectedSalary: c.maxExpectedSalary || 0,
+    gender: c.gender || '',
+    jobSeekingStatus: c.jobSeekingStatus || '',
+    majorKeywords: c.majorKeywords || '',
+    rejectNonLocalWillingness: Boolean(c.rejectNonLocalWillingness),
+    targetCity: c.targetCity || '',
+    complianceConfirmed: Boolean(c.complianceConfirmed),
+    autoRejectPlatform: c.autoRejectPlatform !== false,
+    updatedAt: c.updatedAt || ''
+  }
+}
+
+function criteriaMatches(saved: any, requested: any): boolean {
+  return ['minEducation', 'minWorkYears', 'minAge', 'maxAge', 'maxExpectedSalary', 'gender',
+    'jobSeekingStatus', 'majorKeywords', 'rejectNonLocalWillingness', 'targetCity',
+    'complianceConfirmed', 'autoRejectPlatform'].every(key =>
+      String(saved?.[key] ?? '') === String(requested?.[key] ?? ''))
 }
 
 async function confirmClearAuditLogs() {
@@ -456,13 +508,20 @@ async function saveCriteria() {
     return
   }
   savingCriteria.value = true
+  saveStatus.value = '正在保存…'
+  const requested = { ...strictCriteria.value, projectId: projectId.value }
   try {
     const api: any = await import('../../wailsjs/go/main/App')
-    strictCriteria.value.projectId = projectId.value
-    await api.SetTalentManagementStrictCriteria(strictCriteria.value)
-    ElMessage.success('岗位专属硬性条件已成功保存！')
+    await withTimeout(api.SetTalentManagementStrictCriteria(requested), 10000, '保存硬性条件')
+    const saved = await withTimeout(api.GetTalentManagementStrictCriteria(projectId.value), 5000, '回读硬性条件')
+    if (saved) {
+      applyCriteria(saved, projectId.value)
+      saveStatus.value = `已保存 · ${saved.updatedAt || new Date().toLocaleString('zh-CN')}`
+      ElMessage.success('岗位专属硬性条件已成功保存并同步')
+    }
   } catch (e: any) {
-    ElMessage.error(e?.message || '保存硬性条件失败')
+    saveStatus.value = `保存异常：${e?.message || '本地数据服务未响应'}`
+    ElMessage.error(saveStatus.value)
   } finally {
     savingCriteria.value = false
   }

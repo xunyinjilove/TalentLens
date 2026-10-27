@@ -43,13 +43,13 @@
 
         <el-button
           class="analyze-all-btn"
-          :disabled="filtered.length === 0 || analyzingAll"
+          :disabled="!selectedProjectId || projectCandidateCount === 0 || analyzingAll"
           :loading="analyzingAll"
           @click="triggerAnalyzeAll()"
-          :title="filtered.length > 0 ? `一键批量分析当前检索到的 ${filtered.length} 位候选人简历` : '当前列表暂无可分析的候选人'"
+          :title="selectedProjectId ? `重新分析当前职位的 ${projectCandidateCount} 位有效候选人` : '请先选择一个职位专属分库'"
         >
           <el-icon v-if="!analyzingAll"><Cpu /></el-icon>
-          <span>{{ analyzingAll ? `分析中 (${analyzedCount}/${totalToAnalyze})` : `一键全部分析${filtered.length > 0 ? ` (${filtered.length})` : ''}` }}</span>
+          <span>{{ analyzingAll ? `分析中 (${analyzedCount}/${totalToAnalyze})` : `一键全部分析${projectCandidateCount > 0 ? ` (${projectCandidateCount})` : ''}` }}</span>
         </el-button>
 
         <el-dropdown trigger="click" @command="handleLibraryAction">
@@ -89,6 +89,8 @@
         </el-button>
       </div>
     </header>
+    <el-alert v-if="analysisRunSummary" :title="analysisRunSummary" :type="analysisRunError ? 'warning' : 'info'"
+      show-icon closable style="margin: 8px 0" @close="analysisRunSummary = ''" />
 
     <!-- 主体分栏：左侧职位分库导航 + 右侧候选人看板 -->
     <div class="talent-workbench-layout">
@@ -880,7 +882,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref, watch } from 'vue'
+import { computed, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import {
   Refresh,
@@ -913,6 +915,7 @@ import TalentManagementImportDialog from '../components/TalentManagementImportDi
 import OneClickFilterDialog from '../components/OneClickFilterDialog.vue'
 import AIConfigGuide from '../components/AIConfigGuide.vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import { EventsOn, EventsOff } from '../../wailsjs/runtime/runtime'
 import { getCandidateSurname } from '../utils/candidate'
 
 interface PendingApplication { id: string; applicationId: string; candidateName: string; platformJobId: string }
@@ -1080,6 +1083,12 @@ const filteringStrict = ref(false)
 const analyzingAll = ref(false)
 const analyzedCount = ref(0)
 const totalToAnalyze = ref(0)
+const activeReanalysisRunId = ref('')
+let reanalysisPollTimer: number | undefined
+const analysisRunSummary = ref('')
+const analysisRunError = ref(false)
+const projectCandidateCount = computed(() => selectedProjectId.value
+  ? recruitment.candidates.filter(c => c.projectId === selectedProjectId.value).length : 0)
 
 const unanalyzedCandidates = computed(() => {
   return (recruitment.candidates || []).filter(c => {
@@ -1100,59 +1109,69 @@ function triggerOneClickFilter() {
 }
 
 async function triggerAnalyzeAll() {
-  const targets = filtered.value
-  if (!targets.length) {
-    ElMessage.info('当前筛选检索列表暂无可分析的候选人')
+  if (!selectedProjectId.value) {
+    ElMessage.warning('请先在左侧选择一个职位专属分库')
     return
   }
-
+  if (!projectCandidateCount.value) {
+    ElMessage.info('当前职位没有有效候选人')
+    return
+  }
   try {
     const api: any = await import('../../wailsjs/go/main/App')
-    const cfg = await api.GetConfig()
-    if (!cfg?.ai?.api_key || cfg.ai.api_key.trim().length < 10) {
-      showAIConfigGuide.value = true
-      return
-    }
-
-    // 检查是否有待分析、解析异常、或未评分候选人
-    const unanalyzed = targets.filter(c => {
-      const status = c.analysisStatus
-      return status === 'pending' || status === 'pending_document' || status === 'error' || (!c.abilityScore && status !== 'done') || c.radarStale
-    })
-
-    let targetsToAnalyze: TalentCandidate[] = unanalyzed
-    if (unanalyzed.length === 0) {
-      try {
-        await ElMessageBox.confirm(
-          `当前检索到的 ${targets.length} 位候选人均已完成评估。是否确认对这 ${targets.length} 份简历全部重新进行 AI 深度分析？`,
-          '全部重新分析确认',
-          {
-            confirmButtonText: '全部重新分析',
-            cancelButtonText: '取消',
-            type: 'warning'
-          }
-        )
-        targetsToAnalyze = targets
-      } catch {
-        return
-      }
-    }
-
-    const resumeIDs = targetsToAnalyze.map(c => c.resumeId || c.projectCandidateId).filter(Boolean)
-    if (!resumeIDs.length) {
-      ElMessage.warning('候选人未关联有效简历文件，无法进行分析')
-      return
-    }
-
+    const result = await api.StartProjectBatchReanalysis(selectedProjectId.value)
     analyzingAll.value = true
-    totalToAnalyze.value = resumeIDs.length
+    activeReanalysisRunId.value = result.runId
+    totalToAnalyze.value = result.total
     analyzedCount.value = 0
-
-    ElMessage.success(`已开始对检索到的 ${resumeIDs.length} 位候选人启动 AI 深度分析`)
-    await api.StartBatchAnalysis(resumeIDs, cfg.ai, null)
+    const skipped = Object.entries(result.skipped || {}).map(([reason, count]) => `${reason} ${count} 人`).join('；')
+    analysisRunError.value = Boolean(skipped)
+    analysisRunSummary.value = `${result.resumed ? '续跑本次未成功的' : '已启动当前职位全量重算：'} ${result.total} 份` +
+      (skipped ? `；跳过：${skipped}` : '')
+    ElMessage.success(`已启动真实 AI 分析：${result.total} 份`)
+    if (reanalysisPollTimer) window.clearInterval(reanalysisPollTimer)
+    reanalysisPollTimer = window.setInterval(() => { void pollProjectReanalysis() }, 1500)
+    void pollProjectReanalysis()
   } catch (err: any) {
-    ElMessage.error(err?.message || '启动分析失败')
+    const message = err?.message || '启动分析失败'
+    if (/AI 未配置|API Key|Base URL/.test(message)) showAIConfigGuide.value = true
+    analysisRunError.value = true
+    analysisRunSummary.value = message
+    ElMessage.error(message)
     analyzingAll.value = false
+  }
+}
+
+async function pollProjectReanalysis() {
+  const runId = activeReanalysisRunId.value
+  if (!runId) return
+  try {
+    const api: any = await import('../../wailsjs/go/main/App')
+    const status = await api.GetProjectReanalysisStatus(runId)
+    if (activeReanalysisRunId.value !== runId) return
+    const prevCount = analyzedCount.value
+    const currentCompleted = status.completed || 0
+    analyzedCount.value = currentCompleted
+    if (status.total && status.total > 0) {
+      totalToAnalyze.value = status.total
+    }
+    // 实时检测增量：只要有新简历完成分析，立即局部刷新卡片分数，杜绝界面冻结假死感
+    if (currentCompleted > prevCount) {
+      void refresh()
+    }
+    if (status.status === 'running') return
+    analyzingAll.value = false
+    activeReanalysisRunId.value = ''
+    if (reanalysisPollTimer) window.clearInterval(reanalysisPollTimer)
+    reanalysisPollTimer = undefined
+    analysisRunError.value = status.status !== 'completed'
+    analysisRunSummary.value = status.status === 'completed'
+      ? `当前职位 ${status.completed} 份简历已完成大模型重算。`
+      : `本轮 ${status.completed}/${status.total} 份成功，${status.failed} 份待续跑：${status.lastError || '请检查模型服务'}。旧结果已保留。`
+    await refresh()
+  } catch (error: any) {
+    analysisRunError.value = true
+    analysisRunSummary.value = `读取分析进度失败：${error?.message || error}`
   }
 }
 const importing = ref(false)
@@ -1175,7 +1194,7 @@ function handleLibraryAction(command: string) {
 function navigateToEvaluation(item: TalentCandidate) {
   router.push({
     path: '/project/' + item.projectId,
-    query: { resume: item.resumeId || '' }
+    query: { resume: item.resumeId || item.projectCandidateId }
   })
 }
 
@@ -1721,27 +1740,39 @@ async function retryAnalysis(resumeId: string) {
   }
 }
 
-onMounted(async () => {
+onMounted(() => {
   void projects.loadProjects()
   void refresh()
   void loadInbox()
   void loadDuplicates()
 
   try {
-    const runtime: any = await import('../../wailsjs/runtime/runtime')
-    runtime.EventsOn('batch:progress', (data: any) => {
-      if (data && (!data.projectId || !selectedProjectId.value || data.projectId === selectedProjectId.value)) {
-        analyzedCount.value = data.current || 0
+    EventsOn('project-reanalysis:progress', (data: any) => {
+      if (data?.runId === activeReanalysisRunId.value) {
+        const prevCount = analyzedCount.value
+        analyzedCount.value = data.completed ?? data.current ?? 0
         totalToAnalyze.value = data.total || totalToAnalyze.value
+        if (analyzedCount.value > prevCount) {
+          void refresh()
+        }
+        if (data.error) {
+          analysisRunError.value = true
+          analysisRunSummary.value = `第 ${data.current}/${data.total} 份分析失败：${data.error}；旧测评已保留`
+        }
       }
     })
-    runtime.EventsOn('batch:completed', async (data: any) => {
-      if (data && (!data.projectId || !selectedProjectId.value || data.projectId === selectedProjectId.value)) {
-        analyzingAll.value = false
-        ElMessage.success('简历深度分析完成！')
-        await refresh()
+    EventsOn('project-reanalysis:completed', async (data: any) => {
+      if (data?.runId === activeReanalysisRunId.value) {
+        await pollProjectReanalysis()
       }
     })
+  } catch (e) {}
+})
+onUnmounted(() => {
+  if (reanalysisPollTimer) window.clearInterval(reanalysisPollTimer)
+  try {
+    EventsOff('project-reanalysis:progress')
+    EventsOff('project-reanalysis:completed')
   } catch (e) {}
 })
 </script>
