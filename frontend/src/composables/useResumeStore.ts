@@ -307,6 +307,19 @@ export const useResumeStore = defineStore('resume', () => {
         if (!resumes.value.some(r => r.id === selectedId.value)) selectedId.value = null
         loadError.value = ''
         devLog('info', `加载项目简历: ${resumes.value.length} 份`)
+
+        // 跨模块同步：检测该职位当前是否已有大模型重算分析任务正在运行
+        try {
+          const status = await WailsApp.GetActiveProjectReanalysis(projectId)
+          if (status && status.status === 'running') {
+            isAnalyzing.value = true
+            batchProgress.value = {
+              current: status.completed || 0,
+              total: status.total,
+              currentResumeId: null
+            }
+          }
+        } catch {}
       }
     } catch (err: any) {
       resumes.value = []
@@ -762,8 +775,18 @@ export const useResumeStore = defineStore('resume', () => {
     // 监听批量分析进度（更新全局进度状态）
     const unsub6 = WailsRuntime.EventsOn('batch:progress', (data: any) => {
       devLog('info', `批量进度: ${data.current}/${data.total}`)
+      isAnalyzing.value = true
       batchProgress.value = {
-        current: data.current,
+        current: data.completed ?? data.current,
+        total: data.total,
+        currentResumeId: data.resumeId || null
+      }
+    })
+
+    const unsubReanalysis = WailsRuntime.EventsOn('project-reanalysis:progress', (data: any) => {
+      isAnalyzing.value = true
+      batchProgress.value = {
+        current: data.completed ?? data.current ?? 0,
         total: data.total,
         currentResumeId: data.resumeId || null
       }
@@ -774,16 +797,24 @@ export const useResumeStore = defineStore('resume', () => {
       devLog('info', `批量分析完成, 共 ${data.total} 份`)
       isAnalyzing.value = false
       batchProgress.value = { current: 0, total: 0, currentResumeId: null }
-      const finishedProjectId = batchRunProjectId
+      const finishedProjectId = batchRunProjectId || data?.projectId
       batchRunProjectId = ''
       if (finishedProjectId && resumes.value.some(resume => resume.projectId === finishedProjectId)) void loadProjectResumes(finishedProjectId)
       if (data.failed > 0) ElMessage.warning(`本批 ${data.failed} 份分析失败；原有测评（如有）已保留，请查看日志后重试`)
     })
 
+    const unsubReanalysisDone = WailsRuntime.EventsOn('project-reanalysis:completed', (data: any) => {
+      isAnalyzing.value = false
+      batchProgress.value = { current: 0, total: 0, currentResumeId: null }
+      if (data?.projectId && resumes.value.some(resume => resume.projectId === data.projectId)) {
+        void loadProjectResumes(data.projectId)
+      }
+    })
+
     const unsubContact = WailsRuntime.EventsOn('resume:contact_updated', (data: any) => {
       if (data.projectId && resumes.value.some(resume => resume.projectId === data.projectId)) void loadProjectResumes(data.projectId)
     })
-    eventCleanupFns = [unsubContact, unsub1, unsub2, unsub3, unsub4, unsub5, unsub6, unsub7].filter(fn => typeof fn === 'function')
+    eventCleanupFns = [unsubContact, unsub1, unsub2, unsub3, unsub4, unsub5, unsub6, unsub7, unsubReanalysis, unsubReanalysisDone].filter(fn => typeof fn === 'function')
     console.log('✅ Wails 事件监听已初始化')
   }
 

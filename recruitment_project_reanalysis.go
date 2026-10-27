@@ -59,6 +59,27 @@ func (a *App) GetProjectReanalysisStatus(runID string) (ProjectReanalysisStatus,
 	return result, nil
 }
 
+// GetActiveProjectReanalysis 查询指定职位当前是否正在进行批量大模型重算分析
+func (a *App) GetActiveProjectReanalysis(projectID string) (ProjectReanalysisStatus, error) {
+	result := ProjectReanalysisStatus{ProjectID: projectID}
+	if strings.TrimSpace(projectID) == "" {
+		return result, nil
+	}
+	db, err := a.getRecruitmentDB()
+	if err != nil {
+		return result, err
+	}
+	var runID string
+	err = db.QueryRow(`SELECT id FROM project_reanalysis_runs WHERE project_id=? AND status='running' ORDER BY created_at DESC LIMIT 1`, projectID).Scan(&runID)
+	if err == sql.ErrNoRows {
+		return result, nil
+	}
+	if err != nil {
+		return result, err
+	}
+	return a.GetProjectReanalysisStatus(runID)
+}
+
 // projectReanalysisTargets uses the same active project-candidate links as the
 // talent library. Neither archived people nor incomplete documents are sent
 // to the model.
@@ -139,6 +160,18 @@ func (a *App) StartProjectBatchReanalysis(projectID string) (ProjectReanalysisSt
 	}
 	if a.activeProjects[projectID] {
 		a.analysisMutex.Unlock()
+		db, err := a.getRecruitmentDB()
+		if err == nil {
+			var activeRunID string
+			var activeTotal int
+			_ = db.QueryRow(`SELECT id, total FROM project_reanalysis_runs WHERE project_id=? AND status='running' ORDER BY created_at DESC LIMIT 1`, projectID).Scan(&activeRunID, &activeTotal)
+			if activeRunID != "" {
+				result.RunID = activeRunID
+				result.Total = activeTotal
+				result.Resumed = true
+				return result, nil
+			}
+		}
 		return result, fmt.Errorf("该职位已有分析任务正在运行")
 	}
 	a.activeProjects[projectID] = true
@@ -311,8 +344,11 @@ func (a *App) runProjectReanalysis(db *sql.DB, run ProjectReanalysisStart, targe
 				"error":     errorText,
 			})
 			a.emitEvent("batch:progress", map[string]interface{}{
+				"runId":     run.RunID,
 				"current":   current,
+				"completed": done,
 				"total":     total,
+				"failed":    fail,
 				"resumeId":  resumeID,
 				"projectId": run.ProjectID,
 			})
