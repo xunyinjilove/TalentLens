@@ -363,8 +363,10 @@ export const useResumeStore = defineStore('resume', () => {
       try {
         await WailsApp.DeleteResume(id)
         devLog('info', `后端已删除简历: ${id}`)
+        ElMessage.success('已删除简历')
       } catch (err: any) {
         devLog('error', `后端删除失败: ${err.message || err}`)
+        ElMessage.error(`删除简历失败: ${err.message || err}`)
       }
     }
   }

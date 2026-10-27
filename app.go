@@ -1061,10 +1061,37 @@ func (a *App) GetResumes() []*Resume {
 	return resumes
 }
 
+func (a *App) removeResumeFromAllProjects(resumeID string) {
+	if resumeID == "" {
+		return
+	}
+	projects := a.GetProjects()
+	for _, p := range projects {
+		found := false
+		var newIDs []string
+		for _, rid := range p.ResumeIDs {
+			if rid == resumeID {
+				found = true
+			} else {
+				newIDs = append(newIDs, rid)
+			}
+		}
+		if found {
+			p.ResumeIDs = newIDs
+			p.UpdatedAt = time.Now()
+			a.saveProject(p)
+		}
+	}
+}
+
 func (a *App) DeleteResume(id string) error {
 	_ = a.deleteRecruitmentResume(id)
+	a.removeResumeFromAllProjects(id)
 	path := filepath.Join(a.getDataDir(), "resumes", id+".json")
-	return os.Remove(path)
+	if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	return nil
 }
 
 func (a *App) ReAnalyzeResume(id string) error {
@@ -1844,7 +1871,13 @@ func (a *App) StartProjectAnalysis(projectID string, cfg *AIConfig) {
 		resumes := a.GetProjectResumes(projectID)
 		var pendingIDs []string
 		for _, r := range resumes {
-			if r.Status == "pending" || r.Status == "error" {
+			hasContent := len(strings.TrimSpace(r.Content)) > 0
+			if (r.Status == "pending" || r.Status == "error" || r.Status == "pending_document" || r.Status != "done") && hasContent {
+				if r.Status == "pending_document" {
+					r.Status = "pending"
+					a.saveResume(r)
+					a.syncRecruitmentResume(r)
+				}
 				pendingIDs = append(pendingIDs, r.ID)
 			}
 		}

@@ -314,6 +314,9 @@ async function load() {
     await loadSyncTask()
     await loadCriteria()
     await loadAuditLogs()
+    if (jobs.value.length) {
+      ElMessage.success(`成功读取 ${jobs.value.length} 个 51job 在线职位`)
+    }
   } catch (error: any) {
     ElMessage.error(error?.message || String(error))
   } finally {

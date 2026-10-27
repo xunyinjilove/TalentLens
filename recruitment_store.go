@@ -305,11 +305,15 @@ func (a *App) getRecruitmentDB() (*sql.DB, error) {
 		_ = a.recruitmentDB.Close()
 		a.recruitmentDB = nil
 	}
-	db, err := sql.Open("sqlite", filepath.Join(dir, "recruitment.sqlite"))
+	dsn := fmt.Sprintf("%s?_pragma=busy_timeout(10000)&_pragma=journal_mode(WAL)&_pragma=synchronous(NORMAL)&_pragma=foreign_keys(ON)", filepath.Join(dir, "recruitment.sqlite"))
+	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		return nil, err
 	}
 	db.SetMaxOpenConns(1)
+	_, _ = db.Exec("PRAGMA busy_timeout = 10000;")
+	_, _ = db.Exec("PRAGMA journal_mode = WAL;")
+	_, _ = db.Exec("PRAGMA synchronous = NORMAL;")
 	if _, err = db.Exec("PRAGMA foreign_keys = ON"); err == nil {
 		_, err = db.Exec(recruitmentSchema)
 	}
@@ -602,6 +606,7 @@ func (a *App) deleteRecruitmentResume(resumeID string) error {
 	}
 	defer tx.Rollback()
 
+	now := time.Now().UTC().Format(time.RFC3339Nano)
 	versionID := "legacy_resume_" + resumeID
 	execs := []struct {
 		query string
@@ -609,6 +614,7 @@ func (a *App) deleteRecruitmentResume(resumeID string) error {
 	}{
 		{`DELETE FROM evaluations WHERE resume_version_id = ? OR resume_version_id IN (SELECT id FROM resume_versions WHERE legacy_resume_id = ?)`, []any{versionID, resumeID}},
 		{`DELETE FROM analysis_jobs WHERE resume_version_id = ? OR resume_version_id IN (SELECT id FROM resume_versions WHERE legacy_resume_id = ?)`, []any{versionID, resumeID}},
+		{`UPDATE project_candidates SET archived_at=?, updated_at=? WHERE id IN (SELECT project_candidate_id FROM project_candidate_resumes WHERE resume_version_id = ? OR resume_version_id IN (SELECT id FROM resume_versions WHERE legacy_resume_id = ?)) OR id LIKE ?`, []any{now, now, versionID, resumeID, "%_" + resumeID}},
 		{`DELETE FROM project_candidate_resumes WHERE resume_version_id = ? OR resume_version_id IN (SELECT id FROM resume_versions WHERE legacy_resume_id = ?)`, []any{versionID, resumeID}},
 		{`DELETE FROM resume_versions WHERE legacy_resume_id = ? OR id = ?`, []any{resumeID, versionID}},
 	}

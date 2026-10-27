@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"os"
@@ -175,6 +176,9 @@ func (a *App) Get51JobTalentManagementCatalog() (TalentManagementCatalog, error)
 	hideConsoleWindow(cmd)
 	out, err := cmd.Output()
 	if jsonErr := json.Unmarshal(out, &result); jsonErr != nil {
+		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+			return result, fmt.Errorf("读取 51job 职位超时，请先点击【打开 51job 浏览器】确认已登录并可查看人才管理")
+		}
 		if err != nil {
 			return result, fmt.Errorf("读取 51job 人才管理职位失败: %w", err)
 		}

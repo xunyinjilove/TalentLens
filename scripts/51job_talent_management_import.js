@@ -55,7 +55,7 @@ async function connectManagementPage() {
     browser = await puppeteer.connect({
       browserURL: 'http://127.0.0.1:9503',
       defaultViewport: null,
-      protocolTimeout: 60000
+      protocolTimeout: 30000
     });
   } catch (err) {
     throw new Error('51job 专用浏览器端口 (9503) 未连接，请先点击【打开 51job 浏览器】并登录企业账号');
@@ -76,18 +76,32 @@ async function connectManagementPage() {
   const target = targets.find(t => (t.type() === 'page' || t.type() === 'other') &&
     t.url().startsWith('https://ehire.51job.com/Revision/talent/management'));
   let page = null;
+  let isTempPage = false;
   if (target) {
     page = await target.page().catch(() => null);
   }
   if (!page) {
     try {
       page = await openBackgroundManagementPage(browser);
+      isTempPage = true;
     } catch (e) {
       await browser.disconnect().catch(() => {});
-      throw new Error('请先在已登录的 51job 专用浏览器打开“人才管理”页面');
+      throw e;
+    }
+  } else {
+    // 若页面已经存在，等待 Vue 组件就绪（最多 3.5 秒）
+    try {
+      await page.waitForFunction(() => {
+        const components = Array.from(document.querySelectorAll('*')).map(element => element.__vue__).filter(Boolean);
+        const management = components.find(vm => vm.$options?.name === 'TalentManagement');
+        const menu = components.find(vm => vm.$options?.name === 'EhMenuPositions');
+        return Boolean(management?.$data?.hruid && menu?.$props?.positionListsAll?.length);
+      }, { timeout: 3500 });
+    } catch {
+      // 容错继续
     }
   }
-  return { browser, page };
+  return { browser, page, isTempPage };
 }
 
 async function readState(page) {
@@ -124,32 +138,41 @@ async function openBackgroundManagementPage(browser) {
     const { targetId } = await session.send('Target.createTarget', {
       url: 'https://ehire.51job.com/Revision/talent/management', background: true
     });
-    const target = await browser.waitForTarget(item => item._targetId === targetId, { timeout: 20000 });
+    const target = await browser.waitForTarget(item => item._targetId === targetId, { timeout: 10000 });
     page = await target.page();
   } finally {
     await session.detach().catch(() => {});
   }
   if (!page) throw new Error('51job 后台读取页未就绪');
-  let lastError;
-  for (let attempt = 0; attempt < 3; attempt++) {
-    try {
-      await page.waitForFunction(() => {
-        const components = Array.from(document.querySelectorAll('*')).map(element => element.__vue__).filter(Boolean);
-        const management = components.find(vm => vm.$options?.name === 'TalentManagement');
-        const menu = components.find(vm => vm.$options?.name === 'EhMenuPositions');
-        return Boolean(management?.$data?.hruid && management?.$data?.jobParams?.coid &&
-          menu?.$props?.positionListsAll?.length);
-      }, { timeout: 25000 });
-      return page;
-    } catch (error) {
-      lastError = error;
-      if (page.isClosed()) break;
-    }
-  }
-  {
+
+  try {
+    await page.waitForFunction(() => {
+      const u = window.location.href.toLowerCase();
+      if (u.includes('login') || u.includes('navigate.aspx') || u.includes('passport')) {
+        return 'LOGIN_REDIRECT';
+      }
+      const components = Array.from(document.querySelectorAll('*')).map(element => element.__vue__).filter(Boolean);
+      const management = components.find(vm => vm.$options?.name === 'TalentManagement');
+      const menu = components.find(vm => vm.$options?.name === 'EhMenuPositions');
+      return Boolean(management?.$data?.hruid && management?.$data?.jobParams?.coid &&
+        menu?.$props?.positionListsAll?.length);
+    }, { timeout: 12000 }).then(async (handle) => {
+      const val = await handle.jsonValue().catch(() => null);
+      if (val === 'LOGIN_REDIRECT') {
+        throw new Error('51job 尚未登录或会话已过期，请先点击【打开 51job 浏览器】登录企业账号');
+      }
+    });
+    return page;
+  } catch (error) {
     const currentURL = page.url();
     await page.close().catch(() => {});
-    throw new Error(`51job 后台读取页未就绪（当前路径: ${new URL(currentURL).pathname}）: ${lastError?.message}`);
+    if (currentURL.toLowerCase().includes('login') || currentURL.toLowerCase().includes('navigate.aspx') || currentURL.toLowerCase().includes('passport')) {
+      throw new Error('51job 尚未登录或会话已过期，请先点击【打开 51job 浏览器】登录企业账号');
+    }
+    if (String(error?.message).includes('尚未登录')) {
+      throw error;
+    }
+    throw new Error('51job 人才管理页面加载超时，请先点击【打开 51job 浏览器】登录并确认可查看人才管理');
   }
 }
 
@@ -363,7 +386,7 @@ async function rejectCandidate(browser, accountScope, options) {
 }
 
 async function run(mode, options = {}) {
-  const { browser, page } = await connectManagementPage();
+  const { browser, page, isTempPage } = await connectManagementPage();
   try {
     const state = await readState(page);
     if (!state) throw new Error('51job 人才管理页面尚未加载完成');
@@ -388,6 +411,9 @@ async function run(mode, options = {}) {
     }
     throw new Error(`不支持的读取模式: ${mode}`);
   } finally {
+    if (isTempPage && page && !page.isClosed()) {
+      await page.close().catch(() => {});
+    }
     await browser.disconnect();
   }
 }
