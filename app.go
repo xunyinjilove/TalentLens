@@ -780,8 +780,8 @@ func (a *App) loadConfig() {
 			needSave = true
 		}
 	}
-	if a.config.AI.APIKey == "custom-client-key-123" {
-		log.Printf("[loadConfig] 清理测试残留的虚拟 Key")
+	if a.config.AI.APIKey == "custom-client-key-123" || strings.Contains(a.config.AI.APIKey, "sk-ws-H.PDMIIDX") {
+		log.Printf("[loadConfig] 清理测试残留或历史未授权的 Key")
 		a.config.AI.APIKey = ""
 		needSave = true
 	}
