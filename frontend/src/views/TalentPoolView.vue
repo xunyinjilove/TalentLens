@@ -1108,6 +1108,15 @@ function triggerOneClickFilter() {
   showOneClickFilterDialog.value = true
 }
 
+function checkAIConfig(): boolean {
+  const saved = localStorage.getItem('goresume_settings')
+  if (!saved) return false
+  try {
+    const settings = JSON.parse(saved)
+    return Boolean(settings.ai?.apiKey && settings.ai.apiKey.trim().length >= 10)
+  } catch { return false }
+}
+
 async function triggerAnalyzeAll() {
   if (!selectedProjectId.value) {
     ElMessage.warning('请先在左侧选择一个职位专属分库')
@@ -1115,6 +1124,11 @@ async function triggerAnalyzeAll() {
   }
   if (!projectCandidateCount.value) {
     ElMessage.info('当前职位没有有效候选人')
+    return
+  }
+  // 严格安全对齐：只有在软件系统设置中输入并保存了 API Key 才能启动分析，禁止直接使用未授权/残留的本地 Key
+  if (!checkAIConfig()) {
+    showAIConfigGuide.value = true
     return
   }
   try {
@@ -1730,6 +1744,10 @@ async function clearDuplicateHints() {
 
 
 async function retryAnalysis(resumeId: string) {
+  if (!checkAIConfig()) {
+    showAIConfigGuide.value = true
+    return
+  }
   try {
     const api: any = await import('../../wailsjs/go/main/App')
     await api.RetryCandidateAnalysis(resumeId)
