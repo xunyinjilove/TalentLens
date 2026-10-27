@@ -407,7 +407,7 @@ export const useResumeStore = defineStore('resume', () => {
     '需要补充相关认证'
   ]
 
-  // 获取 AI 配置
+  // 获取 AI 配置 (优先读取 localStorage，若无则从后端原生 config.json 兜底对齐)
   function getAIConfig() {
     const saved = localStorage.getItem('goresume_settings')
     if (!saved) return null
@@ -424,6 +424,28 @@ export const useResumeStore = defineStore('resume', () => {
     } catch {
       return null
     }
+  }
+
+  async function getAIConfigAsync() {
+    const local = getAIConfig()
+    if (local && local.api_key) return local
+    try {
+      const WailsApp = await import('../../wailsjs/go/main/App')
+      if (WailsApp) {
+        const backendCfg = await WailsApp.GetConfig()
+        if (backendCfg?.ai?.api_key) {
+          return {
+            provider: backendCfg.ai.provider || 'aliyun-glm',
+            base_url: backendCfg.ai.base_url || '',
+            api_key: backendCfg.ai.api_key || '',
+            model: backendCfg.ai.model || '',
+            max_retries: backendCfg.ai.max_retries || 3,
+            timeout: backendCfg.ai.timeout || 60
+          }
+        }
+      }
+    } catch {}
+    return local
   }
 
   // 获取岗位配置
@@ -474,7 +496,7 @@ export const useResumeStore = defineStore('resume', () => {
 
     // 如果在 Wails 环境下，使用后端 API
     if (isWailsEnv && WailsApp) {
-      const aiConfig = getAIConfig()
+      const aiConfig = await getAIConfigAsync()
       const jobConfig = getJobConfig()
 
       if (!aiConfig || !aiConfig.api_key) {
@@ -587,7 +609,7 @@ export const useResumeStore = defineStore('resume', () => {
   async function reAnalyzeAll(): Promise<boolean> {
     if (isAnalyzing.value) return false
 
-    const aiConfig = getAIConfig()
+    const aiConfig = await getAIConfigAsync()
     if (!aiConfig || !aiConfig.api_key) {
       devLog('error', '批量重分析失败: 未配置 AI Key')
       return false

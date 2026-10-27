@@ -615,6 +615,15 @@ onMounted(async () => {
     const WailsApp = await import('../../wailsjs/go/main/App')
     dataDir.value = await WailsApp.GetDataDir()
     appVersion.value = await WailsApp.GetAppVersion()
+
+    // 优先从后端 Go 服务 (config.json) 读取持久化配置，避免因 localStorage 丢失导致前端显示空 Key
+    const backendCfg = await WailsApp.GetConfig()
+    if (backendCfg?.ai) {
+      if (backendCfg.ai.api_key) aiForm.apiKey = backendCfg.ai.api_key
+      if (backendCfg.ai.base_url) aiForm.baseURL = backendCfg.ai.base_url
+      if (backendCfg.ai.provider) aiForm.provider = backendCfg.ai.provider
+      if (backendCfg.ai.model) aiForm.model = backendCfg.ai.model
+    }
   } catch {
     appVersion.value = '1.1.0'
   }
@@ -624,10 +633,10 @@ onMounted(async () => {
     try {
       const s = JSON.parse(saved)
       if (s.ai) {
-        aiForm.provider = s.ai.provider || aiForm.provider
-        aiForm.baseURL = s.ai.baseURL || aiForm.baseURL
-        aiForm.apiKey = s.ai.apiKey || ''
-        aiForm.model = s.ai.model || aiForm.model
+        if (!aiForm.provider && s.ai.provider) aiForm.provider = s.ai.provider
+        if (!aiForm.baseURL && s.ai.baseURL) aiForm.baseURL = s.ai.baseURL
+        if (!aiForm.apiKey && s.ai.apiKey) aiForm.apiKey = s.ai.apiKey
+        if (!aiForm.model && s.ai.model) aiForm.model = s.ai.model
 
         // 若本地已有配置，向 Go 后端静默对齐同步一次
         if (aiForm.apiKey) {
