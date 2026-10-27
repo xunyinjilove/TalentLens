@@ -13,15 +13,15 @@
 
     <!-- 全局分析进度条 -->
     <Transition name="progress-slide">
-      <div v-if="resumeStore.isAnalyzing && resumeStore.batchProgress.total > 0" class="global-progress">
+      <div v-if="resumeStore.isAnalyzing && (resumeStore.batchProgress.total > 0 || resumeStore.resumes.length > 0)" class="global-progress">
         <div class="progress-info">
           <span class="progress-text">
-            {{ $t('analysis.batchProgress', { current: resumeStore.batchProgress.current, total: resumeStore.batchProgress.total }) }}
+            {{ $t('analysis.batchProgress', { current: resumeStore.batchProgress.current || 0, total: resumeStore.batchProgress.total || resumeStore.resumes.length }) }}
           </span>
-          <span class="progress-pct">{{ Math.round((resumeStore.batchProgress.current / resumeStore.batchProgress.total) * 100) }}%</span>
+          <span class="progress-pct">{{ Math.round(((resumeStore.batchProgress.current || 0) / (resumeStore.batchProgress.total || resumeStore.resumes.length || 1)) * 100) }}%</span>
         </div>
         <div class="progress-track">
-          <div class="progress-fill" :style="{ width: (resumeStore.batchProgress.current / resumeStore.batchProgress.total * 100) + '%' }"></div>
+          <div class="progress-fill" :style="{ width: (((resumeStore.batchProgress.current || 0) / (resumeStore.batchProgress.total || resumeStore.resumes.length || 1)) * 100) + '%' }"></div>
         </div>
       </div>
     </Transition>
@@ -134,7 +134,7 @@
                 <el-icon v-if="resumeStore.isAnalyzing" class="spin"><Loading /></el-icon>
                 <el-icon v-else-if="resumeStore.analysisReadyCount > 0"><VideoPlay /></el-icon>
                 <el-icon v-else><RefreshRight /></el-icon>
-                <span v-if="resumeStore.isAnalyzing">{{ $t('home.analyzing') }}</span>
+                <span v-if="resumeStore.isAnalyzing">{{ (resumeStore.batchProgress.total > 0 || resumeStore.resumes.length > 0) ? `分析中 (${resumeStore.batchProgress.current || 0}/${resumeStore.batchProgress.total || resumeStore.resumes.length})` : $t('home.analyzing') }}</span>
                 <span v-else-if="resumeStore.analysisReadyCount > 0">分析 ({{ resumeStore.analysisReadyCount }})</span>
                 <span v-else>重新分析全部 ({{ resumeStore.doneCount }})</span>
               </button>

@@ -92,6 +92,23 @@
     <el-alert v-if="analysisRunSummary" :title="analysisRunSummary" :type="analysisRunError ? 'warning' : 'info'"
       show-icon closable style="margin: 8px 0" @close="analysisRunSummary = ''" />
 
+    <!-- 全局一键分析实时进度卡片 -->
+    <div v-if="analyzingAll && totalToAnalyze > 0" class="talent-analysis-progress-card">
+      <div class="progress-meta">
+        <span class="progress-title">
+          <el-icon class="is-loading"><Loading /></el-icon>
+          正在进行大模型智能深度分析：已完成 {{ analyzedCount }} / {{ totalToAnalyze }} 份
+        </span>
+        <span class="progress-percentage">{{ Math.round((analyzedCount / totalToAnalyze) * 100) }}%</span>
+      </div>
+      <el-progress
+        :percentage="Math.min(100, Math.round((analyzedCount / totalToAnalyze) * 100))"
+        :stroke-width="8"
+        :show-text="false"
+        status="success"
+      />
+    </div>
+
     <!-- 主体分栏：左侧职位分库导航 + 右侧候选人看板 -->
     <div class="talent-workbench-layout">
       <!-- 左侧：职位分库导航侧栏 -->
@@ -1137,7 +1154,7 @@ async function triggerAnalyzeAll() {
     analyzingAll.value = true
     activeReanalysisRunId.value = result.runId
     totalToAnalyze.value = result.total
-    analyzedCount.value = 0
+    analyzedCount.value = result.completed || 0
     const skipped = Object.entries(result.skipped || {}).map(([reason, count]) => `${reason} ${count} 人`).join('；')
     analysisRunError.value = Boolean(skipped)
     analysisRunSummary.value = `${result.resumed ? '续跑本次未成功的' : '已启动当前职位全量重算：'} ${result.total} 份` +
@@ -1186,6 +1203,40 @@ async function pollProjectReanalysis() {
   } catch (error: any) {
     analysisRunError.value = true
     analysisRunSummary.value = `读取分析进度失败：${error?.message || error}`
+  }
+}
+
+async function checkActiveProjectReanalysis(projectId: string) {
+  if (!projectId) {
+    if (!activeReanalysisRunId.value) {
+      analyzingAll.value = false
+    }
+    return
+  }
+  try {
+    const api: any = await import('../../wailsjs/go/main/App')
+    if (typeof api.GetActiveProjectReanalysis === 'function') {
+      const active = await api.GetActiveProjectReanalysis(projectId)
+      if (active && active.status === 'running' && active.runId) {
+        analyzingAll.value = true
+        activeReanalysisRunId.value = active.runId
+        totalToAnalyze.value = active.total || 0
+        analyzedCount.value = active.completed || 0
+        if (!reanalysisPollTimer) {
+          reanalysisPollTimer = window.setInterval(() => { void pollProjectReanalysis() }, 1500)
+        }
+        return
+      } else if (activeReanalysisRunId.value === active?.runId && active?.status !== 'running') {
+        analyzingAll.value = false
+        activeReanalysisRunId.value = ''
+        if (reanalysisPollTimer) {
+          window.clearInterval(reanalysisPollTimer)
+          reanalysisPollTimer = undefined
+        }
+      }
+    }
+  } catch (e) {
+    console.warn('checkActiveProjectReanalysis error:', e)
   }
 }
 const importing = ref(false)
@@ -1392,6 +1443,10 @@ const filtered = computed(() => recruitment.candidates.filter(item =>
 watch(() => route.query.project, value => {
   selectedProjectId.value = String(value || '')
 })
+
+watch(selectedProjectId, newId => {
+  void checkActiveProjectReanalysis(newId)
+}, { immediate: true })
 
 
 
@@ -1763,10 +1818,15 @@ onMounted(() => {
   void refresh()
   void loadInbox()
   void loadDuplicates()
+  void checkActiveProjectReanalysis(selectedProjectId.value)
 
   try {
     EventsOn('project-reanalysis:progress', (data: any) => {
-      if (data?.runId === activeReanalysisRunId.value) {
+      if (data?.runId === activeReanalysisRunId.value || (data?.projectId && data.projectId === selectedProjectId.value)) {
+        if (data?.runId && !activeReanalysisRunId.value) {
+          activeReanalysisRunId.value = data.runId
+        }
+        analyzingAll.value = true
         const prevCount = analyzedCount.value
         analyzedCount.value = data.completed ?? data.current ?? 0
         totalToAnalyze.value = data.total || totalToAnalyze.value
@@ -1780,7 +1840,7 @@ onMounted(() => {
       }
     })
     EventsOn('project-reanalysis:completed', async (data: any) => {
-      if (data?.runId === activeReanalysisRunId.value) {
+      if (data?.runId === activeReanalysisRunId.value || (data?.projectId && data.projectId === selectedProjectId.value)) {
         await pollProjectReanalysis()
       }
     })
@@ -1796,6 +1856,35 @@ onUnmounted(() => {
 </script>
 
 <style scoped>
+/* 全局一键分析实时进度条卡片 */
+.talent-analysis-progress-card {
+  margin: 10px 0 16px 0;
+  padding: 12px 18px;
+  background: linear-gradient(135deg, rgba(79, 70, 229, 0.08) 0%, rgba(14, 165, 233, 0.08) 100%);
+  border: 1px solid rgba(99, 102, 241, 0.25);
+  border-radius: 10px;
+  box-shadow: 0 4px 12px rgba(99, 102, 241, 0.08);
+}
+.talent-analysis-progress-card .progress-meta {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 13px;
+  font-weight: 600;
+  color: #3b82f6;
+  margin-bottom: 8px;
+}
+.talent-analysis-progress-card .progress-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.talent-analysis-progress-card .progress-percentage {
+  font-variant-numeric: tabular-nums;
+  color: #2563eb;
+  font-size: 14px;
+}
+
 /* 全局页面容器：保证右侧保留充裕的 32px 呼吸间距，支持极端分辨率横向自适应 */
 .talent-pool-page {
   box-sizing: border-box;
