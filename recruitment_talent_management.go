@@ -647,7 +647,9 @@ func extractCandidateProfile(resumeText string) candidateProfileSummary {
 		}
 
 		if summary.Degree == "" {
-			if deg, ok := data["degree"].(string); ok {
+			if deg, ok := data["top_degree_value"].(string); ok && strings.TrimSpace(deg) != "" {
+				summary.Degree = strings.TrimSpace(deg)
+			} else if deg, ok := data["degree"].(string); ok {
 				summary.Degree = deg
 			} else if edu, ok := data["education"].(string); ok {
 				summary.Degree = edu
@@ -667,18 +669,27 @@ func extractCandidateProfile(resumeText string) candidateProfileSummary {
 		}
 
 		if summary.School == "" {
-			if sch, ok := data["school"].(string); ok {
+			if sch, ok := data["top_school_name"].(string); ok && strings.TrimSpace(sch) != "" {
+				summary.School = strings.TrimSpace(sch)
+			} else if sch, ok := data["school"].(string); ok {
 				summary.School = sch
 			}
 		}
 		if summary.Major == "" {
-			if maj, ok := data["major"].(string); ok {
+			if maj, ok := data["top_major_value"].(string); ok && strings.TrimSpace(maj) != "" {
+				summary.Major = strings.TrimSpace(maj)
+			} else if maj, ok := data["major"].(string); ok {
 				summary.Major = maj
 			}
 		}
 
 		if !summary.WorkYearsKnown {
-			if wy, ok := data["workyear"].(string); ok {
+			if wy, ok := data["work_year_value"].(string); ok && strings.TrimSpace(wy) != "" {
+				if y, ok2 := parseWorkYears(wy); ok2 {
+					summary.WorkYears = y
+					summary.WorkYearsKnown = true
+				}
+			} else if wy, ok := data["workyear"].(string); ok {
 				if y, ok2 := parseWorkYears(wy); ok2 {
 					summary.WorkYears = y
 					summary.WorkYearsKnown = true

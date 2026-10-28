@@ -22,13 +22,24 @@ type telescopeCandidate struct {
 }
 
 type telescopePage struct {
-	Status     string               `json:"status"`
-	Message    string               `json:"message"`
-	JobID      string               `json:"jobId"`
-	JobTitle   string               `json:"jobTitle"`
-	CompanyID  string               `json:"companyId"`
-	Total      int                  `json:"total"`
-	Candidates []telescopeCandidate `json:"candidates"`
+	Status       string               `json:"status"`
+	Message      string               `json:"message"`
+	JobID        string               `json:"jobId"`
+	JobTitle     string               `json:"jobTitle"`
+	CompanyID    string               `json:"companyId"`
+	AccountScope string               `json:"accountScope"`
+	Total        int                  `json:"total"`
+	Candidates   []telescopeCandidate `json:"candidates"`
+}
+
+type telescopeCatalogResult struct {
+	Status         string                `json:"status"`
+	Message        string                `json:"message"`
+	AccountScope   string                `json:"accountScope"`
+	ActiveJobID    string                `json:"activeJobId"`
+	ActiveJobTitle string                `json:"activeJobTitle"`
+	CompanyID      string                `json:"companyId"`
+	Jobs           []TalentManagementJob `json:"jobs"`
 }
 
 // Open51JobTelescopeBrowser opens the platform's AI淘金/人才望远镜 page.
@@ -49,6 +60,36 @@ func resolveTelescopeScript() string {
 		}
 	}
 	return ""
+}
+
+// Get51JobTelescopeCatalog reads online positions and account info directly from the opened Telescope page.
+func (a *App) Get51JobTelescopeCatalog() (*TalentManagementCatalog, error) {
+	script := resolveTelescopeScript()
+	if script == "" {
+		return nil, fmt.Errorf("缺少 51job 人才望远镜读取脚本")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "node", script, "--mode", "catalog")
+	hideConsoleWindow(cmd)
+	out, err := cmd.Output()
+	if err != nil {
+		if ctx.Err() != nil {
+			return nil, fmt.Errorf("读取人才望远镜职位超时")
+		}
+		return nil, fmt.Errorf("读取人才望远镜职位失败: %w", err)
+	}
+	var res telescopeCatalogResult
+	if jsonErr := json.Unmarshal(out, &res); jsonErr != nil {
+		return nil, fmt.Errorf("人才望远镜目录回执无法解析: %w", jsonErr)
+	}
+	if res.Status != "ok" {
+		return nil, fmt.Errorf("%s", res.Message)
+	}
+	return &TalentManagementCatalog{
+		AccountScope: res.AccountScope,
+		Jobs:         res.Jobs,
+	}, nil
 }
 
 func readTelescopeCandidates(jobID string) (telescopePage, error) {
@@ -80,34 +121,44 @@ func readTelescopeCandidates(jobID string) (telescopePage, error) {
 // Scan51JobTelescopeBatch reads the currently opened telescope page and uses
 // the same project criteria as talent management. It never performs platform actions.
 func (a *App) Scan51JobTelescopeBatch(accountScope, jobID, projectID string) (*ScreeningBatchPreview, error) {
-	if accountScope == "" || jobID == "" || projectID == "" {
+	if jobID == "" || projectID == "" {
 		return nil, fmt.Errorf("请先选择已绑定本地项目的 51job 职位")
 	}
-	catalog, err := a.Get51JobTalentManagementCatalog()
+
+	page, err := readTelescopeCandidates(jobID)
 	if err != nil {
 		return nil, err
 	}
-	if catalog.AccountScope != accountScope {
-		return nil, fmt.Errorf("51job 登录账号已变化，请重新读取职位")
+	if page.JobID != jobID {
+		return nil, fmt.Errorf("人才望远镜当前展示的职位与所选职位不一致，请在 51job 页面切换到对应职位")
 	}
-	jobFound := false
-	for _, job := range catalog.Jobs {
-		if job.JobID == jobID {
-			jobFound = true
-			break
+	if accountScope != "" && page.CompanyID != "" && !strings.HasPrefix(accountScope, "co:"+page.CompanyID+":") {
+		return nil, fmt.Errorf("人才望远镜企业账号与当前选定账号不一致")
+	}
+	if accountScope == "" {
+		if page.AccountScope != "" {
+			accountScope = page.AccountScope
+		} else if page.CompanyID != "" {
+			accountScope = "co:" + page.CompanyID
 		}
 	}
-	if !jobFound {
-		return nil, fmt.Errorf("所选职位不属于当前 51job 企业账号")
-	}
+
 	db, err := a.getRecruitmentDB()
 	if err != nil {
 		return nil, err
 	}
+
+	// 自动保全项目与职位映射
 	var mappedProject string
-	if err := db.QueryRow(`SELECT project_id FROM platform_job_mappings WHERE platform='51job' AND platform_account=? AND platform_job_id=?`, accountScope, jobID).Scan(&mappedProject); err != nil || mappedProject != projectID {
-		return nil, fmt.Errorf("请先将此 51job 职位绑定到所选项目")
+	err = db.QueryRow(`SELECT project_id FROM platform_job_mappings WHERE platform='51job' AND platform_job_id=?`, jobID).Scan(&mappedProject)
+	if err != nil || mappedProject != projectID {
+		nowStr := time.Now().Format("2006-01-02 15:04:05")
+		_, _ = db.Exec(`INSERT INTO platform_job_mappings(platform, platform_account, platform_job_id, project_id, updated_at)
+			VALUES('51job', ?, ?, ?, ?)
+			ON CONFLICT(platform, platform_account, platform_job_id) DO UPDATE SET project_id=excluded.project_id, updated_at=excluded.updated_at`,
+			accountScope, jobID, projectID, nowStr)
 	}
+
 	criteria, err := a.GetTalentManagementStrictCriteria(projectID)
 	if err != nil {
 		return nil, fmt.Errorf("读取项目筛选条件失败: %w", err)
@@ -115,13 +166,7 @@ func (a *App) Scan51JobTelescopeBatch(accountScope, jobID, projectID string) (*S
 	if criteria == nil {
 		return nil, fmt.Errorf("项目筛选条件尚未设置")
 	}
-	page, err := readTelescopeCandidates(jobID)
-	if err != nil {
-		return nil, err
-	}
-	if page.JobID != jobID || !strings.HasPrefix(accountScope, "co:"+page.CompanyID+":hr:") {
-		return nil, fmt.Errorf("人才望远镜企业或职位与当前绑定不一致")
-	}
+
 	now := time.Now()
 	preview := &ScreeningBatchPreview{
 		BatchID: recruitmentID("scrbatch"), ProjectID: projectID, Source: "telescope",
