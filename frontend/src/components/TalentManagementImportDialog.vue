@@ -1,7 +1,7 @@
 <template>
   <el-dialog
     v-model="visible"
-    title="51job 人才管理 · 职位接入与合规初筛"
+    title="51job 人才管理与人才望远镜 · 项目筛选"
     width="760px"
     top="4vh"
     :close-on-click-modal="!running"
@@ -46,14 +46,36 @@
             type="warning" :closable="false" show-icon style="margin-bottom: 16px"
             title="注意：当前 51job 职位的招聘要求为【大专】，但您在【岗位专属硬性条件】中设置了【本科及以上】。本次扫描的大专候选人将被拦截排除。若需录入大专候选人，请前往【岗位专属硬性条件】将最低学历调整为【大专及以上】。" />
 
-          <div style="display: flex; gap: 12px; align-items: center; margin-bottom: 16px">
+          <div style="display: flex; gap: 12px; align-items: center; margin-bottom: 16px; flex-wrap: wrap">
             <el-button type="primary" :loading="scanning" :disabled="!jobId || !projectId || catalogStale" @click="scanBatchPreview">
-              <el-icon><Search /></el-icon> 扫描待处理人选并生成初筛预览 (单页50人)
+              <el-icon><Search /></el-icon> {{ (batchPreview && batchPreview.scanStatus === 'paused') ? '继续断点扫描待处理人选' : '扫描当前项目全部待处理人选' }}
+            </el-button>
+            <el-button size="default" :disabled="!projectId || scanning" @click="checkAndResumeProject">
+              <el-icon><Refresh /></el-icon> 检查任务与对账
             </el-button>
             <span style="font-size: 12px; color: #64748b">
               扫描仅收集名单与核验证据，绝不静默触碰或修改平台状态
             </span>
           </div>
+
+          <!-- 任务检查点与进度指标 -->
+          <div v-if="batchPreview" style="margin-bottom: 14px; font-size: 12px; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 10px 14px; display: flex; flex-wrap: wrap; gap: 16px; align-items: center">
+            <div>
+              <strong>扫描任务状态：</strong>
+              <el-tag size="small" :type="batchPreview.scanStatus === 'complete' ? 'success' : (batchPreview.scanStatus === 'scanning' ? 'primary' : 'warning')">
+                {{ batchPreview.scanStatus === 'complete' ? '全部页已扫完 (就绪)' : (batchPreview.scanStatus === 'scanning' ? '正在扫描待处理' : (batchPreview.scanStatus === 'manual_required' ? '需人工处理' : '待续扫')) }}
+              </el-tag>
+            </div>
+            <div>已读页数：<strong>{{ batchPreview.currentPage || 1 }} / {{ batchPreview.totalPagesEstimated || 1 }}</strong></div>
+            <div>已核验人数：<strong>{{ batchPreview.totalCount }} 人</strong> (平台总待处理约 {{ batchPreview.initialPlatformCount || batchPreview.totalCount }} 人)</div>
+            <div v-if="batchPreview.nextPage > batchPreview.currentPage && batchPreview.scanStatus !== 'complete'">下一页：<strong>第 {{ batchPreview.nextPage }} 页</strong></div>
+            <div v-if="batchPreview.lastError" style="color: #ef4444; font-weight: 500">最近异常：{{ batchPreview.lastError }}</div>
+            <div v-if="batchPreview.nextCheckAt && batchPreview.scanStatus !== 'complete'" style="color: #64748b">下次自动检查：{{ batchPreview.nextCheckAt }}</div>
+          </div>
+
+          <el-alert v-if="batchPreview && batchPreview.scanStatus !== 'complete'"
+            type="warning" :closable="false" show-icon style="margin-bottom: 12px"
+            title="风控保护：当前扫描尚未覆盖全部待处理人选（或处于待续扫状态）。必须扫完全部页后才允许批量执行入库或标记不合适操作。" />
 
           <!-- 初筛预览看板 -->
           <div v-if="batchPreview" class="screening-preview-card" style="border: 1px solid #e2e8f0; border-radius: 8px; padding: 14px; background: #fff; margin-bottom: 16px">
@@ -72,7 +94,7 @@
             <div v-if="previewSubTab === 'qualified'">
               <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px">
                 <span style="font-size: 12px; color: #166534">各项启用条件均通过，可一键导入至当前职位专属分库</span>
-                <el-button type="success" size="small" :loading="executingAction" :disabled="batchPreview.qualifiedCount === 0" @click="confirmImportQualified">
+                <el-button type="success" size="small" :loading="executingAction" :disabled="batchPreview.qualifiedCount === 0 || batchPreview.scanStatus !== 'complete'" @click="confirmImportQualified">
                   一键导入合格人选入库 ({{ batchPreview.qualifiedCount }})
                 </el-button>
               </div>
@@ -99,24 +121,27 @@
             <div v-if="previewSubTab === 'unfit'">
               <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px">
                 <span style="font-size: 12px; color: #991b1b">有确凿不符合项，可批量联动 51job 平台标记「不感兴趣」</span>
-                <el-button type="danger" size="small" :loading="executingAction" :disabled="!selectedUnfitCandidates.length" @click="confirmRejectUnfit">
+                <el-button type="danger" size="small" :loading="executingAction" :disabled="!selectedUnfitCandidates.length || batchPreview.scanStatus !== 'complete'" @click="confirmRejectUnfit">
                   批量标记不合适 (已选 {{ selectedUnfitCandidates.length }} 人)
                 </el-button>
               </div>
-              <el-table :data="batchPreview.unfitList" size="small" max-height="240" @selection-change="handleUnfitSelectionChange" empty-text="当前批次无不合格人选">
-                <el-table-column type="selection" width="40" />
+              <el-table :data="batchPreview.unfitList" size="small" max-height="260" @selection-change="handleUnfitSelectionChange" empty-text="当前批次无不合格人选">
+                <el-table-column type="selection" width="40" :selectable="(row: any) => row.actionStatus !== 'completed' && row.actionStatus !== 'verified_on_platform'" />
                 <el-table-column prop="candidateName" label="姓名" width="100" />
                 <el-table-column label="不合格确凿证据" min-width="260">
                   <template #default="{ row }">
                     <div v-for="item in row.ruleEvidence.filter((e: any) => e.status === 'fail')" :key="item.rule" style="font-size: 11px; color: #b91c1c; font-weight: 500">
                       ✖ {{ item.label }}：{{ item.evidence }}
                     </div>
+                    <div v-if="row.actionReceiptAt || row.actionError" style="font-size: 11px; color: #64748b; margin-top: 2px">
+                      平台回执: {{ row.actionReceiptAt }} {{ row.actionError }}
+                    </div>
                   </template>
                 </el-table-column>
-                <el-table-column prop="actionStatus" label="状态" width="90">
+                <el-table-column prop="actionStatus" label="状态" width="130">
                   <template #default="{ row }">
-                    <el-tag size="small" :type="row.actionStatus === 'rejected' ? 'danger' : 'warning'">
-                      {{ row.actionStatus === 'rejected' ? '已标记' : '待处理' }}
+                    <el-tag size="small" :type="getActionStatusTagType(row.actionStatus)">
+                      {{ getActionStatusLabel(row.actionStatus) }}
                     </el-tag>
                   </template>
                 </el-table-column>
@@ -149,6 +174,68 @@
 
         <p v-if="progress" style="color: #606f89; font-size: 13px">{{ progress }}</p>
         <p v-if="summary" style="color: #0f766e; font-size: 13px; font-weight: 500">{{ summary }}</p>
+      </el-tab-pane>
+
+      <el-tab-pane label="人才望远镜每日筛选" name="telescope">
+        <el-alert type="info" :closable="false" show-icon style="margin-bottom: 16px"
+          title="读取 51job「AI淘金 → 人才望远镜」当前职位的候选人，使用本项目已保存的同一版条件生成合格、不合格、待核实名单。读取不会发送消息或修改平台状态。" />
+
+        <el-form label-position="top">
+          <el-row :gutter="16">
+            <el-col :span="12">
+              <el-form-item label="51job 人才望远镜职位">
+                <el-select v-model="jobId" filterable style="width: 100%" :disabled="telescopeScanning"
+                  placeholder="选择与望远镜页面当前标签一致的职位">
+                  <el-option v-for="job in jobs" :key="job.jobId" :value="job.jobId" :label="formatJobOptionLabel(job)" />
+                </el-select>
+              </el-form-item>
+            </el-col>
+            <el-col :span="12">
+              <el-form-item label="共用条件的本地专属库">
+                <el-select v-model="projectId" filterable style="width: 100%" :disabled="telescopeScanning"
+                  placeholder="选择已绑定的项目">
+                  <el-option v-for="project in projects" :key="project.id" :value="project.id"
+                    :label="`${project.job_config?.title || project.name} · ${project.name}`" />
+                </el-select>
+              </el-form-item>
+            </el-col>
+          </el-row>
+        </el-form>
+
+        <p class="catalog-status">已保存项目条件：{{ savedCriteria?.criteriaVersion || '读取中' }} · 活跃度{{ savedCriteria?.activityDays ? `近 ${savedCriteria.activityDays} 天` : '不限' }} · 最低学历{{ savedCriteria?.minEducation || '不限' }}</p>
+        <p class="catalog-status">计划时间：{{ savedCriteria?.scheduleEnabled ? savedCriteria.scheduleTime : '未启用' }}。望远镜自动定时扫描尚未接入；目前可手动运行。</p>
+        <div style="display: flex; gap: 10px; align-items: center; margin: 16px 0">
+          <el-button type="warning" plain @click="openTelescope">打开 51job 人才望远镜</el-button>
+          <el-button type="primary" :loading="telescopeScanning" :disabled="!jobId || !projectId || catalogStale || running" @click="scanTelescopePreview">
+            立即筛选当前项目
+          </el-button>
+        </div>
+        <p v-if="telescopeProgress" class="catalog-status">{{ telescopeProgress }}</p>
+
+        <div v-if="telescopePreview" class="screening-preview-card" style="border: 1px solid #e2e8f0; border-radius: 8px; padding: 14px; background: #fff">
+          <div style="font-weight: 600; margin-bottom: 12px">
+            望远镜预览 · {{ telescopePreview.businessDate }} · 条件 {{ telescopePreview.criteriaVersion }} · 共 {{ telescopePreview.totalCount }} 人
+          </div>
+          <el-radio-group v-model="telescopeSubTab" size="small" style="margin-bottom: 12px">
+            <el-radio-button value="qualified">合格 {{ telescopePreview.qualifiedCount }}</el-radio-button>
+            <el-radio-button value="unfit">不合格 {{ telescopePreview.unfitCount }}</el-radio-button>
+            <el-radio-button value="pending">待核实 {{ telescopePreview.pendingCount }}</el-radio-button>
+          </el-radio-group>
+          <el-table :data="telescopeSubTab === 'qualified' ? telescopePreview.qualifiedList : telescopeSubTab === 'unfit' ? telescopePreview.unfitList : telescopePreview.pendingList"
+            size="small" max-height="300" empty-text="本类暂无人选">
+            <el-table-column prop="candidateName" label="候选人" width="110" />
+            <el-table-column label="逐项核验" min-width="300">
+              <template #default="{ row }">
+                <div v-for="item in row.ruleEvidence" :key="item.rule" style="font-size: 12px; line-height: 1.6">
+                  <el-tag :type="item.status === 'pass' ? 'success' : item.status === 'fail' ? 'danger' : 'warning'" size="small">{{ item.status === 'pass' ? '通过' : item.status === 'fail' ? '不符' : '待核实' }}</el-tag>
+                  {{ item.label }}：{{ item.evidence }}
+                </div>
+              </template>
+            </el-table-column>
+          </el-table>
+          <el-alert type="warning" :closable="false" show-icon style="margin-top: 12px"
+            title="望远镜平台「不感兴趣」和 Hi聊动作仍需核验平台回执，目前此页只提供只读筛选预览。" />
+        </div>
       </el-tab-pane>
 
       <!-- Tab 2: 岗位专属硬性淘汰条件 -->
@@ -230,9 +317,13 @@
                 <el-select v-model="strictCriteria.activityDays" style="width: 100%">
                   <el-option label="不限活跃时间" :value="0" />
                   <el-option label="近 3 天活跃" :value="3" />
-                  <el-option label="近 7 天活跃（推荐）" :value="7" />
+                  <el-option label="近 7 天活跃" :value="7" />
                   <el-option label="近 30 天活跃" :value="30" />
+                  <el-option label="近 3 个月（90 天，默认）" :value="90" />
                 </el-select>
+                <div v-if="strictCriteria.activityDays === 7" style="font-size: 11px; color: #d97706; margin-top: 4px; line-height: 1.4">
+                  提示：当前项目使用近 7 天活跃标准（条件版本：{{ strictCriteria.criteriaVersion }}）。若希望放宽筛选池，可切换为【近 3 个月（90 天）】后保存，新版本将重评未处理名单。
+                </div>
               </el-form-item>
             </el-col>
             <el-col :span="12">
@@ -384,7 +475,7 @@
         <div style="display: flex; gap: 8px">
           <el-button :disabled="running || scanning || executingAction" @click="visible = false">关闭</el-button>
           <el-button v-if="activeTab === 'sync'" type="primary" :loading="scanning" :disabled="!jobId || !projectId || catalogStale"
-            @click="scanBatchPreview">扫描生成初筛预览 (50人)</el-button>
+            @click="scanBatchPreview">{{ (batchPreview && batchPreview.scanStatus === 'paused') ? '继续断点扫描' : '扫描全部待处理人选' }}</el-button>
           <el-button v-if="activeTab === 'criteria'" type="primary" :disabled="!projectId" :loading="savingCriteria"
             @click="saveCriteria">保存硬性条件</el-button>
         </div>
@@ -394,11 +485,11 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Search } from '@element-plus/icons-vue'
+import { Search, Refresh } from '@element-plus/icons-vue'
 
-const props = defineProps<{ modelValue: boolean; projects: any[]; defaultProjectId?: string }>()
+const props = defineProps<{ modelValue: boolean; projects: any[]; defaultProjectId?: string; initialTab?: 'sync' | 'telescope' }>()
 const emit = defineEmits<{ 'update:modelValue': [value: boolean]; completed: [] }>()
 const visible = computed({ get: () => props.modelValue, set: value => emit('update:modelValue', value) })
 
@@ -435,6 +526,11 @@ const executingAction = ref(false)
 const actionLedgerLogs = ref<any[]>([])
 const loadingLedger = ref(false)
 const rescreening = ref(false)
+const telescopePreview = ref<any>(null)
+const telescopeScanning = ref(false)
+const telescopeSubTab = ref<'qualified' | 'unfit' | 'pending'>('qualified')
+const telescopeProgress = ref('')
+const savedCriteria = ref<any>(null)
 
 const strictCriteria = ref({
   projectId: '',
@@ -448,7 +544,7 @@ const strictCriteria = ref({
   majorKeywords: '',
   rejectNonLocalWillingness: false,
   targetCity: '',
-  activityDays: 7,
+  activityDays: 90,
   criteriaVersion: 'v1',
   projectIntroMessage: '',
   scheduleTime: '09:30',
@@ -630,7 +726,7 @@ function applyCriteria(c: any, selectedProjectID: string) {
     majorKeywords: c.majorKeywords || '',
     rejectNonLocalWillingness: Boolean(c.rejectNonLocalWillingness),
     targetCity: c.targetCity || '',
-    activityDays: c.activityDays !== undefined ? c.activityDays : 7,
+    activityDays: c.activityDays !== undefined ? c.activityDays : 90,
     criteriaVersion: c.criteriaVersion || 'v1',
     projectIntroMessage: c.projectIntroMessage || '',
     scheduleTime: c.scheduleTime || '09:30',
@@ -639,10 +735,63 @@ function applyCriteria(c: any, selectedProjectID: string) {
     autoRejectPlatform: c.autoRejectPlatform !== false,
     updatedAt: c.updatedAt || ''
   }
+  savedCriteria.value = { ...strictCriteria.value }
 }
 
 function handleUnfitSelectionChange(selection: any[]) {
   selectedUnfitCandidates.value = selection.map(item => item.candidateId)
+}
+
+function getActionStatusLabel(status: string): string {
+  switch (status) {
+    case 'pending': return '待处理'
+    case 'executing': return '执行中'
+    case 'receipt_pending': return '待核实回执'
+    case 'retrying': return '待重试'
+    case 'completed': return '已完成'
+    case 'verified_on_platform': return '平台已处理／已核对'
+    case 'manual_required': return '需人工处理'
+    case 'failed': return '执行失败'
+    case 'imported': return '已入库'
+    default: return status || '待处理'
+  }
+}
+
+function getActionStatusTagType(status: string): any {
+  switch (status) {
+    case 'completed':
+    case 'verified_on_platform':
+    case 'imported':
+      return 'success'
+    case 'executing':
+      return 'primary'
+    case 'receipt_pending':
+    case 'retrying':
+      return 'warning'
+    case 'failed':
+    case 'manual_required':
+      return 'danger'
+    default:
+      return 'info'
+  }
+}
+
+async function checkAndResumeProject() {
+  if (!projectId.value) return
+  scanning.value = true
+  progress.value = '正在核对任务检查点并进行平台状态对账…'
+  try {
+    const api: any = await import('../../wailsjs/go/main/App')
+    const preview = await api.CheckAndResumeProjectScreening(projectId.value)
+    batchPreview.value = preview
+    selectedUnfitCandidates.value = (preview.unfitList || []).filter((c: any) => c.actionStatus !== 'completed' && c.actionStatus !== 'verified_on_platform').map((c: any) => c.candidateId)
+    progress.value = `任务核查完成：合格 ${preview.qualifiedCount} 人，不合格 ${preview.unfitCount} 人，待核实 ${preview.pendingCount} 人`
+    ElMessage.success('任务检查与状态对账完成')
+  } catch (error: any) {
+    ElMessage.error(error?.message || String(error))
+  } finally {
+    scanning.value = false
+  }
 }
 
 async function scanBatchPreview() {
@@ -653,16 +802,61 @@ async function scanBatchPreview() {
   try {
     const api: any = await import('../../wailsjs/go/main/App')
     await api.Bind51JobTalentManagementJob(accountScope.value, jobId.value, projectId.value)
-    const preview = await api.Scan51JobTalentManagementBatch(accountScope.value, jobId.value, projectId.value, 1)
+    const preview = await api.Scan51JobTalentManagementBatch(accountScope.value, jobId.value, projectId.value, 0)
     batchPreview.value = preview
-    selectedUnfitCandidates.value = (preview.unfitList || []).map((c: any) => c.candidateId)
-    progress.value = `扫描完成：合格 ${preview.qualifiedCount} 人，不合格 ${preview.unfitCount} 人，待核实 ${preview.pendingCount} 人`
-    ElMessage.success(`成功生成初筛预览：共核验 ${preview.totalCount} 位候选人`)
+    selectedUnfitCandidates.value = (preview.unfitList || []).filter((c: any) => c.actionStatus !== 'completed' && c.actionStatus !== 'verified_on_platform').map((c: any) => c.candidateId)
+    progress.value = `扫描结果：合格 ${preview.qualifiedCount} 人，不合格 ${preview.unfitCount} 人，待核实 ${preview.pendingCount} 人`
+    ElMessage.success(`初筛预览就绪：共核验 ${preview.totalCount} 位候选人`)
   } catch (error: any) {
     ElMessage.error(error?.message || String(error))
     progress.value = '扫描生成预览失败'
   } finally {
     scanning.value = false
+  }
+}
+
+onMounted(() => {
+  const runtime: any = (window as any).runtime
+  if (runtime && runtime.EventsOn) {
+    runtime.EventsOn('screening_candidate_updated', (event: any) => {
+      if (!batchPreview.value || batchPreview.value.batchId !== event.batchId) return
+      const cand = (batchPreview.value.unfitList || []).find((c: any) => c.candidateId === event.candidateId)
+      if (cand) {
+        cand.actionStatus = event.actionStatus
+        cand.actionReceiptAt = event.actionReceiptAt || ''
+        cand.actionError = event.actionError || ''
+      }
+    })
+  }
+})
+
+async function openTelescope() {
+  try {
+    const api: any = await import('../../wailsjs/go/main/App')
+    await api.Open51JobTelescopeBrowser()
+    ElMessage.success('已打开 51job 人才望远镜，请确认页面当前职位与这里选择的职位一致')
+  } catch (error: any) {
+    ElMessage.error(error?.message || String(error))
+  }
+}
+
+async function scanTelescopePreview() {
+  if (!accountScope.value || !jobId.value || !projectId.value) return
+  telescopeScanning.value = true
+  telescopePreview.value = null
+  telescopeProgress.value = '正在读取人才望远镜当前职位并使用项目条件筛选…'
+  try {
+    const api: any = await import('../../wailsjs/go/main/App')
+    await api.Bind51JobTalentManagementJob(accountScope.value, jobId.value, projectId.value)
+    const preview = await api.Scan51JobTelescopeBatch(accountScope.value, jobId.value, projectId.value)
+    telescopePreview.value = preview
+    telescopeProgress.value = `只读筛选完成：合格 ${preview.qualifiedCount} 人，不合格 ${preview.unfitCount} 人，待核实 ${preview.pendingCount} 人`
+    ElMessage.success(telescopeProgress.value)
+  } catch (error: any) {
+    telescopeProgress.value = error?.message || String(error)
+    ElMessage.error(telescopeProgress.value)
+  } finally {
+    telescopeScanning.value = false
   }
 }
 
@@ -807,18 +1001,25 @@ async function loadAuditLogs() {
 }
 
 watch(jobId, () => {
+  telescopePreview.value = null
+  telescopeProgress.value = ''
   syncMappedProject()
   void loadSyncTask()
 })
 
 watch(projectId, () => {
+  telescopePreview.value = null
+  savedCriteria.value = null
   void loadCriteria()
   void loadAuditLogs()
   void loadActionLedger()
 })
 
 watch(() => props.modelValue, value => {
-  if (value) void load()
+  if (value) {
+    activeTab.value = props.initialTab || 'sync'
+    void load()
+  }
 })
 
 async function runSingleBatch() {

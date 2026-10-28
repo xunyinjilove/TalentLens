@@ -55,20 +55,10 @@ async function connectManagementPage() {
     browser = await puppeteer.connect({
       browserURL: 'http://127.0.0.1:9503',
       defaultViewport: null,
-      protocolTimeout: 8000
+      protocolTimeout: 30000
     });
   } catch (err) {
     throw new Error('51job 专用浏览器端口 (9503) 未连接，请先点击【打开 51job 浏览器】并登录企业账号');
-  }
-  try {
-    const session = await browser.target().createCDPSession();
-    const { windowId } = await session.send('Browser.getWindowForTarget');
-    if (windowId) {
-      await session.send('Browser.setWindowBounds', { windowId, bounds: { windowState: 'minimized' } });
-    }
-    await session.detach().catch(() => {});
-  } catch {
-    // Ignore minimization error if platform unsupported
   }
   // Avoid calling browser.pages() directly because idle/sleeping tabs or background
   // web-workers can trigger CDP Network.enable timeouts.
@@ -101,7 +91,7 @@ async function connectManagementPage() {
         const management = components.find(vm => vm.$options?.name === 'TalentManagement');
         const menu = components.find(vm => vm.$options?.name === 'EhMenuPositions');
         return Boolean(management?.$data?.hruid && menu?.$props?.positionListsAll?.length);
-      }, { timeout: 5000 });
+      }, { timeout: 5000, polling: 250 });
     } catch {
       // 容错继续
     }
@@ -136,10 +126,6 @@ async function openBackgroundManagementPage(browser) {
   const session = await browser.target().createCDPSession();
   let page;
   try {
-    const { windowId } = await session.send('Browser.getWindowForTarget').catch(() => ({}));
-    if (windowId) {
-      await session.send('Browser.setWindowBounds', { windowId, bounds: { windowState: 'minimized' } }).catch(() => {});
-    }
     const { targetId } = await session.send('Target.createTarget', {
       url: 'https://ehire.51job.com/Revision/talent/management', background: true
     });
@@ -168,7 +154,8 @@ async function openBackgroundManagementPage(browser) {
         return 'COMPONENT_CHANGED';
       }
       return false;
-    }, { timeout: 12000 }).then(async (handle) => {
+    // Background tabs may not schedule animation frames; use interval polling.
+    }, { timeout: 12000, polling: 250 }).then(async (handle) => {
       const val = await handle.jsonValue().catch(() => null);
       if (val === 'LOGIN_REDIRECT') {
         throw new Error('51job 尚未登录或会话已过期，请先点击【打开 51job 浏览器】登录企业账号');
@@ -347,7 +334,26 @@ async function rejectCandidate(browser, accountScope, options) {
       const card = Array.from(document.querySelectorAll('*')).map(el => el.__vue__)
         .find(vm => vm?.$options?.name === 'EhResumeCard' &&
           String(vm.$props?.source?.userid) === candidateId && String(vm.$props?.source?.cvlogid) === recordId);
-      if (!card) throw new Error('无法在待处理列表中定位该候选人（可能已被处理）');
+      if (!card) {
+        // 先只读复查是否已在「不合适」(statusIndex = 4)
+        try {
+          status.changeStatus(4);
+          await new Promise(resolve => setTimeout(resolve, 1200));
+          const unfitCard = Array.from(document.querySelectorAll('*')).map(el => el.__vue__)
+            .find(vm => vm?.$options?.name === 'EhResumeCard' &&
+              String(vm.$props?.source?.userid) === candidateId && String(vm.$props?.source?.cvlogid) === recordId);
+          status.changeStatus(1);
+          if (unfitCard) {
+            return {
+              alreadyUnfit: true,
+              clickedReason: '平台已处于不合适状态',
+              cvlogid: recordId,
+              userid: candidateId
+            };
+          }
+        } catch (_) {}
+        throw new Error('无法在待处理列表中定位该候选人（可能已被处理或转移）');
+      }
 
       const btn = document.getElementById(`unfit_reason_btn${recordId}`);
       if (!btn) throw new Error('无法找到候选人的「不合适」操作按钮');
@@ -380,16 +386,54 @@ async function rejectCandidate(browser, accountScope, options) {
         await new Promise(resolve => setTimeout(resolve, 1000));
       }
 
+      // 逐人真实回执复核：等待列表刷新，验证卡片是否从待处理中移出
+      if (typeof management.updateList === 'function') {
+        try {
+          const p = management.updateList();
+          if (p && typeof p.then === 'function') await p;
+        } catch (_) {}
+      }
+      await new Promise(resolve => setTimeout(resolve, 1500));
+
+      const remainingCard = Array.from(document.querySelectorAll('*')).map(el => el.__vue__)
+        .find(vm => vm?.$options?.name === 'EhResumeCard' &&
+          String(vm.$props?.source?.userid) === candidateId && String(vm.$props?.source?.cvlogid) === recordId);
+
       return {
         clickedReason: (match.textContent || '').trim(),
         cvlogid: recordId,
-        userid: candidateId
+        userid: candidateId,
+        verified: !remainingCard
       };
     }, { jobId, candidateId, recordId, reasonLabel });
 
+    if (outcome.alreadyUnfit) {
+      return {
+        status: 'ok',
+        verified: true,
+        alreadyProcessed: true,
+        receipt: `经核验平台已处于不合适状态，已逐人核对确认（保留来源，不重复点击）`,
+        accountScope,
+        jobId,
+        candidateId,
+        recordId
+      };
+    }
+    if (!outcome.verified) {
+      return {
+        status: 'receipt_pending',
+        verified: false,
+        receipt: `已在平台提交不合适操作，但待处理列表未即时移出该卡片，待核实回执`,
+        accountScope,
+        jobId,
+        candidateId,
+        recordId
+      };
+    }
     return {
       status: 'ok',
-      receipt: `已在 51job 平台成功标记不合适（勾选原因：${outcome.clickedReason}）`,
+      verified: true,
+      receipt: `已在 51job 平台成功标记不合适并经回执核验（勾选原因：${outcome.clickedReason}）`,
       accountScope,
       jobId,
       candidateId,

@@ -414,7 +414,7 @@ func ensureStrictCriteriaColumns(db *sql.DB) error {
 		{"job_seeking_status", "TEXT NOT NULL DEFAULT ''"},
 		{"major_keywords", "TEXT NOT NULL DEFAULT ''"},
 		{"auto_reject_platform", "INTEGER NOT NULL DEFAULT 0"},
-		{"activity_days", "INTEGER NOT NULL DEFAULT 7"},
+		{"activity_days", "INTEGER NOT NULL DEFAULT 90"},
 		{"criteria_version", "TEXT NOT NULL DEFAULT 'v1'"},
 		{"project_intro_message", "TEXT NOT NULL DEFAULT ''"},
 		{"schedule_time", "TEXT NOT NULL DEFAULT '09:30'"},
@@ -444,6 +444,14 @@ func ensureScreeningFrameworkTables(db *sql.DB) error {
 			criteria_version TEXT NOT NULL DEFAULT 'v1',
 			criteria_snapshot TEXT NOT NULL DEFAULT '{}',
 			status TEXT NOT NULL DEFAULT 'preview_ready',
+			scan_status TEXT NOT NULL DEFAULT 'complete',
+			current_page INTEGER NOT NULL DEFAULT 1,
+			next_page INTEGER NOT NULL DEFAULT 1,
+			last_success_page INTEGER NOT NULL DEFAULT 0,
+			total_pages_estimated INTEGER NOT NULL DEFAULT 1,
+			initial_platform_count INTEGER NOT NULL DEFAULT 0,
+			last_error TEXT NOT NULL DEFAULT '',
+			next_check_at TEXT NOT NULL DEFAULT '',
 			qualified_count INTEGER NOT NULL DEFAULT 0,
 			unfit_count INTEGER NOT NULL DEFAULT 0,
 			pending_count INTEGER NOT NULL DEFAULT 0,
@@ -463,6 +471,8 @@ func ensureScreeningFrameworkTables(db *sql.DB) error {
 			raw_profile_json TEXT NOT NULL DEFAULT '{}',
 			detail_loaded INTEGER NOT NULL DEFAULT 0,
 			action_status TEXT NOT NULL DEFAULT 'pending',
+			action_receipt_at TEXT NOT NULL DEFAULT '',
+			action_error TEXT NOT NULL DEFAULT '',
 			created_at TEXT NOT NULL,
 			UNIQUE(batch_id, candidate_id, record_id)
 		);`,
@@ -492,6 +502,65 @@ func ensureScreeningFrameworkTables(db *sql.DB) error {
 			return err
 		}
 	}
+
+	// 增量迁移已存在的 screening_batches 字段
+	batchCols := []struct {
+		name string
+		typ  string
+	}{
+		{"scan_status", "TEXT NOT NULL DEFAULT 'complete'"},
+		{"current_page", "INTEGER NOT NULL DEFAULT 1"},
+		{"next_page", "INTEGER NOT NULL DEFAULT 1"},
+		{"last_success_page", "INTEGER NOT NULL DEFAULT 0"},
+		{"total_pages_estimated", "INTEGER NOT NULL DEFAULT 1"},
+		{"initial_platform_count", "INTEGER NOT NULL DEFAULT 0"},
+		{"last_error", "TEXT NOT NULL DEFAULT ''"},
+		{"next_check_at", "TEXT NOT NULL DEFAULT ''"},
+	}
+	existingBatchCols := make(map[string]bool)
+	if rows, err := db.Query(`PRAGMA table_info(screening_batches)`); err == nil {
+		for rows.Next() {
+			var cid int
+			var name, typ string
+			var notnull, pk int
+			var dfltValue interface{}
+			_ = rows.Scan(&cid, &name, &typ, &notnull, &dfltValue, &pk)
+			existingBatchCols[name] = true
+		}
+		rows.Close()
+	}
+	for _, c := range batchCols {
+		if !existingBatchCols[c.name] {
+			_, _ = db.Exec(fmt.Sprintf("ALTER TABLE screening_batches ADD COLUMN %s %s", c.name, c.typ))
+		}
+	}
+
+	// 增量迁移已存在的 screening_candidate_results 字段
+	resCols := []struct {
+		name string
+		typ  string
+	}{
+		{"action_receipt_at", "TEXT NOT NULL DEFAULT ''"},
+		{"action_error", "TEXT NOT NULL DEFAULT ''"},
+	}
+	existingResCols := make(map[string]bool)
+	if rows, err := db.Query(`PRAGMA table_info(screening_candidate_results)`); err == nil {
+		for rows.Next() {
+			var cid int
+			var name, typ string
+			var notnull, pk int
+			var dfltValue interface{}
+			_ = rows.Scan(&cid, &name, &typ, &notnull, &dfltValue, &pk)
+			existingResCols[name] = true
+		}
+		rows.Close()
+	}
+	for _, c := range resCols {
+		if !existingResCols[c.name] {
+			_, _ = db.Exec(fmt.Sprintf("ALTER TABLE screening_candidate_results ADD COLUMN %s %s", c.name, c.typ))
+		}
+	}
+
 	return nil
 }
 

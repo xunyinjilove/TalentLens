@@ -569,8 +569,11 @@ func (a *App) startup(ctx context.Context) {
 	}
 	if _, err := a.getRecruitmentDB(); err != nil {
 		log.Printf("[RecruitmentStore] SQLite 迁移未完成，保留旧数据入口: %v", err)
-	} else if err := a.interruptUnfinishedSourcingTasks(); err != nil {
-		log.Printf("[RecruitmentStore] 检索任务恢复状态失败: %v", err)
+	} else {
+		if err := a.interruptUnfinishedSourcingTasks(); err != nil {
+			log.Printf("[RecruitmentStore] 检索任务恢复状态失败: %v", err)
+		}
+		a.startScreeningFrameworkScheduler()
 	}
 
 	// 监听原生文件拖拽（Wails 提供真实文件路径）
@@ -609,7 +612,9 @@ func (a *App) startup(ctx context.Context) {
 		log.Printf("[OnFileDrop] 成功添加 %d 个文件", added)
 	})
 
-	a.startTalentManagementScheduler()
+	// 51job screening now requires an HR-reviewed preview before import or
+	// platform actions. The legacy hourly importer bypasses that review, so it
+	// must not start for saved auto_sync_enabled settings.
 	log.Println("TalentLens 已启动")
 }
 
