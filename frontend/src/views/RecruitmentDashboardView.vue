@@ -12,14 +12,14 @@
           <div class="wb-kpi-label">{{ card.label }}</div>
         </div>
       </div>
-      <section class="wb-card overview-board" :class="{ 'is-collapsed': !boardExpanded }" aria-labelledby="overview-board-title">
+      <section class="wb-card overview-board" :class="{ 'is-collapsed': !boardExpanded }" aria-labelledby="overview-board-title" @click="!boardExpanded && (boardExpanded = true)">
         <div class="overview-board-heading">
           <div>
             <h2 id="overview-board-title" class="wb-section-title">候选人跟进看板</h2>
           </div>
           <div class="overview-board-controls">
-            <button type="button" class="overview-board-toggle" :aria-expanded="boardExpanded" aria-controls="overview-board-content" @click="boardExpanded = !boardExpanded">
-              {{ boardExpanded ? '收起看板' : '展开看板' }} <span aria-hidden="true">{{ boardExpanded ? '⌃' : '⌄' }}</span>
+            <button type="button" class="overview-board-toggle" :aria-expanded="boardExpanded" aria-controls="overview-board-content" @click.stop="boardExpanded = !boardExpanded">
+              {{ boardExpanded ? '收起' : '展开' }}
             </button>
             <el-select v-if="boardExpanded" v-model="selectedProjectId" aria-label="筛选招聘职位" class="overview-project-select" placeholder="全部职位">
               <el-option label="全部职位" value="" />
@@ -234,6 +234,8 @@ onMounted(() => { void refresh() })
 
 <style scoped>
 .overview-board { margin-bottom: 18px; padding: 20px; }
+.overview-board.is-collapsed { cursor: pointer; }
+.overview-board.is-collapsed:hover { background: var(--wb-surface-soft); }
 .overview-board-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 18px; margin-bottom: 18px; }
 .overview-board-heading .wb-section-title { margin-bottom: 4px; }
 .overview-board-controls { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 10px; }
