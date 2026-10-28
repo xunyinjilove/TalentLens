@@ -9,11 +9,11 @@
   >
     <div class="dialog-scroll-body" style="max-height: 68vh; overflow-y: auto; overflow-x: hidden; padding-right: 8px;">
       <el-tabs v-model="activeTab" style="margin-top: -10px">
-      <!-- Tab 1: 职位导入与每小时自动同步 -->
-      <el-tab-pane label="职位导入与自动调度" name="sync">
+      <!-- Tab 1: 职位接入与初筛预览 -->
+      <el-tab-pane label="职位接入与初筛预览" name="sync">
         <el-alert type="info" :closable="false" show-icon style="margin-bottom: 16px">
           <template #default>
-            按平台职位 ID 绑定本地专属库。只分析已取得完整资料的简历；附件受限尚未取得时保留为“待补全”。
+            项目是条件的唯一归属。仅扫描平台「待处理」人选生成三类名单预览；HR 确认后，合格人选入库，不合格人选可批量标记「不感兴趣」，待核实人选受完整性保护不入库也不触发平台操作。
           </template>
         </el-alert>
 
@@ -27,14 +27,14 @@
           <el-row :gutter="16">
             <el-col :span="12">
               <el-form-item label="51job 企业职位">
-                <el-select v-model="jobId" filterable style="width: 100%" :disabled="running" placeholder="选择已登录企业的职位">
+                <el-select v-model="jobId" filterable style="width: 100%" :disabled="running || scanning" placeholder="选择已登录企业的职位">
                   <el-option v-for="job in jobs" :key="job.jobId" :value="job.jobId" :label="formatJobOptionLabel(job)" />
                 </el-select>
               </el-form-item>
             </el-col>
             <el-col :span="12">
               <el-form-item label="对应本地职位专属库">
-                <el-select v-model="projectId" filterable style="width: 100%" :disabled="running" placeholder="首次绑定请确认项目">
+                <el-select v-model="projectId" filterable style="width: 100%" :disabled="running || scanning" placeholder="首次绑定请确认项目">
                   <el-option v-for="project in projects" :key="project.id" :value="project.id"
                     :label="`${project.job_config?.title || project.name} · ${project.name}`" />
                 </el-select>
@@ -46,33 +46,103 @@
             type="warning" :closable="false" show-icon style="margin-bottom: 16px"
             title="注意：当前 51job 职位的招聘要求为【大专】，但您在【岗位专属硬性条件】中设置了【本科及以上】。本次扫描的大专候选人将被拦截排除。若需录入大专候选人，请前往【岗位专属硬性条件】将最低学历调整为【大专及以上】。" />
 
-          <el-form-item label="导入的平台状态">
-            <el-checkbox-group v-model="statuses" :disabled="running">
-              <el-checkbox :value="1">待处理</el-checkbox>
-              <el-checkbox :value="2">合适</el-checkbox>
-              <el-checkbox :value="3">面试</el-checkbox>
-              <el-checkbox :value="4">待定</el-checkbox>
-            </el-checkbox-group>
-          </el-form-item>
+          <div style="display: flex; gap: 12px; align-items: center; margin-bottom: 16px">
+            <el-button type="primary" :loading="scanning" :disabled="!jobId || !projectId || catalogStale" @click="scanBatchPreview">
+              <el-icon><Search /></el-icon> 扫描待处理人选并生成初筛预览 (单页50人)
+            </el-button>
+            <span style="font-size: 12px; color: #64748b">
+              扫描仅收集名单与核验证据，绝不静默触碰或修改平台状态
+            </span>
+          </div>
 
-          <!-- 断点状态看板 -->
-          <div v-if="syncTask" style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 6px; padding: 12px 16px; margin-bottom: 16px">
-            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px">
-              <span style="font-weight: 600; color: #1e293b; font-size: 13px">任务断点状态</span>
-              <el-tag :type="syncTaskTagType" size="small">{{ syncTaskStatusLabel }}</el-tag>
-            </div>
-            <div style="font-size: 12px; color: #64748b; line-height: 1.8">
-              <div>当前游标：{{ currentStatusName }} · 第 {{ syncTask.pageIndex }} 页</div>
-              <div>累计导入：{{ syncTask.importedCandidates }} 人 / 平台已知候选人：{{ syncTask.totalCandidates || '待统计' }}</div>
-              <div v-if="syncTask.lastSyncAt">上次检查：{{ syncTask.lastSyncAt }}</div>
-              <div v-if="syncTask.lastError" style="color: #ef4444">异常提示：{{ syncTask.lastError }}</div>
-            </div>
-            <div style="margin-top: 10px; display: flex; align-items: center; justify-content: space-between; border-top: 1px dashed #cbd5e1; padding-top: 8px">
-              <div style="display: flex; align-items: center; gap: 8px">
-                <el-switch v-model="autoSyncEnabled" @change="toggleAutoSync" :disabled="!jobId || running || catalogStale" />
-                <span style="font-size: 12px; color: #334155">软件运行且当前账号登录时，每小时自动检查新增名单</span>
+          <!-- 初筛预览看板 -->
+          <div v-if="batchPreview" class="screening-preview-card" style="border: 1px solid #e2e8f0; border-radius: 8px; padding: 14px; background: #fff; margin-bottom: 16px">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; border-bottom: 1px solid #f1f5f9; padding-bottom: 8px">
+              <div style="font-weight: 600; font-size: 14px; color: #1e293b">
+                本轮初筛核验报告（条件版本：{{ batchPreview.criteriaVersion }} · 共检索 {{ batchPreview.totalCount }} 人）
               </div>
-              <el-button link type="info" size="small" :disabled="running" @click="resetTask">重置断点</el-button>
+              <el-radio-group v-model="previewSubTab" size="small">
+                <el-radio-button value="qualified">合格 ({{ batchPreview.qualifiedCount }})</el-radio-button>
+                <el-radio-button value="unfit">不合格 ({{ batchPreview.unfitCount }})</el-radio-button>
+                <el-radio-button value="pending">待核实 ({{ batchPreview.pendingCount }})</el-radio-button>
+              </el-radio-group>
+            </div>
+
+            <!-- 子看板 1: 合格人选 -->
+            <div v-if="previewSubTab === 'qualified'">
+              <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px">
+                <span style="font-size: 12px; color: #166534">各项启用条件均通过，可一键导入至当前职位专属分库</span>
+                <el-button type="success" size="small" :loading="executingAction" :disabled="batchPreview.qualifiedCount === 0" @click="confirmImportQualified">
+                  一键导入合格人选入库 ({{ batchPreview.qualifiedCount }})
+                </el-button>
+              </div>
+              <el-table :data="batchPreview.qualifiedList" size="small" max-height="240" empty-text="当前批次无合格人选">
+                <el-table-column prop="candidateName" label="姓名" width="100" />
+                <el-table-column label="核验说明" min-width="260">
+                  <template #default="{ row }">
+                    <div v-for="item in row.ruleEvidence" :key="item.rule" style="font-size: 11px; color: #15803d">
+                      ✔ {{ item.label }}：{{ item.evidence }}
+                    </div>
+                  </template>
+                </el-table-column>
+                <el-table-column prop="actionStatus" label="状态" width="90">
+                  <template #default="{ row }">
+                    <el-tag size="small" :type="row.actionStatus === 'imported' ? 'success' : 'info'">
+                      {{ row.actionStatus === 'imported' ? '已入库' : '待导入' }}
+                    </el-tag>
+                  </template>
+                </el-table-column>
+              </el-table>
+            </div>
+
+            <!-- 子看板 2: 不合格人选 -->
+            <div v-if="previewSubTab === 'unfit'">
+              <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px">
+                <span style="font-size: 12px; color: #991b1b">有确凿不符合项，可批量联动 51job 平台标记「不感兴趣」</span>
+                <el-button type="danger" size="small" :loading="executingAction" :disabled="!selectedUnfitCandidates.length" @click="confirmRejectUnfit">
+                  批量标记不合适 (已选 {{ selectedUnfitCandidates.length }} 人)
+                </el-button>
+              </div>
+              <el-table :data="batchPreview.unfitList" size="small" max-height="240" @selection-change="handleUnfitSelectionChange" empty-text="当前批次无不合格人选">
+                <el-table-column type="selection" width="40" />
+                <el-table-column prop="candidateName" label="姓名" width="100" />
+                <el-table-column label="不合格确凿证据" min-width="260">
+                  <template #default="{ row }">
+                    <div v-for="item in row.ruleEvidence.filter((e: any) => e.status === 'fail')" :key="item.rule" style="font-size: 11px; color: #b91c1c; font-weight: 500">
+                      ✖ {{ item.label }}：{{ item.evidence }}
+                    </div>
+                  </template>
+                </el-table-column>
+                <el-table-column prop="actionStatus" label="状态" width="90">
+                  <template #default="{ row }">
+                    <el-tag size="small" :type="row.actionStatus === 'rejected' ? 'danger' : 'warning'">
+                      {{ row.actionStatus === 'rejected' ? '已标记' : '待处理' }}
+                    </el-tag>
+                  </template>
+                </el-table-column>
+              </el-table>
+            </div>
+
+            <!-- 子看板 3: 待核实人选 -->
+            <div v-if="previewSubTab === 'pending'">
+              <div style="margin-bottom: 8px; font-size: 12px; color: #854d0e">
+                资料缺失、活跃度未公开或关键字段未知。保护机制已生效：绝不自动入库，也绝不触发平台淘汰。
+              </div>
+              <el-table :data="batchPreview.pendingList" size="small" max-height="240" empty-text="当前批次无待核实人选">
+                <el-table-column prop="candidateName" label="姓名" width="100" />
+                <el-table-column label="待核实证据说明" min-width="260">
+                  <template #default="{ row }">
+                    <div v-for="item in row.ruleEvidence.filter((e: any) => e.status === 'unknown')" :key="item.rule" style="font-size: 11px; color: #d97706">
+                      ？{{ item.label }}：{{ item.evidence }}
+                    </div>
+                  </template>
+                </el-table-column>
+                <el-table-column label="操作" width="100">
+                  <template #default="{ row }">
+                    <span style="font-size: 12px; color: #94a3b8">保留待人工复核</span>
+                  </template>
+                </el-table-column>
+              </el-table>
             </div>
           </div>
         </el-form>
@@ -154,6 +224,47 @@
             </el-col>
           </el-row>
 
+          <el-row :gutter="16">
+            <el-col :span="12">
+              <el-form-item label="人才活跃度要求">
+                <el-select v-model="strictCriteria.activityDays" style="width: 100%">
+                  <el-option label="不限活跃时间" :value="0" />
+                  <el-option label="近 3 天活跃" :value="3" />
+                  <el-option label="近 7 天活跃（推荐）" :value="7" />
+                  <el-option label="近 30 天活跃" :value="30" />
+                </el-select>
+              </el-form-item>
+            </el-col>
+            <el-col :span="12">
+              <el-form-item label="条件版本标识">
+                <el-input :model-value="strictCriteria.criteriaVersion || 'v1'" disabled placeholder="保存后自动递增版本号" style="width: 100%" />
+              </el-form-item>
+            </el-col>
+          </el-row>
+
+          <el-form-item label="项目专属推介文案（平台打招呼后发送）">
+            <el-input
+              v-model="strictCriteria.projectIntroMessage"
+              type="textarea"
+              :rows="3"
+              placeholder="如：您好！关注到您的经历与我们目前急聘的【研发专家】岗位非常契合，欢迎了解职位详情并投递沟通！"
+              clearable
+            />
+          </el-form-item>
+
+          <el-row :gutter="16">
+            <el-col :span="12">
+              <el-form-item label="每日定时计划时间">
+                <el-input v-model="strictCriteria.scheduleTime" placeholder="例如 09:30" style="width: 100%" />
+              </el-form-item>
+            </el-col>
+            <el-col :span="12">
+              <el-form-item label="定时自动初筛状态" style="display: flex; align-items: center; margin-top: 28px">
+                <el-switch v-model="strictCriteria.scheduleEnabled" active-text="启用每日定时初筛" />
+              </el-form-item>
+            </el-col>
+          </el-row>
+
           <el-form-item label="专业背景关键词匹配（满足其一即可通过）">
             <el-input
               v-model="strictCriteria.majorKeywords"
@@ -197,39 +308,69 @@
             </div>
           </el-form-item>
 
-          <div style="display: flex; gap: 12px; align-items: center">
-            <el-button type="primary" :disabled="!projectId" :loading="savingCriteria" @click="saveCriteria">
-              保存岗位硬性条件
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 16px; border-top: 1px dashed #cbd5e1; padding-top: 12px">
+            <div style="display: flex; gap: 12px; align-items: center">
+              <el-button type="primary" :disabled="!projectId" :loading="savingCriteria" @click="saveCriteria">
+                保存岗位硬性条件
+              </el-button>
+              <span v-if="!projectId" style="font-size: 12px; color: #f59e0b">请先选择上方职位专属库后保存</span>
+              <span v-if="saveStatus" class="catalog-status">{{ saveStatus }}</span>
+            </div>
+            <el-button type="warning" plain :disabled="!projectId" :loading="rescreening" @click="rescreenCurrentProject">
+              一键旧库全量重筛
             </el-button>
-            <span v-if="!projectId" style="font-size: 12px; color: #f59e0b">请先选择上方职位专属库后保存</span>
-            <span v-if="saveStatus" class="catalog-status">{{ saveStatus }}</span>
           </div>
         </el-form>
       </el-tab-pane>
 
-      <!-- Tab 3: 淘汰审计日志 -->
-      <el-tab-pane label="淘汰审计记录" name="audit">
+      <!-- Tab 3: 平台动作台账与审计 -->
+      <el-tab-pane label="平台动作台账与审计" name="audit">
         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px">
           <span style="font-size: 12px; color: #64748b">
-            自动淘汰人选不进入常规人才库列表，全量留存身份、规则、证据与平台回执备查。
+            留存逐人身份、判定规则、执行动作、平台回执与失败原因，支持审计追溯。
           </span>
           <div style="display: flex; gap: 8px">
             <el-button size="small" type="danger" plain :disabled="!auditLogs.length" @click="confirmClearAuditLogs">清空审计记录</el-button>
-            <el-button size="small" :loading="loadingAudit" @click="loadAuditLogs">刷新记录</el-button>
+            <el-button size="small" :loading="loadingAudit || loadingLedger" @click="refreshAuditAndLedger">刷新记录</el-button>
           </div>
         </div>
 
-        <el-table :data="auditLogs" size="small" max-height="360" empty-text="暂无淘汰审计记录">
-          <el-table-column prop="candidateName" label="候选人" width="110" />
-          <el-table-column prop="reasonLabel" label="淘汰原因" width="120">
-            <template #default="{ row }">
-              <el-tag type="danger" size="small">{{ row.reasonLabel }}</el-tag>
-            </template>
-          </el-table-column>
-          <el-table-column prop="evidence" label="确凿证据说明" min-width="200" show-overflow-tooltip />
-          <el-table-column prop="platformReceipt" label="平台回执" min-width="150" show-overflow-tooltip />
-          <el-table-column prop="createdAt" label="执行时间" width="140" />
-        </el-table>
+        <el-tabs type="border-card">
+          <el-tab-pane label="平台动作台账">
+            <el-table :data="actionLedgerLogs" size="small" max-height="300" empty-text="暂无平台动作台账记录">
+              <el-table-column prop="candidateName" label="候选人" width="100" />
+              <el-table-column prop="actionType" label="动作" width="90">
+                <template #default="{ row }">
+                  <el-tag size="small" :type="row.actionType === 'reject' ? 'danger' : (row.actionType === 'import' ? 'success' : 'primary')">
+                    {{ row.actionType === 'reject' ? '标记不合适' : (row.actionType === 'import' ? '专属库入库' : row.actionType) }}
+                  </el-tag>
+                </template>
+              </el-table-column>
+              <el-table-column prop="status" label="状态" width="80">
+                <template #default="{ row }">
+                  <el-tag size="small" :type="row.status === 'success' ? 'success' : 'danger'">
+                    {{ row.status === 'success' ? '成功' : '失败' }}
+                  </el-tag>
+                </template>
+              </el-table-column>
+              <el-table-column prop="receipt" label="平台回执 / 结果" min-width="200" show-overflow-tooltip />
+              <el-table-column prop="requestedAt" label="执行时间" width="140" />
+            </el-table>
+          </el-tab-pane>
+          <el-tab-pane label="淘汰审计记录">
+            <el-table :data="auditLogs" size="small" max-height="300" empty-text="暂无淘汰审计记录">
+              <el-table-column prop="candidateName" label="候选人" width="100" />
+              <el-table-column prop="reasonLabel" label="淘汰原因" width="110">
+                <template #default="{ row }">
+                  <el-tag type="danger" size="small">{{ row.reasonLabel }}</el-tag>
+                </template>
+              </el-table-column>
+              <el-table-column prop="evidence" label="确凿证据说明" min-width="190" show-overflow-tooltip />
+              <el-table-column prop="platformReceipt" label="平台回执" min-width="140" show-overflow-tooltip />
+              <el-table-column prop="createdAt" label="执行时间" width="140" />
+            </el-table>
+          </el-tab-pane>
+        </el-tabs>
       </el-tab-pane>
     </el-tabs>
     </div>
@@ -237,17 +378,13 @@
     <template #footer>
       <div style="display: flex; justify-content: space-between; align-items: center; width: 100%">
         <div style="display: flex; gap: 8px">
-          <el-button type="warning" plain :disabled="running" @click="openBrowser">打开 51job 浏览器</el-button>
-          <el-button :loading="loading" :disabled="running" @click="load">重新读取职位</el-button>
+          <el-button type="warning" plain :disabled="running || scanning || executingAction" @click="openBrowser">打开 51job 浏览器</el-button>
+          <el-button :loading="loading" :disabled="running || scanning || executingAction" @click="load">重新读取职位</el-button>
         </div>
         <div style="display: flex; gap: 8px">
-          <el-button :disabled="running" @click="visible = false">关闭</el-button>
-          <el-button v-if="running" @click="stopRequested = true">本页结束后暂停</el-button>
-          <el-button v-if="!running && activeTab === 'sync'" :disabled="!jobId || !projectId || catalogStale" @click="runSingleBatch">
-            执行单批 (50人)
-          </el-button>
-          <el-button v-if="activeTab === 'sync'" type="primary" :loading="running" :disabled="!jobId || !projectId || !statuses.length || catalogStale"
-            @click="start">连续导入并同步</el-button>
+          <el-button :disabled="running || scanning || executingAction" @click="visible = false">关闭</el-button>
+          <el-button v-if="activeTab === 'sync'" type="primary" :loading="scanning" :disabled="!jobId || !projectId || catalogStale"
+            @click="scanBatchPreview">扫描生成初筛预览 (50人)</el-button>
           <el-button v-if="activeTab === 'criteria'" type="primary" :disabled="!projectId" :loading="savingCriteria"
             @click="saveCriteria">保存硬性条件</el-button>
         </div>
@@ -259,6 +396,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import { Search } from '@element-plus/icons-vue'
 
 const props = defineProps<{ modelValue: boolean; projects: any[]; defaultProjectId?: string }>()
 const emit = defineEmits<{ 'update:modelValue': [value: boolean]; completed: [] }>()
@@ -271,7 +409,7 @@ const accountScope = ref('')
 const jobId = ref('')
 const projectId = ref('')
 const selectedJob = computed(() => jobs.value.find(j => j.jobId === jobId.value))
-const statuses = ref<number[]>([1, 2, 3, 4])
+const statuses = ref<number[]>([1])
 const loading = ref(false)
 const catalogStale = ref(true)
 const catalogStatus = ref('')
@@ -288,6 +426,16 @@ const savingCriteria = ref(false)
 const loadingAudit = ref(false)
 const auditLogs = ref<any[]>([])
 
+// 51job 共用初筛框架状态
+const batchPreview = ref<any>(null)
+const scanning = ref(false)
+const previewSubTab = ref<'qualified' | 'unfit' | 'pending'>('qualified')
+const selectedUnfitCandidates = ref<string[]>([])
+const executingAction = ref(false)
+const actionLedgerLogs = ref<any[]>([])
+const loadingLedger = ref(false)
+const rescreening = ref(false)
+
 const strictCriteria = ref({
   projectId: '',
   minEducation: '',
@@ -300,6 +448,11 @@ const strictCriteria = ref({
   majorKeywords: '',
   rejectNonLocalWillingness: false,
   targetCity: '',
+  activityDays: 7,
+  criteriaVersion: 'v1',
+  projectIntroMessage: '',
+  scheduleTime: '09:30',
+  scheduleEnabled: false,
   complianceConfirmed: false,
   autoRejectPlatform: true,
   updatedAt: ''
@@ -369,6 +522,9 @@ async function load() {
     ElMessage.success(`成功读取 ${jobs.value.length} 个 51job 在线职位`)
   } catch (error: any) {
     if (generation !== loadGeneration) return
+    jobs.value = []
+    jobId.value = ''
+    catalogStale.value = true
     catalogStatus.value = classifyCatalogError(error)
     ElMessage.error(catalogStatus.value)
   } finally {
@@ -474,10 +630,120 @@ function applyCriteria(c: any, selectedProjectID: string) {
     majorKeywords: c.majorKeywords || '',
     rejectNonLocalWillingness: Boolean(c.rejectNonLocalWillingness),
     targetCity: c.targetCity || '',
+    activityDays: c.activityDays !== undefined ? c.activityDays : 7,
+    criteriaVersion: c.criteriaVersion || 'v1',
+    projectIntroMessage: c.projectIntroMessage || '',
+    scheduleTime: c.scheduleTime || '09:30',
+    scheduleEnabled: Boolean(c.scheduleEnabled),
     complianceConfirmed: Boolean(c.complianceConfirmed),
     autoRejectPlatform: c.autoRejectPlatform !== false,
     updatedAt: c.updatedAt || ''
   }
+}
+
+function handleUnfitSelectionChange(selection: any[]) {
+  selectedUnfitCandidates.value = selection.map(item => item.candidateId)
+}
+
+async function scanBatchPreview() {
+  if (!jobId.value || !projectId.value || !accountScope.value) return
+  scanning.value = true
+  summary.value = ''
+  progress.value = '正在扫描平台待处理人选并执行三态合规核验...'
+  try {
+    const api: any = await import('../../wailsjs/go/main/App')
+    await api.Bind51JobTalentManagementJob(accountScope.value, jobId.value, projectId.value)
+    const preview = await api.Scan51JobTalentManagementBatch(accountScope.value, jobId.value, projectId.value, 1)
+    batchPreview.value = preview
+    selectedUnfitCandidates.value = (preview.unfitList || []).map((c: any) => c.candidateId)
+    progress.value = `扫描完成：合格 ${preview.qualifiedCount} 人，不合格 ${preview.unfitCount} 人，待核实 ${preview.pendingCount} 人`
+    ElMessage.success(`成功生成初筛预览：共核验 ${preview.totalCount} 位候选人`)
+  } catch (error: any) {
+    ElMessage.error(error?.message || String(error))
+    progress.value = '扫描生成预览失败'
+  } finally {
+    scanning.value = false
+  }
+}
+
+async function confirmImportQualified() {
+  if (!batchPreview.value?.batchId) return
+  executingAction.value = true
+  try {
+    const api: any = await import('../../wailsjs/go/main/App')
+    const count = await api.ConfirmScreeningImportQualified(batchPreview.value.batchId)
+    ElMessage.success(`成功将 ${count} 位合格人选导入本地专属分库！`)
+    batchPreview.value = await api.GetScreeningBatchPreview(batchPreview.value.batchId)
+    emit('completed')
+    void loadActionLedger()
+  } catch (err: any) {
+    ElMessage.error(err?.message || String(err))
+  } finally {
+    executingAction.value = false
+  }
+}
+
+async function confirmRejectUnfit() {
+  if (!batchPreview.value?.batchId || !selectedUnfitCandidates.value.length) return
+  try {
+    await ElMessageBox.confirm(`确定要对已选的 ${selectedUnfitCandidates.value.length} 位不符合硬性条件的候选人在 51job 平台批量标记「不合适」吗？此操作将提交平台并留存审计日志。`, '平台操作确认', {
+      confirmButtonText: '确认标记不合适',
+      cancelButtonText: '取消',
+      type: 'warning'
+    })
+    executingAction.value = true
+    const api: any = await import('../../wailsjs/go/main/App')
+    const ledgers = await api.ConfirmScreeningRejectUnfit(batchPreview.value.batchId, selectedUnfitCandidates.value)
+    const successCount = (ledgers || []).filter((l: any) => l.status === 'success').length
+    ElMessage.success(`已完成平台标记：成功 ${successCount} 人`)
+    batchPreview.value = await api.GetScreeningBatchPreview(batchPreview.value.batchId)
+    void loadAuditLogs()
+    void loadActionLedger()
+    emit('completed')
+  } catch (err: any) {
+    if (err !== 'cancel') ElMessage.error(err?.message || String(err))
+  } finally {
+    executingAction.value = false
+  }
+}
+
+async function rescreenCurrentProject() {
+  if (!projectId.value) return
+  try {
+    await ElMessageBox.confirm('一键旧库全量重筛将使用当前保存的岗位硬性条件，对当前专属库全部已入库人选重新进行合规排查。不合格人选将被移至待处理/归档区并留存审计日志，不会自动联动平台执行拒绝。确定继续吗？', '旧库重筛确认', {
+      confirmButtonText: '确定重筛',
+      cancelButtonText: '取消',
+      type: 'warning'
+    })
+    rescreening.value = true
+    const api: any = await import('../../wailsjs/go/main/App')
+    const res = await api.RescreenProjectRepository(projectId.value)
+    ElMessage.success(`旧库重筛完成：共核验 ${res.totalChecked} 人，排除不合规 ${res.unfitCount} 人，保留合格 ${res.activeRemainingCount} 人`)
+    void loadAuditLogs()
+    emit('completed')
+  } catch (err: any) {
+    if (err !== 'cancel') ElMessage.error(err?.message || String(err))
+  } finally {
+    rescreening.value = false
+  }
+}
+
+async function loadActionLedger() {
+  if (!projectId.value) return
+  loadingLedger.value = true
+  try {
+    const api: any = await import('../../wailsjs/go/main/App')
+    actionLedgerLogs.value = (await api.ListPlatformActionLedger(projectId.value)) || []
+  } catch (e) {
+    actionLedgerLogs.value = []
+  } finally {
+    loadingLedger.value = false
+  }
+}
+
+function refreshAuditAndLedger() {
+  void loadAuditLogs()
+  void loadActionLedger()
 }
 
 function criteriaMatches(saved: any, requested: any): boolean {
@@ -548,6 +814,7 @@ watch(jobId, () => {
 watch(projectId, () => {
   void loadCriteria()
   void loadAuditLogs()
+  void loadActionLedger()
 })
 
 watch(() => props.modelValue, value => {

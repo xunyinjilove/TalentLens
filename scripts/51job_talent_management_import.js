@@ -89,14 +89,19 @@ async function connectManagementPage() {
       throw e;
     }
   } else {
-    // 若页面已经存在，等待 Vue 组件就绪（最多 3.5 秒）
+    // 若页面已经存在，等待 Vue 组件就绪（最多 5 秒）
     try {
       await page.waitForFunction(() => {
+        const u = window.location.href.toLowerCase();
+        if (u.includes('login') || u.includes('navigate.aspx') || u.includes('passport') ||
+            u.includes('default.aspx') || (!u.includes('/talent/') && !u.includes('/revision/'))) {
+          return 'LOGIN_REDIRECT';
+        }
         const components = Array.from(document.querySelectorAll('*')).map(element => element.__vue__).filter(Boolean);
         const management = components.find(vm => vm.$options?.name === 'TalentManagement');
         const menu = components.find(vm => vm.$options?.name === 'EhMenuPositions');
         return Boolean(management?.$data?.hruid && menu?.$props?.positionListsAll?.length);
-      }, { timeout: 3500 });
+      }, { timeout: 5000 });
     } catch {
       // 容错继续
     }
@@ -155,12 +160,21 @@ async function openBackgroundManagementPage(browser) {
       const components = Array.from(document.querySelectorAll('*')).map(element => element.__vue__).filter(Boolean);
       const management = components.find(vm => vm.$options?.name === 'TalentManagement');
       const menu = components.find(vm => vm.$options?.name === 'EhMenuPositions');
-      return Boolean(management?.$data?.hruid && management?.$data?.jobParams?.coid &&
-        menu?.$props?.positionListsAll?.length);
-    }, { timeout: 6000 }).then(async (handle) => {
+      if (Boolean(management?.$data?.hruid && management?.$data?.jobParams?.coid &&
+        menu?.$props?.positionListsAll?.length)) {
+        return 'READY';
+      }
+      if (document.readyState === 'complete' && components.length > 20 && (!management || !menu)) {
+        return 'COMPONENT_CHANGED';
+      }
+      return false;
+    }, { timeout: 12000 }).then(async (handle) => {
       const val = await handle.jsonValue().catch(() => null);
       if (val === 'LOGIN_REDIRECT') {
         throw new Error('51job 尚未登录或会话已过期，请先点击【打开 51job 浏览器】登录企业账号');
+      }
+      if (val === 'COMPONENT_CHANGED') {
+        throw new Error('51job 页面结构可能已改变（未找到 TalentManagement 或 EhMenuPositions 组件）');
       }
     });
     return page;
@@ -170,10 +184,10 @@ async function openBackgroundManagementPage(browser) {
     if (currentURL.toLowerCase().includes('login') || currentURL.toLowerCase().includes('navigate.aspx') || currentURL.toLowerCase().includes('passport')) {
       throw new Error('51job 尚未登录或会话已过期，请先点击【打开 51job 浏览器】登录企业账号');
     }
-    if (String(error?.message).includes('尚未登录')) {
+    if (String(error?.message).includes('尚未登录') || String(error?.message).includes('页面结构可能已改变')) {
       throw error;
     }
-    throw new Error('51job 人才管理页面加载超时，请先点击【打开 51job 浏览器】登录并确认可查看人才管理');
+    throw new Error('51job 人才管理页面加载超时（超过12秒），请先点击【打开 51job 浏览器】登录并确认可查看人才管理');
   }
 }
 
