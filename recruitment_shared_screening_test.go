@@ -1,9 +1,68 @@
 package main
 
 import (
+	"database/sql"
 	"encoding/json"
 	"testing"
 )
+
+func TestTelescopeActivityLabels(t *testing.T) {
+	cases := []struct {
+		label string
+		days  int
+	}{
+		{"1小时前活跃", 0}, {"24小时内活跃", 1}, {"3日内活跃", 3},
+		{"1周内活跃", 7}, {"2周内活跃", 14}, {"1个月内活跃", 30},
+	}
+	for _, tc := range cases {
+		days, known := parseCandidateActivityDays(`{"active_type":"` + tc.label + `"}`)
+		if !known || days != tc.days {
+			t.Fatalf("%s: got (%d,%v), want %d", tc.label, days, known, tc.days)
+		}
+	}
+}
+
+func TestScreeningIgnoresAgeAndGender(t *testing.T) {
+	criteria := TalentManagementStrictCriteria{MinEducation: "本科", MinAge: 30, MaxAge: 40, Gender: "男"}
+	verdict, checks := EvaluateCandidateTriState(`{"degree":"本科","age":"25","sex":"女"}`, criteria)
+	if verdict != "qualified" {
+		t.Fatalf("age and gender must not change verdict, got %s", verdict)
+	}
+	for _, check := range checks {
+		if check.Rule == "AGE_RANGE" || check.Rule == "GENDER" {
+			t.Fatalf("age and gender must not become screening checks: %+v", check)
+		}
+	}
+}
+
+func TestPersistScreeningBatchWritesParentBeforeResults(t *testing.T) {
+	db, err := sql.Open("sqlite", ":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	db.SetMaxOpenConns(1)
+	if _, err := db.Exec(`PRAGMA foreign_keys=ON; CREATE TABLE projects(id TEXT PRIMARY KEY); INSERT INTO projects(id) VALUES('project-1');`); err != nil {
+		t.Fatal(err)
+	}
+	if err := ensureScreeningFrameworkTables(db); err != nil {
+		t.Fatal(err)
+	}
+	item := ScreeningCandidateResult{ID: "result-1", BatchID: "batch-1", ProjectID: "project-1",
+		CandidateID: "candidate-1", RecordID: "record-1", Verdict: "qualified",
+		RuleEvidence: []RuleCheckItem{}, RawProfile: `{}`, ActionStatus: "pending", CreatedAt: "2026-10-28 12:00:00"}
+	preview := &ScreeningBatchPreview{BatchID: "batch-1", ProjectID: "project-1", Source: "telescope",
+		Platform: "51job", PlatformAccount: "co:1:hr:2", PlatformJobID: "job-1",
+		BusinessDate: "2026-10-28", CriteriaVersion: "v1", Status: "preview_ready",
+		QualifiedCount: 1, QualifiedList: []ScreeningCandidateResult{item}}
+	if err := persistScreeningBatch(db, preview, `{}`, "2026-10-28 12:00:00"); err != nil {
+		t.Fatal(err)
+	}
+	var count int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM screening_candidate_results WHERE batch_id='batch-1'`).Scan(&count); err != nil || count != 1 {
+		t.Fatalf("persisted result count = %d, error = %v", count, err)
+	}
+}
 
 func TestEvaluateCandidateTriState_BachelorBlocksAssociate(t *testing.T) {
 	criteria := TalentManagementStrictCriteria{
@@ -233,5 +292,77 @@ func TestPlatformActionLedgerIdempotency(t *testing.T) {
 	}
 	if list[0].Receipt != "既有平台回执：已标记不合适" {
 		t.Fatalf("回执不符: %s", list[0].Receipt)
+	}
+}
+
+func TestActivityDays_90DaysRuleAndConservativeBoundary(t *testing.T) {
+	criteria := TalentManagementStrictCriteria{
+		ActivityDays: 90,
+	}
+
+	// 1. 3个月内活跃 -> 合格
+	v1, _ := EvaluateCandidateTriState(`{"active_type":"3个月内活跃"}`, criteria)
+	if v1 != "qualified" {
+		t.Errorf("预期 3个月内活跃 在 90天要求下为 qualified，实际: %s", v1)
+	}
+
+	// 2. 1个月内活跃 -> 合格
+	v2, _ := EvaluateCandidateTriState(`{"active_type":"1个月内活跃"}`, criteria)
+	if v2 != "qualified" {
+		t.Errorf("预期 1个月内活跃 在 90天要求下为 qualified，实际: %s", v2)
+	}
+
+	// 3. 半年内活跃 -> 模糊区间，保守边界，预期待核实 (pending_verification)，绝不直接拒绝
+	v3, _ := EvaluateCandidateTriState(`{"active_type":"半年内活跃"}`, criteria)
+	if v3 != "pending_verification" {
+		t.Errorf("预期 半年内活跃 在 90天要求下为 pending_verification，实际: %s", v3)
+	}
+
+	// 4. 3个月前活跃 -> 明确超过 90 天，预期 unfit
+	v4, _ := EvaluateCandidateTriState(`{"active_type":"3个月前活跃"}`, criteria)
+	if v4 != "unfit" {
+		t.Errorf("预期 3个月前活跃 在 90天要求下为 unfit，实际: %s", v4)
+	}
+
+	// 5. 半年前活跃 -> 明确超过 90 天，预期 unfit
+	v5, _ := EvaluateCandidateTriState(`{"active_type":"半年前活跃"}`, criteria)
+	if v5 != "unfit" {
+		t.Errorf("预期 半年前活跃 在 90天要求下为 unfit，实际: %s", v5)
+	}
+}
+
+func TestActivityDays_Default90ForNewProjectAndPreserveExisting(t *testing.T) {
+	app := NewApp()
+	app.dataDirOverride = t.TempDir()
+	defer app.closeRecruitmentDB()
+
+	// 1. 新建项目默认应为 90 天
+	proj := app.CreateProject("90天新项目", "研发部", 1, "", "", nil)
+	c1, err := app.GetTalentManagementStrictCriteria(proj.ID)
+	if err != nil {
+		t.Fatalf("读取新项目硬性条件失败: %v", err)
+	}
+	if c1.ActivityDays != 90 {
+		t.Errorf("新项目默认活跃天数应为 90 天，实际得到: %d", c1.ActivityDays)
+	}
+
+	// 2. 保存为 7 天后，再次读取必须保持 7 天（不被篡改为 90）
+	c1.ActivityDays = 7
+	if err := app.SetTalentManagementStrictCriteria(*c1); err != nil {
+		t.Fatalf("保存 7 天条件失败: %v", err)
+	}
+	c2, err := app.GetTalentManagementStrictCriteria(proj.ID)
+	if err != nil || c2.ActivityDays != 7 {
+		t.Errorf("已有 7 天项目应严格保持 7 天，实际得到: %d, err: %v", c2.ActivityDays, err)
+	}
+
+	// 3. 用户设置为 0（不限），读取时绝不能被改写为 90
+	c2.ActivityDays = 0
+	if err := app.SetTalentManagementStrictCriteria(*c2); err != nil {
+		t.Fatalf("保存 0 天条件失败: %v", err)
+	}
+	c3, err := app.GetTalentManagementStrictCriteria(proj.ID)
+	if err != nil || c3.ActivityDays != 0 {
+		t.Errorf("不限时间(0天)项目应保持 0，实际得到: %d, err: %v", c3.ActivityDays, err)
 	}
 }

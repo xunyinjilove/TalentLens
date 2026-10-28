@@ -929,7 +929,7 @@ func (a *App) GetTalentManagementStrictCriteria(projectID string) (*TalentManage
 	var rejectCity, compliance, autoReject, schedEnabled int
 	err = db.QueryRow(`SELECT project_id, min_education, min_work_years, min_age, max_age, max_expected_salary,
 		gender, job_seeking_status, major_keywords, reject_non_local_willingness, target_city, compliance_confirmed, auto_reject_platform,
-		COALESCE(activity_days, 7), COALESCE(criteria_version, 'v1'), COALESCE(project_intro_message, ''), COALESCE(schedule_time, '09:30'), COALESCE(schedule_enabled, 0), updated_at
+		COALESCE(activity_days, 90), COALESCE(criteria_version, 'v1'), COALESCE(project_intro_message, ''), COALESCE(schedule_time, '09:30'), COALESCE(schedule_enabled, 0), updated_at
 		FROM talent_management_strict_criteria WHERE project_id=?`, projectID).Scan(
 		&c.ProjectID, &c.MinEducation, &c.MinWorkYears, &c.MinAge, &c.MaxAge, &c.MaxExpectedSalary,
 		&c.Gender, &c.JobSeekingStatus, &c.MajorKeywords, &rejectCity, &c.TargetCity, &compliance, &autoReject,
@@ -950,7 +950,7 @@ func (a *App) GetTalentManagementStrictCriteria(projectID string) (*TalentManage
 			MinWorkYears:              minYears,
 			RejectNonLocalWillingness: false,
 			TargetCity:                targetCity,
-			ActivityDays:              7,
+			ActivityDays:              90,
 			CriteriaVersion:           "v1",
 			ProjectIntroMessage:       "",
 			ScheduleTime:              "09:30",
@@ -968,9 +968,7 @@ func (a *App) GetTalentManagementStrictCriteria(projectID string) (*TalentManage
 	c.ComplianceConfirmed = compliance == 1
 	c.AutoRejectPlatform = autoReject == 1
 	c.ScheduleEnabled = schedEnabled == 1
-	if c.ActivityDays == 0 && !strings.Contains(c.UpdatedAt, "202") {
-		c.ActivityDays = 7
-	}
+	// 注意：0 表示“不限活跃时间”，切勿覆盖篡改为默认值
 	if c.CriteriaVersion == "" {
 		c.CriteriaVersion = "v1"
 	}
@@ -984,6 +982,10 @@ func (a *App) GetTalentManagementStrictCriteria(projectID string) (*TalentManage
 func (a *App) SetTalentManagementStrictCriteria(criteria TalentManagementStrictCriteria) error {
 	if criteria.ProjectID == "" {
 		return fmt.Errorf("必须指定本地职位分库 ID")
+	}
+	validDays := map[int]bool{0: true, 3: true, 7: true, 30: true, 90: true}
+	if !validDays[criteria.ActivityDays] {
+		return fmt.Errorf("活跃天数仅支持 0(不限), 3, 7, 30, 90 天，当前值: %d", criteria.ActivityDays)
 	}
 	db, err := a.getRecruitmentDB()
 	if err != nil {

@@ -42,6 +42,14 @@
         </el-button>
 
         <el-button
+          class="strict-filter-btn"
+          @click="openTelescopeScreening"
+          title="按当前项目保存的条件筛选 51job 人才望远镜候选人"
+        >
+          <el-icon><Search /></el-icon><span>人才望远镜筛选</span>
+        </el-button>
+
+        <el-button
           class="analyze-all-btn"
           :disabled="!selectedProjectId || projectCandidateCount === 0 || analyzingAll"
           :loading="analyzingAll"
@@ -815,6 +823,7 @@
       v-model="showTalentImportDialog"
       :projects="projects.projects"
       :default-project-id="selectedProjectId"
+      :initial-tab="talentImportInitialTab"
       @completed="refresh"
     />
     <OneClickFilterDialog
@@ -1080,6 +1089,12 @@ function resetFilters() {
 
 const showSearch = ref(false)
 const showTalentImportDialog = ref(false)
+const talentImportInitialTab = ref<'sync' | 'telescope'>('sync')
+
+function openTelescopeScreening() {
+  talentImportInitialTab.value = 'telescope'
+  showTalentImportDialog.value = true
+}
 const showOutreach = ref(false)
 const outreachCandidateIds = ref<string[]>([])
 
@@ -1249,7 +1264,10 @@ const mergeReasons = ref<Record<string, string>>({})
 const pendingReviewCount = computed(() => pendingApplications.value.length + duplicates.value.length)
 
 function handleLibraryAction(command: string) {
-  if (command === 'talent51') showTalentImportDialog.value = true
+  if (command === 'talent51') {
+    talentImportInitialTab.value = 'sync'
+    showTalentImportDialog.value = true
+  }
   if (command === 'import') void import51Job()
   if (command === 'inbox') showInbox()
   if (command === 'duplicates') showDuplicates()
