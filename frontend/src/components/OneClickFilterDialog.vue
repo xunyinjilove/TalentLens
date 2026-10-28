@@ -104,7 +104,7 @@
         <!-- 双向联动与保存设置 -->
         <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 6px; padding: 12px 16px; margin-top: 8px">
           <div style="font-weight: 600; color: #1e293b; font-size: 13px; margin-bottom: 8px">双向联动与规则保存</div>
-          <div style="display: flex; flex-direction: column; gap: 8px">
+          <div class="linkage-options">
             <el-checkbox v-model="autoMarkLocalRejected" disabled>
               <span style="color: #475569">本地人才库：将排除人选招聘阶段自动转为【已淘汰/不合适】并归档</span>
             </el-checkbox>
@@ -273,5 +273,28 @@ async function executeFilter() {
 <style scoped>
 .one-click-filter-content {
   padding: 4px 0;
+}
+.linkage-options {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+.linkage-options :deep(.el-checkbox) {
+  display: flex;
+  align-items: flex-start;
+  height: auto;
+  min-width: 0;
+  margin-right: 0;
+  white-space: normal;
+}
+.linkage-options :deep(.el-checkbox__input) {
+  margin-top: 4px;
+}
+.linkage-options :deep(.el-checkbox__label) {
+  min-width: 0;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  line-height: 1.6;
 }
 </style>
