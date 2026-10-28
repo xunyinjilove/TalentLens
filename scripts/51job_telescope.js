@@ -20,19 +20,59 @@ function normalizeTelescopeCandidate(raw, jobId) {
 }
 
 function telescopeSnapshot() {
-    if (location.pathname !== '/Revision/talent/search-recommend') return null;
-    const components = Array.from(document.querySelectorAll('*')).map(el => el.__vue__).filter(Boolean);
-    const recommend = components.find(vm => vm.$options?.name === 'TalentRecommend');
-    const list = components.find(vm => vm.$options?.name === 'EhFossicksList');
-    if (!recommend || !list) return null;
-    const job = recommend.$data?.activeJobInfo || {};
-    const groups = list.$props?.list || [];
-    return {
-      jobId: String(job.jobid || list.$props?.jobParams?.jobid || ''),
-      jobTitle: String(job.jobname || ''),
-      companyId: String(job.coid || groups[0]?.coid || ''),
-      candidates: groups.flatMap(group => group.dataList || []).map(item => JSON.parse(JSON.stringify(item)))
-    };
+  if (location.pathname !== '/Revision/talent/search-recommend') return null;
+  const components = Array.from(document.querySelectorAll('*')).map(el => el.__vue__).filter(Boolean);
+  const recommend = components.find(vm => vm.$options?.name === 'TalentRecommend');
+  const menu = components.find(vm => vm.$options?.name === 'EhMenuPositionsRecommend');
+  const list = components.find(vm => vm.$options?.name === 'EhFossicksList');
+  if (!recommend || !list) return null;
+
+  const job = recommend.$data?.activeJobInfo || {};
+  const groups = list.$props?.list || list.$data?.list || [];
+  const hruid = String(recommend.$data?.hruId || '').trim();
+  const coid = String(job.coid || groups[0]?.coid || list.$props?.jobParams?.coid || '').trim();
+
+  const rawPositions = menu?.$props?.positionListsAll || menu?.$data?.positionListsAll || [];
+  const seen = new Set();
+  const jobs = [];
+  for (const p of rawPositions) {
+    const pid = String(p.jobid || '').trim();
+    if (!pid || seen.has(pid)) continue;
+    seen.add(pid);
+    jobs.push({
+      jobId: pid,
+      title: String(p.jobname || '').trim(),
+      workArea: String(p.workArea || p.jobArea || '').trim(),
+      degree: String(p.degree || '').trim(),
+      workYear: String(p.workYear || '').trim(),
+      salary: String(p.salary || p.newSalary || '').trim(),
+      status: String(p.statusStr || p.publishStatus || '').trim()
+    });
+  }
+
+  const activeJobId = String(job.jobid || menu?.$props?.activeJobid || list.$props?.jobParams?.jobid || '').trim();
+  const activeJobTitle = String(job.jobname || '').trim();
+  if (activeJobId && !seen.has(activeJobId)) {
+    jobs.unshift({
+      jobId: activeJobId,
+      title: activeJobTitle,
+      workArea: String(job.workArea || '').trim(),
+      degree: String(job.degree || '').trim(),
+      workYear: String(job.workYear || '').trim(),
+      salary: String(job.salary || '').trim(),
+      status: String(job.publishStatus || '').trim()
+    });
+  }
+
+  return {
+    jobId: activeJobId,
+    jobTitle: activeJobTitle,
+    companyId: coid,
+    hruid,
+    accountScope: (coid && hruid) ? `co:${coid}:hr:${hruid}` : '',
+    jobs,
+    candidates: groups.flatMap(group => group.dataList || []).map(item => JSON.parse(JSON.stringify(item)))
+  };
 }
 
 async function readTelescopePage(target) {
@@ -48,6 +88,40 @@ async function readTelescopePage(target) {
     return JSON.parse(response.result?.value || 'null');
   } finally {
     await session.detach().catch(() => {});
+  }
+}
+
+async function readTelescopeCatalog() {
+  const browser = await puppeteer.connect({
+    browserURL: 'http://127.0.0.1:9503', defaultViewport: null, protocolTimeout: 8000
+  });
+  try {
+    const targets = browser.targets().filter(target => target.type() === 'page' &&
+      target.url().startsWith('https://ehire.51job.com/Revision/talent/search-recommend'));
+    if (!targets.length) {
+      throw new Error('未找到已打开的人才望远镜页面，请先在 51job 专用浏览器打开「AI淘金 → 人才望远镜」');
+    }
+    let lastError = null;
+    for (const target of targets) {
+      try {
+        const state = await readTelescopePage(target);
+        if (state && (state.jobs?.length > 0 || state.jobId)) {
+          return {
+            status: 'ok',
+            accountScope: state.accountScope,
+            activeJobId: state.jobId,
+            activeJobTitle: state.jobTitle,
+            companyId: state.companyId,
+            jobs: state.jobs
+          };
+        }
+      } catch (err) {
+        lastError = err;
+      }
+    }
+    throw lastError || new Error('未能从人才望远镜页面解析出职位列表');
+  } finally {
+    await browser.disconnect();
   }
 }
 
@@ -87,7 +161,8 @@ async function scanTelescope(jobId, limit = 100) {
       }
       return {
         status: 'ok', source: 'telescope', jobId, jobTitle: state.jobTitle,
-        companyId: state.companyId, total: state.candidates.length, candidates
+        companyId: state.companyId, accountScope: state.accountScope,
+        total: state.candidates.length, candidates
       };
     }
     if (!visibleJobs.length && readErrors.length) {
@@ -100,10 +175,18 @@ async function scanTelescope(jobId, limit = 100) {
 }
 
 if (require.main === module) {
-  const index = process.argv.indexOf('--job-id');
-  const jobId = index >= 0 ? process.argv[index + 1] : '';
-  scanTelescope(jobId).then(result => process.stdout.write(JSON.stringify(result) + '\n'))
-    .catch(error => { process.stdout.write(JSON.stringify({ status: 'error', message: error.message }) + '\n'); process.exitCode = 1; });
+  const modeIndex = process.argv.indexOf('--mode');
+  const mode = modeIndex >= 0 ? process.argv[modeIndex + 1] : 'scan';
+  if (mode === 'catalog') {
+    readTelescopeCatalog()
+      .then(result => process.stdout.write(JSON.stringify(result) + '\n'))
+      .catch(error => { process.stdout.write(JSON.stringify({ status: 'error', message: error.message }) + '\n'); process.exitCode = 1; });
+  } else {
+    const index = process.argv.indexOf('--job-id');
+    const jobId = index >= 0 ? process.argv[index + 1] : '';
+    scanTelescope(jobId).then(result => process.stdout.write(JSON.stringify(result) + '\n'))
+      .catch(error => { process.stdout.write(JSON.stringify({ status: 'error', message: error.message }) + '\n'); process.exitCode = 1; });
+  }
 }
 
-module.exports = { normalizeTelescopeCandidate, scanTelescope, readTelescopePage };
+module.exports = { normalizeTelescopeCandidate, scanTelescope, readTelescopePage, readTelescopeCatalog };

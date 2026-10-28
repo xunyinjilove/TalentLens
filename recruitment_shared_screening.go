@@ -553,9 +553,22 @@ func (a *App) Scan51JobTalentManagementBatch(accountScope, jobID, projectID stri
 			return nil, txErr
 		}
 
-		for _, cand := range pageData.Candidates {
+		for candIdx, cand := range pageData.Candidates {
 			if cand.CandidateID == "" || cand.RecordID == "" {
 				continue
+			}
+
+			// 实时广播逐人扫描进度至前端
+			if a.ctx != nil {
+				runtime.EventsEmit(a.ctx, "screening_scan_progress", map[string]interface{}{
+					"batchId":         batchID,
+					"page":            page,
+					"totalPages":      totalPagesEst,
+					"candidateIndex":  candIdx + 1,
+					"totalCandidates": len(pageData.Candidates),
+					"candidateName":   cand.Name,
+					"statusText":      fmt.Sprintf("正在核验第 %d/%d 页 · 候选人 %s (%d/%d)", page, totalPagesEst, cand.Name, candIdx+1, len(pageData.Candidates)),
+				})
 			}
 
 			var existingActionStatus string
@@ -572,8 +585,9 @@ func (a *App) Scan51JobTalentManagementBatch(accountScope, jobID, projectID stri
 
 			verdict, checks := EvaluateCandidateTriState(resumeContent, *criteria)
 
+			// 若列表概要信息不足（如学历或活跃度未知），且有必要读取详情时，设定 8 秒有限等待
 			if verdict == "pending_verification" {
-				detailOut, detailErr := runTalentManagementAdapter(45*time.Second, "--mode", "detail", "--job-id", jobID,
+				detailOut, detailErr := runTalentManagementAdapter(8*time.Second, "--mode", "detail", "--job-id", jobID,
 					"--candidate-id", cand.CandidateID, "--record-id", cand.RecordID, "--status-index", "1", "--page-index", fmt.Sprint(page))
 				if detailErr == nil {
 					var detailResp talentManagementDetail
@@ -582,6 +596,14 @@ func (a *App) Scan51JobTalentManagementBatch(accountScope, jobID, projectID stri
 						detailLoaded = true
 						verdict, checks = EvaluateCandidateTriState(resumeContent, *criteria)
 					}
+				} else {
+					// 详情超时或受限：绝不阻塞整批扫描，记录说明并保持待核实保全状态
+					checks = append(checks, RuleCheckItem{
+						Rule:     "detail_load",
+						Label:    "简历详情读取",
+						Status:   "unknown",
+						Evidence: "详情加载超时，已保全为待核实，后续可单独重试",
+					})
 				}
 			}
 

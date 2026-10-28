@@ -226,8 +226,8 @@ async function scanJobStatus(browser, accountScope, jobId, statusIndex, pageInde
   }
 }
 
-// A detail is opened through the page's own resume-card action, then matched
-// against every platform ID in the returned /resumedtl/getresume response.
+// A detail is opened through background CDP navigation, avoiding window.open
+// which pulls the browser window to the foreground. Intercepts /resumedtl/getresume.
 async function readCandidateDetail(browser, accountScope, options) {
   const { jobId, candidateId, recordId } = options;
   const statusIndex = Number(options.statusIndex);
@@ -236,15 +236,18 @@ async function readCandidateDetail(browser, accountScope, options) {
       !jobId || !candidateId || !recordId) throw new Error('读取简历所需的平台标识不完整');
   const page = await openBackgroundManagementPage(browser);
   let detailPage;
+  let detailTargetId;
   try {
     const catalog = normalizeCatalog(await readState(page));
     if (catalog.accountScope !== accountScope || !catalog.jobs.some(job => job.jobId === jobId)) {
       throw new Error('51job 账号或职位已变化');
     }
+    // Set 6s timeout for single candidate detail to avoid blocking the whole batch
     const responsePromise = new Promise((resolve, reject) => {
-      const timer = setTimeout(() => { browser.off('targetcreated', onTarget); reject(new Error('简历详情加载超时')); }, 20000);
+      const timer = setTimeout(() => { browser.off('targetcreated', onTarget); reject(new Error('简历详情加载超时')); }, 6000);
       const onTarget = async target => {
         if (target.type() !== 'page') return;
+        if (detailTargetId && target._targetId !== detailTargetId) return;
         try {
           const candidatePage = await target.page();
           if (!candidatePage) return;
@@ -283,10 +286,43 @@ async function readCandidateDetail(browser, accountScope, options) {
         .find(vm => vm?.$options?.name === 'EhResumeCard' &&
           String(vm.$props?.source?.userid) === candidateId && String(vm.$props?.source?.cvlogid) === recordId);
       if (!card) throw new Error('无法定位候选人的简历卡片');
-      card.toResumeDetail(candidateId, jobId);
-      return { name: String(item.username || item.base_info?.resume_name || item.base_info?.name || '').trim(),
-        hasAttachment: String(item.resume_has_enclosure || '') === '1' };
+
+      // 劫持 window.open 拦截前台弹出，防止 Chromium 抢夺焦点激活窗口
+      let detailUrl = '';
+      const origOpen = window.open;
+      window.open = function(url) {
+        detailUrl = url;
+        return { focus: () => {}, close: () => {} };
+      };
+      try {
+        if (typeof card.toResumeDetail === 'function') {
+          card.toResumeDetail(candidateId, jobId);
+        }
+      } catch (_) {}
+      finally {
+        window.open = origOpen;
+      }
+      if (!detailUrl) {
+        detailUrl = `/Revision/talent/resumedtl?userid=${encodeURIComponent(candidateId)}&jobid=${encodeURIComponent(jobId)}&cvlogid=${encodeURIComponent(recordId)}`;
+      }
+
+      return {
+        name: String(item.username || item.base_info?.resume_name || item.base_info?.name || '').trim(),
+        hasAttachment: String(item.resume_has_enclosure || '') === '1',
+        detailUrl
+      };
     }, { jobId, statusIndex, pageIndex, candidateId, recordId });
+
+    // 在底层以 background: true 静默打开后台目标标签页，零前台焦点抢占
+    const session = await browser.target().createCDPSession();
+    try {
+      const fullUrl = selected.detailUrl.startsWith('http') ? selected.detailUrl : `https://ehire.51job.com${selected.detailUrl}`;
+      const created = await session.send('Target.createTarget', { url: fullUrl, background: true });
+      detailTargetId = created.targetId;
+    } finally {
+      await session.detach().catch(() => {});
+    }
+
     const response = await responsePromise;
     const data = response?.data;
     if (!data || String(data.resumeid) !== candidateId || String(data.cvlogid) !== recordId ||
@@ -303,6 +339,13 @@ async function readCandidateDetail(browser, accountScope, options) {
       documentStatus: hasAttachment ? '附件存在但平台受限未授权，保持待补全保护' : '结构化简历完整' };
   } finally {
     if (detailPage && !detailPage.isClosed()) await detailPage.close().catch(() => {});
+    if (detailTargetId) {
+      try {
+        const s = await browser.target().createCDPSession();
+        await s.send('Target.closeTarget', { targetId: detailTargetId });
+        await s.detach().catch(() => {});
+      } catch (_) {}
+    }
     await page.close().catch(() => {});
   }
 }
