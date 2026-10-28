@@ -1,7 +1,7 @@
 <template>
   <div class="job-management-view">
     <!-- 顶部导航栏 -->
-    <header class="top-nav-bar">
+    <header class="top-nav-bar" data-wails-drag>
       <div class="nav-left">
         <h1 class="page-title">职位管理</h1>
         <div class="page-subtitle">招聘信息 / 职位发布与维护</div>
