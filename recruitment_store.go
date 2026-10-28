@@ -339,6 +339,9 @@ func (a *App) getRecruitmentDB() (*sql.DB, error) {
 		err = ensureStrictCriteriaColumns(db)
 	}
 	if err == nil {
+		err = ensureScreeningFrameworkTables(db)
+	}
+	if err == nil {
 		_, err = db.Exec(`INSERT OR IGNORE INTO project_candidate_resumes(project_candidate_id,resume_version_id,created_at)
 			SELECT pc.id,rv.id,rv.created_at FROM project_candidates pc JOIN resume_versions rv ON rv.candidate_id=pc.candidate_id
 			WHERE json_valid(rv.raw_json) AND json_extract(rv.raw_json,'$.project_id')=pc.project_id`)
@@ -411,6 +414,11 @@ func ensureStrictCriteriaColumns(db *sql.DB) error {
 		{"job_seeking_status", "TEXT NOT NULL DEFAULT ''"},
 		{"major_keywords", "TEXT NOT NULL DEFAULT ''"},
 		{"auto_reject_platform", "INTEGER NOT NULL DEFAULT 0"},
+		{"activity_days", "INTEGER NOT NULL DEFAULT 7"},
+		{"criteria_version", "TEXT NOT NULL DEFAULT 'v1'"},
+		{"project_intro_message", "TEXT NOT NULL DEFAULT ''"},
+		{"schedule_time", "TEXT NOT NULL DEFAULT '09:30'"},
+		{"schedule_enabled", "INTEGER NOT NULL DEFAULT 0"},
 	}
 
 	for _, c := range cols {
@@ -418,6 +426,70 @@ func ensureStrictCriteriaColumns(db *sql.DB) error {
 			if _, err := db.Exec(fmt.Sprintf("ALTER TABLE talent_management_strict_criteria ADD COLUMN %s %s", c.name, c.typ)); err != nil {
 				return err
 			}
+		}
+	}
+	return nil
+}
+
+func ensureScreeningFrameworkTables(db *sql.DB) error {
+	ddls := []string{
+		`CREATE TABLE IF NOT EXISTS screening_batches (
+			id TEXT PRIMARY KEY,
+			project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+			source TEXT NOT NULL,
+			platform TEXT NOT NULL DEFAULT '51job',
+			platform_account TEXT NOT NULL,
+			platform_job_id TEXT NOT NULL,
+			business_date TEXT NOT NULL,
+			criteria_version TEXT NOT NULL DEFAULT 'v1',
+			criteria_snapshot TEXT NOT NULL DEFAULT '{}',
+			status TEXT NOT NULL DEFAULT 'preview_ready',
+			qualified_count INTEGER NOT NULL DEFAULT 0,
+			unfit_count INTEGER NOT NULL DEFAULT 0,
+			pending_count INTEGER NOT NULL DEFAULT 0,
+			started_at TEXT NOT NULL,
+			completed_at TEXT NOT NULL DEFAULT ''
+		);`,
+		`CREATE INDEX IF NOT EXISTS idx_screening_batch_project ON screening_batches(project_id, business_date);`,
+		`CREATE TABLE IF NOT EXISTS screening_candidate_results (
+			id TEXT PRIMARY KEY,
+			batch_id TEXT NOT NULL REFERENCES screening_batches(id) ON DELETE CASCADE,
+			project_id TEXT NOT NULL,
+			candidate_id TEXT NOT NULL,
+			record_id TEXT NOT NULL,
+			candidate_name TEXT NOT NULL,
+			verdict TEXT NOT NULL,
+			rule_evidence_json TEXT NOT NULL DEFAULT '[]',
+			raw_profile_json TEXT NOT NULL DEFAULT '{}',
+			detail_loaded INTEGER NOT NULL DEFAULT 0,
+			action_status TEXT NOT NULL DEFAULT 'pending',
+			created_at TEXT NOT NULL,
+			UNIQUE(batch_id, candidate_id, record_id)
+		);`,
+		`CREATE INDEX IF NOT EXISTS idx_scr_cand_batch ON screening_candidate_results(batch_id, verdict);`,
+		`CREATE TABLE IF NOT EXISTS platform_action_ledger (
+			id TEXT PRIMARY KEY,
+			project_id TEXT NOT NULL,
+			platform TEXT NOT NULL DEFAULT '51job',
+			platform_account TEXT NOT NULL,
+			platform_job_id TEXT NOT NULL,
+			candidate_id TEXT NOT NULL,
+			record_id TEXT NOT NULL,
+			candidate_name TEXT NOT NULL,
+			action_type TEXT NOT NULL,
+			confirmed_by TEXT NOT NULL DEFAULT 'HR',
+			requested_at TEXT NOT NULL,
+			receipt TEXT NOT NULL DEFAULT '',
+			status TEXT NOT NULL DEFAULT 'success',
+			error_message TEXT NOT NULL DEFAULT '',
+			retry_count INTEGER NOT NULL DEFAULT 0,
+			UNIQUE(project_id, candidate_id, record_id, action_type)
+		);`,
+		`CREATE INDEX IF NOT EXISTS idx_pal_project_cand ON platform_action_ledger(project_id, candidate_id);`,
+	}
+	for _, ddl := range ddls {
+		if _, err := db.Exec(ddl); err != nil {
+			return err
 		}
 	}
 	return nil

@@ -108,6 +108,11 @@ type TalentManagementStrictCriteria struct {
 	MajorKeywords             string  `json:"majorKeywords"`             // 专业关键词 (逗号分隔，如 "医学,药学,市场营销")
 	RejectNonLocalWillingness bool    `json:"rejectNonLocalWillingness"` // 明确拒绝在目标城市工作
 	TargetCity                string  `json:"targetCity"`                // 目标工作城市
+	ActivityDays              int     `json:"activityDays"`              // 活跃度天数: 0 (不限) / 3 / 7 / 30，默认 7
+	CriteriaVersion           string  `json:"criteriaVersion"`           // 条件版本号
+	ProjectIntroMessage       string  `json:"projectIntroMessage"`       // 项目专属打招呼/文案
+	ScheduleTime              string  `json:"scheduleTime"`              // 每日计划时间 (如 "09:30")
+	ScheduleEnabled           bool    `json:"scheduleEnabled"`           // 是否启用每日计划
 	ComplianceConfirmed       bool    `json:"complianceConfirmed"`       // HR 确认合规授权
 	AutoRejectPlatform        bool    `json:"autoRejectPlatform"`        // 是否联动 51job 自动标记不合适
 	UpdatedAt                 string  `json:"updatedAt"`
@@ -642,7 +647,11 @@ func extractCandidateProfile(resumeText string) candidateProfileSummary {
 		}
 
 		if summary.Degree == "" {
-			if deg, ok := data["topdegree"].(string); ok {
+			if deg, ok := data["degree"].(string); ok {
+				summary.Degree = deg
+			} else if edu, ok := data["education"].(string); ok {
+				summary.Degree = edu
+			} else if deg, ok := data["topdegree"].(string); ok {
 				summary.Degree = deg
 			} else if degObj, ok := data["highestdegree"].(map[string]interface{}); ok {
 				if d, ok2 := degObj["degree"].(string); ok2 {
@@ -657,6 +666,17 @@ func extractCandidateProfile(resumeText string) candidateProfileSummary {
 			}
 		}
 
+		if summary.School == "" {
+			if sch, ok := data["school"].(string); ok {
+				summary.School = sch
+			}
+		}
+		if summary.Major == "" {
+			if maj, ok := data["major"].(string); ok {
+				summary.Major = maj
+			}
+		}
+
 		if !summary.WorkYearsKnown {
 			if wy, ok := data["workyear"].(string); ok {
 				if y, ok2 := parseWorkYears(wy); ok2 {
@@ -665,6 +685,14 @@ func extractCandidateProfile(resumeText string) candidateProfileSummary {
 				}
 			} else if wyNum, ok := data["workyear"].(float64); ok {
 				summary.WorkYears = wyNum
+				summary.WorkYearsKnown = true
+			} else if wy2, ok := data["work_years"].(string); ok {
+				if y, ok2 := parseWorkYears(wy2); ok2 {
+					summary.WorkYears = y
+					summary.WorkYearsKnown = true
+				}
+			} else if wyNum2, ok := data["work_years"].(float64); ok {
+				summary.WorkYears = wyNum2
 				summary.WorkYearsKnown = true
 			}
 		}
@@ -898,12 +926,14 @@ func (a *App) GetTalentManagementStrictCriteria(projectID string) (*TalentManage
 		return nil, err
 	}
 	var c TalentManagementStrictCriteria
-	var rejectCity, compliance, autoReject int
+	var rejectCity, compliance, autoReject, schedEnabled int
 	err = db.QueryRow(`SELECT project_id, min_education, min_work_years, min_age, max_age, max_expected_salary,
-		gender, job_seeking_status, major_keywords, reject_non_local_willingness, target_city, compliance_confirmed, auto_reject_platform, updated_at
+		gender, job_seeking_status, major_keywords, reject_non_local_willingness, target_city, compliance_confirmed, auto_reject_platform,
+		COALESCE(activity_days, 7), COALESCE(criteria_version, 'v1'), COALESCE(project_intro_message, ''), COALESCE(schedule_time, '09:30'), COALESCE(schedule_enabled, 0), updated_at
 		FROM talent_management_strict_criteria WHERE project_id=?`, projectID).Scan(
 		&c.ProjectID, &c.MinEducation, &c.MinWorkYears, &c.MinAge, &c.MaxAge, &c.MaxExpectedSalary,
-		&c.Gender, &c.JobSeekingStatus, &c.MajorKeywords, &rejectCity, &c.TargetCity, &compliance, &autoReject, &c.UpdatedAt)
+		&c.Gender, &c.JobSeekingStatus, &c.MajorKeywords, &rejectCity, &c.TargetCity, &compliance, &autoReject,
+		&c.ActivityDays, &c.CriteriaVersion, &c.ProjectIntroMessage, &c.ScheduleTime, &schedEnabled, &c.UpdatedAt)
 	if err == sql.ErrNoRows {
 		p := a.GetProject(projectID)
 		targetCity := ""
@@ -920,6 +950,11 @@ func (a *App) GetTalentManagementStrictCriteria(projectID string) (*TalentManage
 			MinWorkYears:              minYears,
 			RejectNonLocalWillingness: false,
 			TargetCity:                targetCity,
+			ActivityDays:              7,
+			CriteriaVersion:           "v1",
+			ProjectIntroMessage:       "",
+			ScheduleTime:              "09:30",
+			ScheduleEnabled:           false,
 			ComplianceConfirmed:       false,
 			AutoRejectPlatform:        true,
 			UpdatedAt:                 time.Now().Format("2006-01-02 15:04:05"),
@@ -932,6 +967,16 @@ func (a *App) GetTalentManagementStrictCriteria(projectID string) (*TalentManage
 	c.RejectNonLocalWillingness = rejectCity == 1
 	c.ComplianceConfirmed = compliance == 1
 	c.AutoRejectPlatform = autoReject == 1
+	c.ScheduleEnabled = schedEnabled == 1
+	if c.ActivityDays == 0 && !strings.Contains(c.UpdatedAt, "202") {
+		c.ActivityDays = 7
+	}
+	if c.CriteriaVersion == "" {
+		c.CriteriaVersion = "v1"
+	}
+	if c.ScheduleTime == "" {
+		c.ScheduleTime = "09:30"
+	}
 	return &c, nil
 }
 
@@ -956,17 +1001,41 @@ func (a *App) SetTalentManagementStrictCriteria(criteria TalentManagementStrictC
 	if criteria.AutoRejectPlatform {
 		autoReject = 1
 	}
+	schedEnabled := 0
+	if criteria.ScheduleEnabled {
+		schedEnabled = 1
+	}
+	if criteria.ScheduleTime == "" {
+		criteria.ScheduleTime = "09:30"
+	}
+
+	// 自动生成递增条件版本号
+	versionNum := 1
+	var existingVer string
+	_ = db.QueryRow(`SELECT criteria_version FROM talent_management_strict_criteria WHERE project_id=?`, criteria.ProjectID).Scan(&existingVer)
+	if strings.HasPrefix(existingVer, "v") {
+		if num, err := strconv.Atoi(strings.TrimPrefix(existingVer, "v")); err == nil {
+			versionNum = num + 1
+		}
+	}
+	criteria.CriteriaVersion = fmt.Sprintf("v%d", versionNum)
+
 	now := time.Now().Format("2006-01-02 15:04:05")
 	_, err = db.Exec(`INSERT INTO talent_management_strict_criteria(project_id, min_education, min_work_years, min_age, max_age, max_expected_salary,
-		gender, job_seeking_status, major_keywords, reject_non_local_willingness, target_city, compliance_confirmed, auto_reject_platform, updated_at)
-		VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+		gender, job_seeking_status, major_keywords, reject_non_local_willingness, target_city, compliance_confirmed, auto_reject_platform,
+		activity_days, criteria_version, project_intro_message, schedule_time, schedule_enabled, updated_at)
+		VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
 		ON CONFLICT(project_id) DO UPDATE SET min_education=excluded.min_education, min_work_years=excluded.min_work_years,
 		min_age=excluded.min_age, max_age=excluded.max_age, max_expected_salary=excluded.max_expected_salary,
 		gender=excluded.gender, job_seeking_status=excluded.job_seeking_status, major_keywords=excluded.major_keywords,
 		reject_non_local_willingness=excluded.reject_non_local_willingness, target_city=excluded.target_city,
-		compliance_confirmed=excluded.compliance_confirmed, auto_reject_platform=excluded.auto_reject_platform, updated_at=excluded.updated_at`,
+		compliance_confirmed=excluded.compliance_confirmed, auto_reject_platform=excluded.auto_reject_platform,
+		activity_days=excluded.activity_days, criteria_version=excluded.criteria_version,
+		project_intro_message=excluded.project_intro_message, schedule_time=excluded.schedule_time,
+		schedule_enabled=excluded.schedule_enabled, updated_at=excluded.updated_at`,
 		criteria.ProjectID, criteria.MinEducation, criteria.MinWorkYears, criteria.MinAge, criteria.MaxAge, criteria.MaxExpectedSalary,
-		criteria.Gender, criteria.JobSeekingStatus, criteria.MajorKeywords, rejectCity, criteria.TargetCity, compliance, autoReject, now)
+		criteria.Gender, criteria.JobSeekingStatus, criteria.MajorKeywords, rejectCity, criteria.TargetCity, compliance, autoReject,
+		criteria.ActivityDays, criteria.CriteriaVersion, criteria.ProjectIntroMessage, criteria.ScheduleTime, schedEnabled, now)
 	if err != nil {
 		return err
 	}
