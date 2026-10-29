@@ -819,6 +819,12 @@ onMounted(() => {
     runtime.EventsOn('screening_scan_progress', (event: any) => {
       if (event && event.statusText) {
         progress.value = event.statusText
+        if (batchPreview.value && (!event.batchId || batchPreview.value.batchId === event.batchId)) {
+          batchPreview.value.scanStatus = 'scanning'
+          batchPreview.value.lastError = ''
+          if (event.page) batchPreview.value.currentPage = event.page
+          if (event.totalPages) batchPreview.value.totalPagesEstimated = event.totalPages
+        }
       }
     })
   }

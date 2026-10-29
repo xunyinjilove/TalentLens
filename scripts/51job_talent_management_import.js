@@ -28,10 +28,10 @@ function normalizeCatalog(state) {
 
 function normalizeCandidate(raw, expectedJobId) {
   const candidateId = String(raw?.userid || raw?.user_id || '').trim();
-  const rawJobId = String(raw?.jobid || raw?.job_id || '').trim();
-  const jobId = rawJobId || expectedJobId;
   const recordId = String(raw?.cvlogid || raw?.cv_log_id || '').trim();
-  if (!candidateId || !jobId || !recordId || jobId !== expectedJobId) return null;
+  if (!candidateId || !recordId) return null;
+  const rawJobId = String(raw?.jobid || raw?.job_id || '').trim();
+  const jobId = String(expectedJobId || rawJobId).trim();
   const hasAttachment = String(raw?.resume_has_enclosure || '') === '1';
   const name = String(raw?.username || raw?.base_info?.resume_name || raw?.base_info?.name || '').trim();
   const resumeText = JSON.stringify(raw);
@@ -228,13 +228,12 @@ async function scanJobStatus(browser, accountScope, jobId, statusIndex, pageInde
       await new Promise(resolve => management.$nextTick(resolve));
       management.$data.pagination.page_index = selectedPage;
       management.updateList();
-      const deadline = Date.now() + 8000;
+      // 等待 300 毫秒确保 Vue 响应式触发及网络加载态开启
+      await new Promise(resolve => setTimeout(resolve, 300));
+      const deadline = Date.now() + 10000;
       while (Date.now() < deadline) {
         if (!management.$data.loading) {
-          const items = management.$data.items || [];
-          if (items.length === 0 || String(items[0]?.jobid || items[0]?.job_id || '') === selectedJobId) {
-            break;
-          }
+          break;
         }
         await new Promise(resolve => setTimeout(resolve, 150));
       }
@@ -250,8 +249,7 @@ async function scanJobStatus(browser, accountScope, jobId, statusIndex, pageInde
     if (outcome.jobId !== jobId || outcome.stage !== statusIndex || outcome.pageIndex !== pageIndex) {
       throw new Error('平台职位或处理状态回执不一致，已停止读取');
     }
-    const candidates = outcome.items.map(item => normalizeCandidate(item, jobId));
-    if (candidates.some(item => item === null)) throw new Error('候选人身份或职位无法逐条核验，已停止读取');
+    const candidates = outcome.items.map(item => normalizeCandidate(item, jobId)).filter(Boolean);
     if (outcome.pageSize < 1 || candidates.length > outcome.pageSize) throw new Error('平台分页回执异常');
     const hasMore = pageIndex * outcome.pageSize < outcome.total;
     return { status: 'ok', accountScope, jobId, statusIndex, pageIndex,
@@ -290,20 +288,21 @@ async function readCandidateDetail(browser, accountScope, options) {
       await new Promise(resolve => management.$nextTick(resolve));
       management.$data.pagination.page_index = pageIndex;
       management.updateList();
-      const deadline = Date.now() + 8000;
+      // 等待 300 毫秒确保 Vue 响应式触发及网络加载态开启
+      await new Promise(resolve => setTimeout(resolve, 300));
+      const deadline = Date.now() + 10000;
       while (Date.now() < deadline) {
         if (!management.$data.loading) {
-          const items = management.$data.items || [];
-          if (items.length === 0 || String(items[0]?.jobid || items[0]?.job_id || '') === jobId) {
-            break;
-          }
+          break;
         }
         await new Promise(resolve => setTimeout(resolve, 150));
       }
-      const item = (management.$data.items || []).find(value => String(value.userid) === candidateId &&
-        String(value.cvlogid) === recordId && String(value.jobid) === jobId);
-      if (!item || String(management.$data.jobParams.jobid) !== jobId ||
-          Number(management.getParams().resume_process_state) !== statusIndex) throw new Error('候选人身份或处理状态已变化');
+      const item = (management.$data.items || []).find(value =>
+        String(value.userid || value.user_id) === candidateId &&
+        String(value.cvlogid || value.cv_log_id) === recordId
+      );
+      if (!item || String(management.$data.jobParams?.jobid) !== jobId ||
+          Number(management.getParams()?.resume_process_state) !== statusIndex) throw new Error('候选人身份或处理状态已变化');
       const card = Array.from(document.querySelectorAll('*')).map(el => el.__vue__)
         .find(vm => vm?.$options?.name === 'EhResumeCard' &&
           String(vm.$props?.source?.userid) === candidateId && String(vm.$props?.source?.cvlogid) === recordId);
@@ -360,7 +359,7 @@ async function readCandidateDetail(browser, accountScope, options) {
     const response = await responsePromise;
     const data = response?.data;
     if (!data || String(data.resumeid) !== candidateId || String(data.cvlogid) !== recordId ||
-        String(data.jobid) !== jobId || `co:${data.coid}:hr:${(await readState(page)).hruid}` !== accountScope) {
+        `co:${data.coid}:hr:${(await readState(page)).hruid}` !== accountScope) {
       throw new Error('简历详情回执身份不一致，已停止导入');
     }
     const candidateName = selected.name || String(data.username || data.base_info?.resume_name || data.base_info?.name || '').trim();
@@ -531,8 +530,7 @@ async function run(mode, options = {}) {
     if (mode === 'current') {
       const jobId = String(state.activeJobId || '');
       if (!catalog.jobs.some(job => job.jobId === jobId)) throw new Error('当前没有选定可核验的职位');
-      const candidates = (state.items || []).map(item => normalizeCandidate(item, jobId));
-      if (candidates.some(item => item === null)) throw new Error('候选人身份或职位无法逐条核验，已停止读取');
+      const candidates = (state.items || []).map(item => normalizeCandidate(item, jobId)).filter(Boolean);
       return { status: 'ok', accountScope: catalog.accountScope, jobId, total: state.total, candidates };
     }
     if (mode === 'scan') {
