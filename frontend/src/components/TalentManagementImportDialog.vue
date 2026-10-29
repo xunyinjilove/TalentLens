@@ -420,55 +420,6 @@
         </el-form>
       </el-tab-pane>
 
-      <!-- Tab 3: 平台动作台账与审计 -->
-      <el-tab-pane label="平台动作台账与审计" name="audit">
-        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px">
-          <span style="font-size: 12px; color: #64748b">
-            留存逐人身份、判定规则、执行动作、平台回执与失败原因，支持审计追溯。
-          </span>
-          <div style="display: flex; gap: 8px">
-            <el-button size="small" type="danger" plain :disabled="!auditLogs.length" @click="confirmClearAuditLogs">清空审计记录</el-button>
-            <el-button size="small" :loading="loadingAudit || loadingLedger" @click="refreshAuditAndLedger">刷新记录</el-button>
-          </div>
-        </div>
-
-        <el-tabs type="border-card">
-          <el-tab-pane label="平台动作台账">
-            <el-table :data="actionLedgerLogs" size="small" max-height="300" empty-text="暂无平台动作台账记录">
-              <el-table-column prop="candidateName" label="候选人" width="100" />
-              <el-table-column prop="actionType" label="动作" width="90">
-                <template #default="{ row }">
-                  <el-tag size="small" :type="row.actionType === 'reject' ? 'danger' : (row.actionType === 'import' ? 'success' : 'primary')">
-                    {{ row.actionType === 'reject' ? '标记不合适' : (row.actionType === 'import' ? '专属库入库' : row.actionType) }}
-                  </el-tag>
-                </template>
-              </el-table-column>
-              <el-table-column prop="status" label="状态" width="80">
-                <template #default="{ row }">
-                  <el-tag size="small" :type="row.status === 'success' ? 'success' : 'danger'">
-                    {{ row.status === 'success' ? '成功' : '失败' }}
-                  </el-tag>
-                </template>
-              </el-table-column>
-              <el-table-column prop="receipt" label="平台回执 / 结果" min-width="200" show-overflow-tooltip />
-              <el-table-column prop="requestedAt" label="执行时间" width="140" />
-            </el-table>
-          </el-tab-pane>
-          <el-tab-pane label="淘汰审计记录">
-            <el-table :data="auditLogs" size="small" max-height="300" empty-text="暂无淘汰审计记录">
-              <el-table-column prop="candidateName" label="候选人" width="100" />
-              <el-table-column prop="reasonLabel" label="淘汰原因" width="110">
-                <template #default="{ row }">
-                  <el-tag type="danger" size="small">{{ row.reasonLabel }}</el-tag>
-                </template>
-              </el-table-column>
-              <el-table-column prop="evidence" label="确凿证据说明" min-width="190" show-overflow-tooltip />
-              <el-table-column prop="platformReceipt" label="平台回执" min-width="140" show-overflow-tooltip />
-              <el-table-column prop="createdAt" label="执行时间" width="140" />
-            </el-table>
-          </el-tab-pane>
-        </el-tabs>
-      </el-tab-pane>
     </el-tabs>
     </div>
 
@@ -520,8 +471,6 @@ const summary = ref('')
 const syncTask = ref<any>(null)
 const autoSyncEnabled = ref(false)
 const savingCriteria = ref(false)
-const loadingAudit = ref(false)
-const auditLogs = ref<any[]>([])
 
 // 51job 共用初筛框架状态
 const batchPreview = ref<any>(null)
@@ -529,8 +478,6 @@ const scanning = ref(false)
 const previewSubTab = ref<'qualified' | 'unfit' | 'pending'>('qualified')
 const selectedUnfitCandidates = ref<string[]>([])
 const executingAction = ref(false)
-const actionLedgerLogs = ref<any[]>([])
-const loadingLedger = ref(false)
 const rescreening = ref(false)
 const telescopePreview = ref<any>(null)
 const telescopeScanning = ref(false)
@@ -612,12 +559,11 @@ async function load() {
       const mapping = nextMappings.find((item: any) => item.platform === '51job' &&
         item.platformAccount === catalog.accountScope && item.platformJobId === nextJobID)
       const nextProjectID = mapping?.projectId || props.defaultProjectId || ''
-      const [task, criteria, audit] = await Promise.all([
+      const [task, criteria] = await Promise.all([
         nextJobID ? api.GetTalentManagementSyncTask('51job', catalog.accountScope, nextJobID).catch(() => null) : Promise.resolve(null),
-        nextProjectID ? api.GetTalentManagementStrictCriteria(nextProjectID).catch(() => null) : Promise.resolve(null),
-        nextProjectID ? api.ListTalentManagementAuditLogs(nextProjectID).catch(() => []) : Promise.resolve([])
+        nextProjectID ? api.GetTalentManagementStrictCriteria(nextProjectID).catch(() => null) : Promise.resolve(null)
       ])
-      return { catalog, nextMappings, nextJobs, nextJobID, nextProjectID, task, criteria, audit }
+      return { catalog, nextMappings, nextJobs, nextJobID, nextProjectID, task, criteria }
     })(), 25000, '重新读取职位')
     if (generation !== loadGeneration) return
     mappings.value = fresh.nextMappings
@@ -628,7 +574,6 @@ async function load() {
     syncTask.value = fresh.task
     autoSyncEnabled.value = Boolean(fresh.task?.autoSyncEnabled)
     if (fresh.criteria) applyCriteria(fresh.criteria, fresh.nextProjectID)
-    auditLogs.value = fresh.audit || []
     catalogStale.value = false
     catalogStatus.value = `已核验 ${jobs.value.length} 个在线职位 · ${new Date().toLocaleTimeString('zh-CN', { hour12: false })}`
     ElMessage.success(`成功读取 ${jobs.value.length} 个 51job 在线职位`)
@@ -789,7 +734,7 @@ function getActionStatusLabel(status: string): string {
     case 'executing': return '执行中'
     case 'receipt_pending': return '待核实回执'
     case 'retrying': return '待重试'
-    case 'completed': return '已完成'
+    case 'completed': return '已标记不合适'
     case 'verified_on_platform': return '平台已处理／已核对'
     case 'manual_required': return '需人工处理'
     case 'failed': return '执行失败'
@@ -929,7 +874,6 @@ async function confirmImportQualified() {
     ElMessage.success(`成功将 ${count} 位合格人选导入本地专属分库！`)
     batchPreview.value = await api.GetScreeningBatchPreview(batchPreview.value.batchId)
     emit('completed')
-    void loadActionLedger()
   } catch (err: any) {
     ElMessage.error(err?.message || String(err))
   } finally {
@@ -940,7 +884,7 @@ async function confirmImportQualified() {
 async function confirmRejectUnfit() {
   if (!batchPreview.value?.batchId || !selectedUnfitCandidates.value.length) return
   try {
-    await ElMessageBox.confirm(`确定要对已选的 ${selectedUnfitCandidates.value.length} 位不符合硬性条件的候选人在 51job 平台批量标记「不合适」吗？此操作将提交平台并留存审计日志。`, '平台操作确认', {
+    await ElMessageBox.confirm(`确定要对已选的 ${selectedUnfitCandidates.value.length} 位不符合硬性条件的候选人在 51job 平台批量标记「不合适」吗？处理结果会自动保存，以避免重复操作。`, '平台操作确认', {
       confirmButtonText: '确认标记不合适',
       cancelButtonText: '取消',
       type: 'warning'
@@ -951,8 +895,6 @@ async function confirmRejectUnfit() {
     const successCount = (ledgers || []).filter((l: any) => l.status === 'success').length
     ElMessage.success(`已完成平台标记：成功 ${successCount} 人`)
     batchPreview.value = await api.GetScreeningBatchPreview(batchPreview.value.batchId)
-    void loadAuditLogs()
-    void loadActionLedger()
     emit('completed')
   } catch (err: any) {
     if (err !== 'cancel') ElMessage.error(err?.message || String(err))
@@ -973,7 +915,6 @@ async function rescreenCurrentProject() {
     const api: any = await import('../../wailsjs/go/main/App')
     const res = await api.RescreenProjectRepository(projectId.value)
     ElMessage.success(`旧库重筛完成：共核验 ${res.totalChecked} 人，排除不合规 ${res.unfitCount} 人，保留合格 ${res.activeRemainingCount} 人`)
-    void loadAuditLogs()
     emit('completed')
   } catch (err: any) {
     if (err !== 'cancel') ElMessage.error(err?.message || String(err))
@@ -982,44 +923,11 @@ async function rescreenCurrentProject() {
   }
 }
 
-async function loadActionLedger() {
-  if (!projectId.value) return
-  loadingLedger.value = true
-  try {
-    const api: any = await import('../../wailsjs/go/main/App')
-    actionLedgerLogs.value = (await api.ListPlatformActionLedger(projectId.value)) || []
-  } catch (e) {
-    actionLedgerLogs.value = []
-  } finally {
-    loadingLedger.value = false
-  }
-}
-
-function refreshAuditAndLedger() {
-  void loadAuditLogs()
-  void loadActionLedger()
-}
-
 function criteriaMatches(saved: any, requested: any): boolean {
   return ['minEducation', 'minWorkYears', 'minAge', 'maxAge', 'maxExpectedSalary', 'gender',
     'jobSeekingStatus', 'majorKeywords', 'rejectNonLocalWillingness', 'targetCity',
     'complianceConfirmed', 'autoRejectPlatform'].every(key =>
       String(saved?.[key] ?? '') === String(requested?.[key] ?? ''))
-}
-
-async function confirmClearAuditLogs() {
-  if (!projectId.value) return
-  try {
-    await ElMessageBox.confirm('确定要清空本岗位的全部淘汰审计记录吗？清空后记录不可恢复。', '清空确认', {
-      confirmButtonText: '确定清空',
-      cancelButtonText: '取消',
-      type: 'warning'
-    })
-    const api: any = await import('../../wailsjs/go/main/App')
-    await api.ClearTalentManagementAuditLogs(projectId.value)
-    ElMessage.success('已清空本岗位的淘汰审计记录')
-    await loadAuditLogs()
-  } catch (e) {}
 }
 
 async function saveCriteria() {
@@ -1047,19 +955,6 @@ async function saveCriteria() {
   }
 }
 
-async function loadAuditLogs() {
-  if (!projectId.value) return
-  loadingAudit.value = true
-  try {
-    const api: any = await import('../../wailsjs/go/main/App')
-    auditLogs.value = (await api.ListTalentManagementAuditLogs(projectId.value)) || []
-  } catch (e) {
-    auditLogs.value = []
-  } finally {
-    loadingAudit.value = false
-  }
-}
-
 watch(jobId, () => {
   telescopePreview.value = null
   telescopeProgress.value = ''
@@ -1071,8 +966,6 @@ watch(projectId, () => {
   telescopePreview.value = null
   savedCriteria.value = null
   void loadCriteria()
-  void loadAuditLogs()
-  void loadActionLedger()
 })
 
 watch(() => props.modelValue, value => {
