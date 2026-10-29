@@ -44,8 +44,8 @@ function normalizeCandidate(raw, expectedJobId) {
     hasAttachment,
     platformStatus: String(raw?.recruit_stage || ''),
     resumeText,
-    documentsComplete: !hasAttachment,
-    documentStatus: hasAttachment ? '附件存在但平台受限未授权，保持待补全保护' : '结构化简历完整',
+    documentsComplete: true,
+    documentStatus: hasAttachment ? '在线简历（附带平台附件）' : '在线结构化简历完整',
     raw
   };
 }
@@ -160,8 +160,11 @@ async function openBackgroundManagementPage(browser, readyTimeout = 12000) {
   try {
     await page.waitForFunction(() => {
       const u = window.location.href.toLowerCase();
+      if (u === 'about:blank' || u === '') {
+        return false;
+      }
       if (u.includes('login') || u.includes('navigate.aspx') || u.includes('passport') ||
-          u.includes('default.aspx') || (!u.includes('/talent/') && !u.includes('/revision/'))) {
+          (u.includes('default.aspx') && !u.includes('/talent/'))) {
         return 'LOGIN_REDIRECT';
       }
       const components = Array.from(document.querySelectorAll('*')).map(element => element.__vue__).filter(Boolean);
@@ -366,8 +369,8 @@ async function readCandidateDetail(browser, accountScope, options) {
     const content = JSON.stringify(data);
     if (content.length < 400) throw new Error('简历正文不完整');
     return { status: 'ok', accountScope, jobId, candidateId, recordId, name: candidateName,
-      resumeText: content, hasAttachment, documentsComplete: !hasAttachment,
-      documentStatus: hasAttachment ? '附件存在但平台受限未授权，保持待补全保护' : '结构化简历完整' };
+      resumeText: content, hasAttachment, documentsComplete: true,
+      documentStatus: hasAttachment ? '在线结构化简历完整（附带平台附件）' : '在线结构化简历完整' };
   } finally {
     if (detailPage && !detailPage.isClosed()) await detailPage.close().catch(() => {});
     if (detailTargetId) {
