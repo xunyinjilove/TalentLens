@@ -64,6 +64,50 @@ func TestPersistScreeningBatchWritesParentBeforeResults(t *testing.T) {
 	}
 }
 
+func TestQualifiedScreeningAutoImportIsIdempotentAndLocalOnly(t *testing.T) {
+	app := NewApp()
+	app.dataDirOverride = t.TempDir()
+	defer app.closeRecruitmentDB()
+	project := app.CreateProject("测试职位", "", 1, "", "", &JobConfig{Title: "测试职位"})
+	if project == nil {
+		t.Fatal("create project failed")
+	}
+	const scope, jobID, candidateID, recordID = "co:1:hr:2", "job-1", "candidate-1", "record-1"
+	if err := app.SetPlatformJobMapping("51job", scope, jobID, project.ID); err != nil {
+		t.Fatal(err)
+	}
+	db, err := app.getRecruitmentDB()
+	if err != nil {
+		t.Fatal(err)
+	}
+	item := ScreeningCandidateResult{ID: "result-1", BatchID: "batch-1", ProjectID: project.ID,
+		CandidateID: candidateID, RecordID: recordID, CandidateName: "测试人选", Verdict: "qualified",
+		RuleEvidence: []RuleCheckItem{}, RawProfile: `{"degree":"本科","workyear":"5年"}`,
+		DetailLoaded: true, ActionStatus: "pending", CreatedAt: "2026-10-29 12:00:00"}
+	preview := &ScreeningBatchPreview{BatchID: "batch-1", ProjectID: project.ID, Source: "talent_management",
+		Platform: "51job", PlatformAccount: scope, PlatformJobID: jobID, BusinessDate: "2026-10-29",
+		CriteriaVersion: "v1", Status: "preview_ready", QualifiedCount: 1, QualifiedList: []ScreeningCandidateResult{item}}
+	if err := persistScreeningBatch(db, preview, `{}`, "2026-10-29 12:00:00"); err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 2; i++ {
+		if err := app.autoImportQualifiedCandidate(db, "batch-1", project.ID, scope, jobID, candidateID, recordID, item.CandidateName, item.RawProfile); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if got := len(app.GetProjectResumes(project.ID)); got != 1 {
+		t.Fatalf("project resumes = %d, want 1", got)
+	}
+	var status string
+	if err := db.QueryRow(`SELECT action_status FROM screening_candidate_results WHERE id='result-1'`).Scan(&status); err != nil || status != "imported" {
+		t.Fatalf("import status = %q, err=%v", status, err)
+	}
+	var platformActions int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM platform_action_ledger WHERE action_type IN ('hi','reject')`).Scan(&platformActions); err != nil || platformActions != 0 {
+		t.Fatalf("platform actions = %d, err=%v", platformActions, err)
+	}
+}
+
 func TestEvaluateCandidateTriState_BachelorBlocksAssociate(t *testing.T) {
 	criteria := TalentManagementStrictCriteria{
 		MinEducation: "本科",

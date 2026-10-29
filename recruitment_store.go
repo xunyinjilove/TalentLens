@@ -349,6 +349,18 @@ func (a *App) getRecruitmentDB() (*sql.DB, error) {
 	if err == nil {
 		err = migrateLegacyRecruitmentData(db, dir)
 	}
+	if err == nil {
+		err = reconcileRecruitmentProjects(db, dir)
+	}
+	if err == nil {
+		_, err = db.Exec(`UPDATE project_candidates SET stage='pending_contact', updated_at=?
+			WHERE stage IN ('new','pending_analysis') AND
+			(SELECT ev.status FROM evaluations ev WHERE ev.project_candidate_id=project_candidates.id
+			 ORDER BY ev.created_at DESC,ev.id DESC LIMIT 1)='done'`, time.Now().UTC().Format(time.RFC3339Nano))
+	}
+	if err == nil {
+		_, err = db.Exec(`UPDATE project_candidates SET stage='new' WHERE stage='pending_analysis'`)
+	}
 	if err != nil {
 		_ = db.Close()
 		return nil, err
@@ -470,6 +482,7 @@ func ensureScreeningFrameworkTables(db *sql.DB) error {
 			rule_evidence_json TEXT NOT NULL DEFAULT '[]',
 			raw_profile_json TEXT NOT NULL DEFAULT '{}',
 			detail_loaded INTEGER NOT NULL DEFAULT 0,
+			source_page INTEGER NOT NULL DEFAULT 1,
 			action_status TEXT NOT NULL DEFAULT 'pending',
 			action_receipt_at TEXT NOT NULL DEFAULT '',
 			action_error TEXT NOT NULL DEFAULT '',
@@ -542,6 +555,7 @@ func ensureScreeningFrameworkTables(db *sql.DB) error {
 	}{
 		{"action_receipt_at", "TEXT NOT NULL DEFAULT ''"},
 		{"action_error", "TEXT NOT NULL DEFAULT ''"},
+		{"source_page", "INTEGER NOT NULL DEFAULT 1"},
 	}
 	existingResCols := make(map[string]bool)
 	if rows, err := db.Query(`PRAGMA table_info(screening_candidate_results)`); err == nil {
@@ -653,14 +667,13 @@ func upsertRecruitmentCandidate(tx *sql.Tx, resume *Resume, stamp, now string) (
 
 // The legacy screens still write JSON. While they are being moved to SQLite,
 // mirror successful legacy writes so the new workbench never shows stale data.
-func (a *App) syncRecruitmentProject(project *Project) {
-	db := a.activeRecruitmentDB()
-	if db == nil || project == nil {
-		return
+func upsertRecruitmentProject(db *sql.DB, project *Project) error {
+	if project == nil || strings.TrimSpace(project.ID) == "" {
+		return fmt.Errorf("项目 ID 为空")
 	}
 	raw, err := json.Marshal(project)
 	if err != nil {
-		return
+		return err
 	}
 	_, err = db.Exec(`INSERT INTO projects
 		(id,name,department,recruiter,headcount,job_title,legacy_json,created_at,updated_at)
@@ -671,9 +684,40 @@ func (a *App) syncRecruitmentProject(project *Project) {
 		project.ID, project.Name, project.Department, project.Recruiter, project.Headcount,
 		project.JobConfig.Title, string(raw), project.CreatedAt.Format(time.RFC3339Nano),
 		project.UpdatedAt.Format(time.RFC3339Nano))
+	return err
+}
+
+func reconcileRecruitmentProjects(db *sql.DB, dir string) error {
+	paths, err := filepath.Glob(filepath.Join(dir, "projects", "*.json"))
+	if err != nil {
+		return err
+	}
+	for _, path := range paths {
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		var project Project
+		if err := json.Unmarshal(data, &project); err != nil {
+			return fmt.Errorf("读取项目 %s 失败: %w", path, err)
+		}
+		if err := upsertRecruitmentProject(db, &project); err != nil {
+			return fmt.Errorf("同步项目 %s 失败: %w", project.ID, err)
+		}
+	}
+	return nil
+}
+
+func (a *App) syncRecruitmentProject(project *Project) error {
+	db := a.activeRecruitmentDB()
+	if db == nil || project == nil {
+		return nil
+	}
+	err := upsertRecruitmentProject(db, project)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "[RecruitmentStore] project sync failed: %v\n", err)
 	}
+	return err
 }
 
 func (a *App) deleteRecruitmentProject(projectID string) error {
@@ -863,6 +907,12 @@ func (a *App) syncRecruitmentResume(resume *Resume) {
 				resume.Analysis.ConfirmedBonusCount, string(analysis), now)
 			if err != nil {
 				return
+			}
+			if resume.Status == "done" {
+				if _, err = tx.Exec(`UPDATE project_candidates SET stage='pending_contact',updated_at=?
+					WHERE id=? AND stage IN ('new','pending_analysis')`, now, linkID); err != nil {
+					return
+				}
 			}
 		}
 	}

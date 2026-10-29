@@ -44,8 +44,7 @@ type telescopeCatalogResult struct {
 
 // Open51JobTelescopeBrowser opens the platform's AI淘金/人才望远镜 page.
 func (a *App) Open51JobTelescopeBrowser() error {
-	a.EnsurePlatformBrowser("51job")
-	return a.OpenURL("https://ehire.51job.com/Revision/talent/search-recommend")
+	return a.activate51JobExistingPage("/Revision/talent/search-recommend")
 }
 
 func resolveTelescopeScript() string {
@@ -73,14 +72,18 @@ func (a *App) Get51JobTelescopeCatalog() (*TalentManagementCatalog, error) {
 	cmd := exec.CommandContext(ctx, "node", script, "--mode", "catalog")
 	hideConsoleWindow(cmd)
 	out, err := cmd.Output()
+	var res telescopeCatalogResult
+	jsonErr := json.Unmarshal(out, &res)
+	if ctx.Err() != nil {
+		return nil, fmt.Errorf("读取人才望远镜职位超时")
+	}
+	if jsonErr == nil && res.Status != "ok" && res.Message != "" {
+		return nil, fmt.Errorf("%s", res.Message)
+	}
 	if err != nil {
-		if ctx.Err() != nil {
-			return nil, fmt.Errorf("读取人才望远镜职位超时")
-		}
 		return nil, fmt.Errorf("读取人才望远镜职位失败: %w", err)
 	}
-	var res telescopeCatalogResult
-	if jsonErr := json.Unmarshal(out, &res); jsonErr != nil {
+	if jsonErr != nil {
 		return nil, fmt.Errorf("人才望远镜目录回执无法解析: %w", jsonErr)
 	}
 	if res.Status != "ok" {
@@ -147,10 +150,17 @@ func (a *App) Scan51JobTelescopeBatch(accountScope, jobID, projectID string) (*S
 	if err != nil {
 		return nil, err
 	}
+	project := a.GetProject(projectID)
+	if project == nil {
+		return nil, fmt.Errorf("本地职位项目不存在：%s", projectID)
+	}
+	if err := upsertRecruitmentProject(db, project); err != nil {
+		return nil, fmt.Errorf("同步本地职位项目失败: %w", err)
+	}
 
 	// 自动保全项目与职位映射
 	var mappedProject string
-	err = db.QueryRow(`SELECT project_id FROM platform_job_mappings WHERE platform='51job' AND platform_job_id=?`, jobID).Scan(&mappedProject)
+	err = db.QueryRow(`SELECT project_id FROM platform_job_mappings WHERE platform='51job' AND platform_account=? AND platform_job_id=?`, accountScope, jobID).Scan(&mappedProject)
 	if err != nil || mappedProject != projectID {
 		nowStr := time.Now().Format("2006-01-02 15:04:05")
 		_, _ = db.Exec(`INSERT INTO platform_job_mappings(platform, platform_account, platform_job_id, project_id, updated_at)

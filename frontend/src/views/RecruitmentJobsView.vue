@@ -1112,34 +1112,48 @@ async function saveJob() {
           job_config: jobConfig,
           updated_at: new Date().toISOString()
         }
-        await projectStore.updateProject(updated)
+        const saved = await waitForJobSave(projectStore.updateProject(updated))
+        if (!saved) throw new Error('职位更新未完成，请刷新列表核对后再重试')
         ElMessage.success('职位已更新')
+      } else {
+        throw new Error('原职位已不存在，请刷新职位列表后重试')
       }
     } else {
-      const created = await projectStore.createProject(
+      const created = await waitForJobSave(projectStore.createProject(
         jobForm.title.trim(),
         jobForm.department.trim(),
         jobForm.headcount,
         jobForm.recruiter?.trim() || '',
         '',
         jobConfig
-      )
+      ))
       if (created) {
         if (jobForm.status !== 'publishing') {
           created.status = jobForm.status
-          await projectStore.updateProject(created)
+          if (!await waitForJobSave(projectStore.updateProject(created))) {
+            throw new Error('职位已创建，但状态保存未确认；请刷新职位列表核对')
+          }
         }
         ElMessage.success('新建职位成功，已为您在人才库建立专属分库！')
+      } else {
+        throw new Error('职位创建未完成，请刷新职位列表核对后再重试')
       }
     }
 
     editModalVisible.value = false
-    await load()
+    void load()
   } catch (err: any) {
     ElMessage.error(err?.message || String(err))
   } finally {
     saving.value = false
   }
+}
+
+function waitForJobSave<T>(operation: Promise<T>): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const timer = window.setTimeout(() => reject(new Error('保存超过 20 秒，结果尚未确认；请刷新职位列表核对，避免重复创建')), 20000)
+    operation.then(value => { window.clearTimeout(timer); resolve(value) }, error => { window.clearTimeout(timer); reject(error) })
+  })
 }
 
 async function openSourcing(project: Project) {

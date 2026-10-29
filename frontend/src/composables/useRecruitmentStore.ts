@@ -96,7 +96,7 @@ export interface SourcingTask {
 }
 
 export const stageLabels: Record<string, string> = {
-  new: '新入库', pending_analysis: '待评估', pending_contact: '待联系',
+  new: '新入库', pending_contact: '待联系',
   communicating: '沟通中', first_interview: '初面', second_interview: '复面',
   offer: 'Offer', hired: '入职', on_hold: '暂缓', rejected: '淘汰'
 }

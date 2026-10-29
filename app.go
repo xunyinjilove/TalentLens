@@ -391,29 +391,29 @@ type ChatResponse struct {
 }
 
 type App struct {
-	ctx                context.Context
-	config             Config
-	activeProjectID    string // 当前活跃的项目ID（前端设置）
-	bossCmd            *exec.Cmd
-	bossStopFile       string // 多平台任务的协作停机标记；空值表示旧版任务
-	activeSearchTaskID string
-	searchStarting     bool
-	bossMutex          sync.Mutex
-	interviewMutex     sync.Mutex
-	contactMutex       sync.Mutex
-	translationMutex   sync.Mutex
+	ctx                  context.Context
+	config               Config
+	activeProjectID      string // 当前活跃的项目ID（前端设置）
+	bossCmd              *exec.Cmd
+	bossStopFile         string // 多平台任务的协作停机标记；空值表示旧版任务
+	activeSearchTaskID   string
+	searchStarting       bool
+	bossMutex            sync.Mutex
+	interviewMutex       sync.Mutex
+	contactMutex         sync.Mutex
+	translationMutex     sync.Mutex
 	outreachMutex        sync.Mutex
 	jobSyncMu            sync.Mutex
 	talentFilterMu       sync.Mutex
 	talentFilterStopFile string
 	contactPending       map[string]pending51JobHiQuote
-	analysisMutex      sync.Mutex
-	activeAnalyses     map[string]bool
-	activeProjects     map[string]bool
-	dataDirOverride    string // 测试使用的隔离数据目录；生产环境为空
-	recruitmentDBMu    sync.Mutex
-	recruitmentDB      *sql.DB
-	recruitmentDir     string
+	analysisMutex        sync.Mutex
+	activeAnalyses       map[string]bool
+	activeProjects       map[string]bool
+	dataDirOverride      string // 测试使用的隔离数据目录；生产环境为空
+	recruitmentDBMu      sync.Mutex
+	recruitmentDB        *sql.DB
+	recruitmentDir       string
 }
 
 func NewApp() *App {
@@ -1321,10 +1321,18 @@ func (a *App) getProjectsDir() string {
 	return dir
 }
 
-func (a *App) saveProject(p *Project) {
-	data, _ := json.MarshalIndent(p, "", "  ")
-	os.WriteFile(filepath.Join(a.getProjectsDir(), p.ID+".json"), data, 0644)
-	a.syncRecruitmentProject(p)
+func (a *App) saveProject(p *Project) error {
+	if p == nil {
+		return fmt.Errorf("职位数据为空")
+	}
+	data, err := json.MarshalIndent(p, "", "  ")
+	if err != nil {
+		return err
+	}
+	if err := os.WriteFile(filepath.Join(a.getProjectsDir(), p.ID+".json"), data, 0644); err != nil {
+		return err
+	}
+	return a.syncRecruitmentProject(p)
 }
 
 // CreateProject 创建招聘项目
@@ -1353,7 +1361,10 @@ func (a *App) CreateProject(name string, department string, headcount int, recru
 		CreatedAt:  time.Now(),
 		UpdatedAt:  time.Now(),
 	}
-	a.saveProject(p)
+	if err := a.saveProject(p); err != nil {
+		log.Printf("[CreateProject] 保存项目 %s 失败: %v", p.ID, err)
+		return nil
+	}
 	log.Printf("[CreateProject] 创建项目: %s (%s) 部门: %s 负责人: %s", p.Name, p.ID, p.Department, p.Recruiter)
 	return p
 }
@@ -1415,8 +1426,7 @@ func (a *App) UpdateProject(p *Project) error {
 		}
 	}
 	p.UpdatedAt = time.Now()
-	a.saveProject(p)
-	return nil
+	return a.saveProject(p)
 }
 
 // DeleteProject 删除项目及其关联简历

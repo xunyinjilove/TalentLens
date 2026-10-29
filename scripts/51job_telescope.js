@@ -25,12 +25,13 @@ function telescopeSnapshot() {
   const recommend = components.find(vm => vm.$options?.name === 'TalentRecommend');
   const menu = components.find(vm => vm.$options?.name === 'EhMenuPositionsRecommend');
   const list = components.find(vm => vm.$options?.name === 'EhFossicksList');
-  if (!recommend || !list) return null;
+  // 职位标签可先于候选人列表加载，目录读取不应依赖列表组件。
+  if (!recommend) return null;
 
   const job = recommend.$data?.activeJobInfo || {};
-  const groups = list.$props?.list || list.$data?.list || [];
+  const groups = list?.$props?.list || list?.$data?.list || [];
   const hruid = String(recommend.$data?.hruId || '').trim();
-  const coid = String(job.coid || groups[0]?.coid || list.$props?.jobParams?.coid || '').trim();
+  const coid = String(job.coid || groups[0]?.coid || list?.$props?.jobParams?.coid || '').trim();
 
   const rawPositions = menu?.$props?.positionListsAll || menu?.$data?.positionListsAll || [];
   const seen = new Set();
@@ -50,7 +51,7 @@ function telescopeSnapshot() {
     });
   }
 
-  const activeJobId = String(job.jobid || menu?.$props?.activeJobid || list.$props?.jobParams?.jobid || '').trim();
+  const activeJobId = String(job.jobid || menu?.$props?.activeJobid || list?.$props?.jobParams?.jobid || '').trim();
   const activeJobTitle = String(job.jobname || '').trim();
   if (activeJobId && !seen.has(activeJobId)) {
     jobs.unshift({

@@ -55,7 +55,7 @@ type ScreeningBatchPreview struct {
 	QualifiedList        []ScreeningCandidateResult `json:"qualifiedList"`
 	UnfitList            []ScreeningCandidateResult `json:"unfitList"`
 	PendingList          []ScreeningCandidateResult `json:"pendingList"`
-	Status               string                     `json:"status"` // "scanning" | "preview_ready" | "completed" | "failed"
+	Status               string                     `json:"status"`     // "scanning" | "preview_ready" | "completed" | "failed"
 	ScanStatus           string                     `json:"scanStatus"` // "pending" | "scanning" | "paused" | "manual_required" | "complete"
 	CurrentPage          int                        `json:"currentPage"`
 	NextPage             int                        `json:"nextPage"`
@@ -465,6 +465,16 @@ func (a *App) Scan51JobTalentManagementBatch(accountScope, jobID, projectID stri
 	if err != nil {
 		return nil, err
 	}
+	project := a.GetProject(projectID)
+	if project == nil {
+		return nil, fmt.Errorf("本地职位项目不存在：%s", projectID)
+	}
+	if err := upsertRecruitmentProject(db, project); err != nil {
+		return nil, fmt.Errorf("同步本地职位项目失败: %w", err)
+	}
+	if err := a.SetPlatformJobMapping("51job", accountScope, jobID, projectID); err != nil {
+		return nil, fmt.Errorf("保存职位绑定失败: %w", err)
+	}
 
 	businessDate := time.Now().Format("2006-01-02")
 	nowStr := time.Now().Format("2006-01-02 15:04:05")
@@ -548,11 +558,6 @@ func (a *App) Scan51JobTalentManagementBatch(accountScope, jobID, projectID stri
 			}
 		}
 
-		tx, txErr := db.Begin()
-		if txErr != nil {
-			return nil, txErr
-		}
-
 		for candIdx, cand := range pageData.Candidates {
 			if cand.CandidateID == "" || cand.RecordID == "" {
 				continue
@@ -572,7 +577,7 @@ func (a *App) Scan51JobTalentManagementBatch(accountScope, jobID, projectID stri
 			}
 
 			var existingActionStatus string
-			_ = tx.QueryRow(`SELECT status FROM platform_action_ledger WHERE project_id=? AND candidate_id=? AND record_id=? ORDER BY requested_at DESC LIMIT 1`,
+			_ = db.QueryRow(`SELECT status FROM platform_action_ledger WHERE project_id=? AND candidate_id=? AND record_id=? ORDER BY requested_at DESC LIMIT 1`,
 				projectID, cand.CandidateID, cand.RecordID).Scan(&existingActionStatus)
 
 			actionStatus := "pending"
@@ -583,26 +588,30 @@ func (a *App) Scan51JobTalentManagementBatch(accountScope, jobID, projectID stri
 			resumeContent := cand.ResumeText
 			detailLoaded := false
 
-			verdict, checks := EvaluateCandidateTriState(resumeContent, *criteria)
-
-			// 若列表概要信息不足（如学历或活跃度未知），且有必要读取详情时，设定 8 秒有限等待
-			if verdict == "pending_verification" {
-				detailOut, detailErr := runTalentManagementAdapter(8*time.Second, "--mode", "detail", "--job-id", jobID,
-					"--candidate-id", cand.CandidateID, "--record-id", cand.RecordID, "--status-index", "1", "--page-index", fmt.Sprint(page))
+			// 每人先读取平台真实详情。网络等待不能放在 SQLite 事务内，否则保存职位会被长时间阻塞。
+			verdict, checks := "pending_verification", []RuleCheckItem{}
+			{
+				detailOut, detailErr := a.readScreeningDetailWithCountdown(batchID, page, totalPagesEst, cand, candIdx+1, len(pageData.Candidates), jobID)
 				if detailErr == nil {
 					var detailResp talentManagementDetail
 					if json.Unmarshal(detailOut, &detailResp) == nil && detailResp.Status == "ok" && strings.TrimSpace(detailResp.ResumeText) != "" {
 						resumeContent = detailResp.ResumeText
 						detailLoaded = true
 						verdict, checks = EvaluateCandidateTriState(resumeContent, *criteria)
+						if !detailResp.DocumentsComplete {
+							verdict = "pending_verification"
+							checks = append(checks, RuleCheckItem{Rule: "documents", Label: "简历资料完整性", Status: "unknown", Evidence: detailResp.DocumentStatus})
+						}
+					} else {
+						detailErr = fmt.Errorf("平台未返回可核验的完整简历")
 					}
-				} else {
-					// 详情超时或受限：绝不阻塞整批扫描，记录说明并保持待核实保全状态
+				}
+				if detailErr != nil {
 					checks = append(checks, RuleCheckItem{
 						Rule:     "detail_load",
 						Label:    "简历详情读取",
 						Status:   "unknown",
-						Evidence: "详情加载超时，已保全为待核实，后续可单独重试",
+						Evidence: fmt.Sprintf("%s；已保全为待核实，稍后自动或手动补读", detailErr),
 					})
 				}
 			}
@@ -610,11 +619,22 @@ func (a *App) Scan51JobTalentManagementBatch(accountScope, jobID, projectID stri
 			resID := recruitmentID("scr")
 			evidenceJSON, _ := json.Marshal(checks)
 
-			_, _ = tx.Exec(`INSERT INTO screening_candidate_results(id, batch_id, project_id, candidate_id, record_id, candidate_name, verdict, rule_evidence_json, raw_profile_json, detail_loaded, action_status, action_receipt_at, action_error, created_at)
-				VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)
-				ON CONFLICT(batch_id, candidate_id, record_id) DO UPDATE SET verdict=excluded.verdict, rule_evidence_json=excluded.rule_evidence_json, raw_profile_json=excluded.raw_profile_json, detail_loaded=excluded.detail_loaded, action_status=excluded.action_status`,
+			_, err = db.Exec(`INSERT INTO screening_candidate_results(id, batch_id, project_id, candidate_id, record_id, candidate_name, verdict, rule_evidence_json, raw_profile_json, detail_loaded, source_page, action_status, action_receipt_at, action_error, created_at)
+				VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+				ON CONFLICT(batch_id, candidate_id, record_id) DO UPDATE SET verdict=excluded.verdict, rule_evidence_json=excluded.rule_evidence_json, raw_profile_json=excluded.raw_profile_json, detail_loaded=excluded.detail_loaded, source_page=excluded.source_page,
+				action_status=CASE WHEN screening_candidate_results.action_status IN ('completed','imported','verified_on_platform') THEN screening_candidate_results.action_status ELSE excluded.action_status END`,
 				resID, batchID, projectID, cand.CandidateID, cand.RecordID, cand.Name, verdict, string(evidenceJSON),
-				resumeContent, boolToInt(detailLoaded), actionStatus, "", "", nowStr)
+				resumeContent, boolToInt(detailLoaded), page, actionStatus, "", "", nowStr)
+			if err != nil {
+				return nil, fmt.Errorf("保存第 %d 页第 %d 人的核验结果失败: %w", page, candIdx+1, err)
+			}
+			if verdict == "qualified" && detailLoaded {
+				if importErr := a.autoImportQualifiedCandidate(db, batchID, projectID, accountScope, jobID,
+					cand.CandidateID, cand.RecordID, cand.Name, resumeContent); importErr != nil {
+					_, _ = db.Exec(`UPDATE screening_candidate_results SET action_error=? WHERE batch_id=? AND candidate_id=? AND record_id=?`,
+						"自动入库待重试: "+importErr.Error(), batchID, cand.CandidateID, cand.RecordID)
+				}
+			}
 		}
 
 		lastSuccessPage = page
@@ -628,10 +648,9 @@ func (a *App) Scan51JobTalentManagementBatch(accountScope, jobID, projectID stri
 			completedAtStr = time.Now().Format("2006-01-02 15:04:05")
 		}
 
-		_, _ = tx.Exec(`UPDATE screening_batches SET current_page=?, next_page=?, last_success_page=?, total_pages_estimated=?, initial_platform_count=?, scan_status=?, completed_at=?, last_error='' WHERE id=?`,
+		_, err = db.Exec(`UPDATE screening_batches SET current_page=?, next_page=?, last_success_page=?, total_pages_estimated=?, initial_platform_count=?, scan_status=?, completed_at=?, last_error='' WHERE id=?`,
 			page, nextPage, lastSuccessPage, totalPagesEst, initPlatCount, finalScanStatus, completedAtStr, batchID)
-
-		if err := tx.Commit(); err != nil {
+		if err != nil {
 			return nil, fmt.Errorf("保存第 %d 页检查点失败: %w", page, err)
 		}
 
@@ -642,6 +661,70 @@ func (a *App) Scan51JobTalentManagementBatch(accountScope, jobID, projectID stri
 
 	_ = updateBatchCounts(db, batchID)
 	return a.GetScreeningBatchPreview(batchID)
+}
+
+func (a *App) readScreeningDetailWithCountdown(batchID string, page, totalPages int, cand talentManagementCandidate, index, total int, jobID string) ([]byte, error) {
+	type response struct {
+		out []byte
+		err error
+	}
+	result := make(chan response, 1)
+	go func() {
+		out, err := runTalentManagementAdapter(15*time.Second, "--mode", "detail", "--job-id", jobID,
+			"--candidate-id", cand.CandidateID, "--record-id", cand.RecordID, "--status-index", "1", "--page-index", fmt.Sprint(page))
+		result <- response{out, err}
+	}()
+	ticker := time.NewTicker(time.Second)
+	defer ticker.Stop()
+	remaining := 15
+	for {
+		select {
+		case done := <-result:
+			return done.out, done.err
+		case <-ticker.C:
+			remaining--
+			if a.ctx != nil {
+				runtime.EventsEmit(a.ctx, "screening_scan_progress", map[string]interface{}{
+					"batchId": batchID, "page": page, "totalPages": totalPages,
+					"candidateIndex": index, "totalCandidates": total, "candidateName": cand.Name,
+					"statusText": fmt.Sprintf("正在读取第 %d/%d 页 · 候选人 %s (%d/%d) 的详情，最多再等 %d 秒", page, totalPages, cand.Name, index, total, max(remaining, 0)),
+				})
+			}
+		}
+	}
+}
+
+// 仅本地入库；平台 Hi聊和不合适动作仍由 HR 分别确认。
+func (a *App) autoImportQualifiedCandidate(db *sql.DB, batchID, projectID, accountScope, jobID, candidateID, recordID, name, raw string) error {
+	if strings.TrimSpace(raw) == "" {
+		return fmt.Errorf("简历详情为空")
+	}
+	complete := true
+	record := ApplicationRecord{
+		Platform: "51job", PlatformAccount: accountScope, ApplicationID: recordID,
+		PlatformCandidateID: candidateID, PlatformJobID: jobID, CandidateName: name,
+		PlatformStatus: "待处理", DocumentsComplete: &complete, DocumentStatus: "完整详情已核验合格，自动入库",
+		ResumeText: raw,
+	}
+	result, err := a.ingestApplicationRecords("51job", []ApplicationRecord{record})
+	if err != nil {
+		return err
+	}
+	if result.FailedCount != 0 {
+		return fmt.Errorf("本地简历建档失败")
+	}
+	found := false
+	for _, resume := range a.GetProjectResumes(projectID) {
+		if resume != nil && resume.SourcePlatform == "51job" && resume.PlatformCandidateID == candidateID {
+			found = true
+			break
+		}
+	}
+	if !found {
+		return fmt.Errorf("入库后未找到该候选人的项目简历关联")
+	}
+	_, err = db.Exec(`UPDATE screening_candidate_results SET action_status=CASE WHEN action_status IN ('completed','verified_on_platform') THEN action_status ELSE 'imported' END,action_error='' WHERE batch_id=? AND candidate_id=? AND record_id=?`, batchID, candidateID, recordID)
+	return err
 }
 
 // Persist the parent and every result atomically; foreign keys reject children
@@ -1101,7 +1184,7 @@ func (a *App) GetScreeningBatchPreview(batchID string) (*ScreeningBatchPreview, 
 
 			// 状态对账：核验已存在的平台动作台账，对齐未反映的状态
 			var ledgerStatus, ledgerReceipt string
-			errL := db.QueryRow(`SELECT status, receipt FROM platform_action_ledger WHERE project_id=? AND candidate_id=? AND record_id=? ORDER BY requested_at DESC LIMIT 1`,
+			errL := db.QueryRow(`SELECT status, receipt FROM platform_action_ledger WHERE project_id=? AND candidate_id=? AND record_id=? AND action_type IN ('hi','reject') ORDER BY requested_at DESC LIMIT 1`,
 				it.ProjectID, it.CandidateID, it.RecordID).Scan(&ledgerStatus, &ledgerReceipt)
 			if errL == nil {
 				if ledgerStatus == "success" {
@@ -1154,9 +1237,112 @@ func (a *App) CheckAndResumeProjectScreening(projectID string) (*ScreeningBatchP
 	if scanStatus == "scanning" || scanStatus == "paused" || scanStatus == "manual_required" {
 		return a.Scan51JobTalentManagementBatch(accountScope, jobID, projectID, 0)
 	}
+	if err := a.retryPendingScreeningDetails(batchID, projectID, jobID, 50); err != nil {
+		return nil, err
+	}
 
 	// 否则刷新并返回当前批次预览（自动对账）
 	return a.GetScreeningBatchPreview(batchID)
+}
+
+// 只补读因平台详情超时而保全的人；已执行平台操作的人永不重新判定或点击。
+func (a *App) retryPendingScreeningDetails(batchID, projectID, jobID string, limit int) error {
+	if !acquireScreeningLease(projectID) {
+		return fmt.Errorf("当前项目已有扫描任务运行，请稍后重试")
+	}
+	defer releaseScreeningLease(projectID)
+	criteria, err := a.GetTalentManagementStrictCriteria(projectID)
+	if err != nil {
+		return err
+	}
+	db, err := a.getRecruitmentDB()
+	if err != nil {
+		return err
+	}
+	rows, err := db.Query(`SELECT id,candidate_id,record_id,source_page FROM screening_candidate_results
+		WHERE batch_id=? AND verdict='pending_verification' AND detail_loaded=0
+		AND rule_evidence_json LIKE '%detail_load%' AND action_status NOT IN ('completed','imported','verified_on_platform')
+		ORDER BY source_page,created_at LIMIT ?`, batchID, limit)
+	if err != nil {
+		return err
+	}
+	type pendingDetail struct {
+		id, candidateID, recordID string
+		page                      int
+	}
+	var pending []pendingDetail
+	for rows.Next() {
+		var item pendingDetail
+		if err := rows.Scan(&item.id, &item.candidateID, &item.recordID, &item.page); err != nil {
+			rows.Close()
+			return err
+		}
+		pending = append(pending, item)
+	}
+	err = rows.Err()
+	rows.Close()
+	if err != nil {
+		return err
+	}
+	for _, item := range pending {
+		out, detailErr := runTalentManagementAdapter(15*time.Second, "--mode", "detail", "--job-id", jobID,
+			"--candidate-id", item.candidateID, "--record-id", item.recordID, "--status-index", "1", "--page-index", fmt.Sprint(item.page))
+		if detailErr != nil {
+			continue
+		}
+		var detail talentManagementDetail
+		if json.Unmarshal(out, &detail) != nil || detail.Status != "ok" || strings.TrimSpace(detail.ResumeText) == "" {
+			continue
+		}
+		verdict, checks := EvaluateCandidateTriState(detail.ResumeText, *criteria)
+		if !detail.DocumentsComplete {
+			verdict = "pending_verification"
+			checks = append(checks, RuleCheckItem{Rule: "documents", Label: "简历资料完整性", Status: "unknown", Evidence: detail.DocumentStatus})
+		}
+		evidence, _ := json.Marshal(checks)
+		if _, err := db.Exec(`UPDATE screening_candidate_results SET verdict=?,rule_evidence_json=?,raw_profile_json=?,detail_loaded=1 WHERE id=?`,
+			verdict, string(evidence), detail.ResumeText, item.id); err != nil {
+			return err
+		}
+	}
+	if err := a.retryQualifiedAutoImports(db, batchID, projectID, jobID, limit); err != nil {
+		return err
+	}
+	return updateBatchCounts(db, batchID)
+}
+
+func (a *App) retryQualifiedAutoImports(db *sql.DB, batchID, projectID, jobID string, limit int) error {
+	var accountScope string
+	if err := db.QueryRow(`SELECT platform_account FROM screening_batches WHERE id=?`, batchID).Scan(&accountScope); err != nil {
+		return err
+	}
+	rows, err := db.Query(`SELECT candidate_id,record_id,candidate_name,raw_profile_json FROM screening_candidate_results
+		WHERE batch_id=? AND verdict='qualified' AND detail_loaded=1 AND action_status='pending' LIMIT ?`, batchID, limit)
+	if err != nil {
+		return err
+	}
+	type candidate struct{ id, recordID, name, raw string }
+	var items []candidate
+	for rows.Next() {
+		var item candidate
+		if err := rows.Scan(&item.id, &item.recordID, &item.name, &item.raw); err != nil {
+			rows.Close()
+			return err
+		}
+		items = append(items, item)
+	}
+	err = rows.Err()
+	rows.Close()
+	if err != nil {
+		return err
+	}
+	for _, item := range items {
+		if err := a.autoImportQualifiedCandidate(db, batchID, projectID, accountScope, jobID, item.id, item.recordID, item.name, item.raw); err != nil {
+			_, _ = db.Exec(`UPDATE screening_candidate_results SET action_error=? WHERE batch_id=? AND candidate_id=? AND record_id=?`,
+				"自动入库待重试: "+err.Error(), batchID, item.id, item.recordID)
+		}
+	}
+	return nil
 }
 
 // resumeAllUnfinishedScreeningTasks 检查所有未完成的筛选任务并尝试续跑
@@ -1166,7 +1352,14 @@ func (a *App) resumeAllUnfinishedScreeningTasks() {
 		return
 	}
 	rows, err := db.Query(`SELECT id, project_id, platform_account, platform_job_id, scan_status
-		FROM screening_batches WHERE scan_status IN ('scanning', 'paused') ORDER BY started_at DESC LIMIT 5`)
+		FROM screening_batches b WHERE b.scan_status IN ('scanning', 'paused') OR
+		(b.scan_status='complete' AND b.source='talent_management' AND EXISTS (
+		 SELECT 1 FROM screening_candidate_results r WHERE r.batch_id=b.id AND r.verdict='pending_verification'
+		 AND r.detail_loaded=0 AND r.rule_evidence_json LIKE '%detail_load%')) OR
+		(b.scan_status='complete' AND b.source='talent_management' AND EXISTS (
+		 SELECT 1 FROM screening_candidate_results r WHERE r.batch_id=b.id AND r.verdict='qualified'
+		 AND r.detail_loaded=1 AND r.action_status='pending'))
+		ORDER BY started_at DESC LIMIT 5`)
 	if err != nil {
 		return
 	}
@@ -1194,14 +1387,20 @@ func (a *App) resumeAllUnfinishedScreeningTasks() {
 	catalog, err := a.Get51JobTalentManagementCatalog()
 	if err != nil {
 		for _, t := range tasks {
-			_, _ = db.Exec(`UPDATE screening_batches SET scan_status='manual_required', last_error='51job 专属浏览器未连接，保留断点' WHERE id=?`, t.batchID)
+			if t.scanStatus != "complete" {
+				_, _ = db.Exec(`UPDATE screening_batches SET scan_status='manual_required', last_error='51job 专属浏览器未连接，保留断点' WHERE id=?`, t.batchID)
+			}
 		}
 		return
 	}
 
 	for _, t := range tasks {
 		if t.accountScope == catalog.AccountScope {
-			_, _ = a.Scan51JobTalentManagementBatch(t.accountScope, t.jobID, t.projectID, 0)
+			if t.scanStatus == "complete" {
+				_ = a.retryPendingScreeningDetails(t.batchID, t.projectID, t.jobID, 10)
+			} else {
+				_, _ = a.Scan51JobTalentManagementBatch(t.accountScope, t.jobID, t.projectID, 0)
+			}
 		}
 	}
 }

@@ -13,7 +13,7 @@
       <el-tab-pane label="职位接入与初筛预览" name="sync">
         <el-alert type="info" :closable="false" show-icon style="margin-bottom: 16px">
           <template #default>
-            项目是条件的唯一归属。仅扫描平台「待处理」人选生成三类名单预览；HR 确认后，合格人选入库，不合格人选可批量标记「不感兴趣」，待核实人选受完整性保护不入库也不触发平台操作。
+            项目是条件的唯一归属。扫描平台「待处理」人选生成三类名单；详情完整且合格的人选立即进入专属分库。不合格人选需 HR 确认后才能在 51job 标记「不感兴趣」；待核实人选不入库也不触发平台操作。
           </template>
         </el-alert>
 
@@ -93,10 +93,7 @@
             <!-- 子看板 1: 合格人选 -->
             <div v-if="previewSubTab === 'qualified'">
               <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px">
-                <span style="font-size: 12px; color: #166534">各项启用条件均通过，可一键导入至当前职位专属分库</span>
-                <el-button type="success" size="small" :loading="executingAction" :disabled="batchPreview.qualifiedCount === 0 || batchPreview.scanStatus !== 'complete'" @click="confirmImportQualified">
-                  一键导入合格人选入库 ({{ batchPreview.qualifiedCount }})
-                </el-button>
+                <span style="font-size: 12px; color: #166534">详情完整且合格的人选会自动进入当前职位专属分库；入库失败可点击「检查任务与对账」重试</span>
               </div>
               <el-table :data="batchPreview.qualifiedList" size="small" max-height="240" empty-text="当前批次无合格人选">
                 <el-table-column prop="candidateName" label="姓名" width="100" />
@@ -109,9 +106,11 @@
                 </el-table-column>
                 <el-table-column prop="actionStatus" label="状态" width="90">
                   <template #default="{ row }">
-                    <el-tag size="small" :type="row.actionStatus === 'imported' ? 'success' : 'info'">
-                      {{ row.actionStatus === 'imported' ? '已入库' : '待导入' }}
-                    </el-tag>
+                    <el-tooltip :content="row.actionError || '等待自动入库'" :disabled="row.actionStatus === 'imported'" placement="top">
+                      <el-tag size="small" :type="row.actionStatus === 'imported' ? 'success' : 'warning'">
+                        {{ row.actionStatus === 'imported' ? '已入库' : (row.actionError ? '待重试' : '待入库') }}
+                      </el-tag>
+                    </el-tooltip>
                   </template>
                 </el-table-column>
               </el-table>
@@ -180,16 +179,17 @@
         <el-alert type="info" :closable="false" show-icon style="margin-bottom: 16px"
           title="读取 51job「AI淘金 → 人才望远镜」当前职位的候选人，使用本项目已保存的同一版条件生成合格、不合格、待核实名单。读取不会发送消息或修改平台状态。" />
 
-        <el-alert v-if="!jobs.length && !loading" type="warning" :closable="false" show-icon style="margin-bottom: 16px"
+        <el-alert v-if="!telescopeJobs.length && !telescopeLoading" type="warning" :closable="false" show-icon style="margin-bottom: 16px"
           title="未读取到职位。若您已在 51job 浏览器打开「AI淘金 → 人才望远镜」，请点击下方【重新读取望远镜职位】。" />
+        <p v-if="telescopeCatalogStatus" class="catalog-status" :class="{ stale: telescopeCatalogStale }">{{ telescopeCatalogStatus }}</p>
 
         <el-form label-position="top">
           <el-row :gutter="16">
             <el-col :span="12">
               <el-form-item label="51job 人才望远镜职位">
-                <el-select v-model="jobId" filterable style="width: 100%" :disabled="telescopeScanning"
+                <el-select v-model="telescopeJobId" filterable style="width: 100%" :disabled="telescopeScanning"
                   placeholder="选择与望远镜页面当前标签一致的职位">
-                  <el-option v-for="job in jobs" :key="job.jobId" :value="job.jobId" :label="formatJobOptionLabel(job)" />
+                  <el-option v-for="job in telescopeJobs" :key="job.jobId" :value="job.jobId" :label="formatJobOptionLabel(job)" />
                 </el-select>
               </el-form-item>
             </el-col>
@@ -209,10 +209,10 @@
         <p class="catalog-status">计划时间：{{ savedCriteria?.scheduleEnabled ? savedCriteria.scheduleTime : '未启用' }}。望远镜自动定时扫描尚未接入；目前可手动运行。</p>
         <div style="display: flex; gap: 10px; align-items: center; margin: 16px 0; flex-wrap: wrap">
           <el-button type="warning" plain @click="openTelescope">打开 51job 人才望远镜</el-button>
-          <el-button type="info" plain :loading="loading" @click="loadTelescopeCatalog">
+          <el-button type="info" plain :loading="telescopeLoading" @click="loadTelescopeCatalog">
             <el-icon><Refresh /></el-icon> 重新读取望远镜职位
           </el-button>
-          <el-button type="primary" :loading="telescopeScanning" :disabled="!jobId || !projectId || catalogStale || running" @click="scanTelescopePreview">
+          <el-button type="primary" :loading="telescopeScanning" :disabled="!telescopeJobId || !projectId || telescopeCatalogStale || running" @click="scanTelescopePreview">
             立即筛选当前项目
           </el-button>
         </div>
@@ -452,15 +452,21 @@ const visible = computed({ get: () => props.modelValue, set: value => emit('upda
 
 const activeTab = ref('sync')
 const jobs = ref<Array<{ jobId: string; title: string; workArea?: string; degree?: string; workYear?: string; salary?: string }>>([])
+const telescopeJobs = ref<Array<{ jobId: string; title: string; workArea?: string; degree?: string; workYear?: string; salary?: string }>>([])
 const mappings = ref<any[]>([])
 const accountScope = ref('')
+const telescopeAccountScope = ref('')
 const jobId = ref('')
+const telescopeJobId = ref('')
 const projectId = ref('')
 const selectedJob = computed(() => jobs.value.find(j => j.jobId === jobId.value))
 const statuses = ref<number[]>([1])
 const loading = ref(false)
+const telescopeLoading = ref(false)
 const catalogStale = ref(true)
+const telescopeCatalogStale = ref(true)
 const catalogStatus = ref('')
+const telescopeCatalogStatus = ref('')
 const saveStatus = ref('')
 let loadGeneration = 0
 const running = ref(false)
@@ -542,17 +548,7 @@ async function load() {
   try {
     const api: any = await import('../../wailsjs/go/main/App')
     const fresh = await withTimeout((async () => {
-      let catalog: any = null
-      try {
-        catalog = await api.Get51JobTalentManagementCatalog()
-      } catch (catErr: any) {
-        // 若人才管理页面不可用，尝试直接读取人才望远镜页面职位
-        try {
-          catalog = await api.Get51JobTelescopeCatalog()
-        } catch (_) {
-          throw catErr
-        }
-      }
+      const catalog = await api.Get51JobTalentManagementCatalog()
       const nextMappings = await api.ListPlatformJobMappings() || []
       const nextJobs = catalog.jobs || []
       const nextJobID = nextJobs.some((job: any) => job.jobId === jobId.value) ? jobId.value : (nextJobs[0]?.jobId || '')
@@ -590,27 +586,34 @@ async function load() {
 }
 
 async function loadTelescopeCatalog() {
-  loading.value = true
+  telescopeLoading.value = true
+  telescopeCatalogStale.value = true
   try {
     const api: any = await import('../../wailsjs/go/main/App')
     const catalog = await api.Get51JobTelescopeCatalog()
     if (catalog && catalog.jobs && catalog.jobs.length > 0) {
-      jobs.value = catalog.jobs
-      if (catalog.accountScope) accountScope.value = catalog.accountScope
-      catalogStale.value = false
-      if (!jobId.value || !jobs.value.some((j: any) => j.jobId === jobId.value)) {
-        jobId.value = catalog.jobs[0]?.jobId || ''
+      telescopeJobs.value = catalog.jobs
+      telescopeAccountScope.value = catalog.accountScope || ''
+      telescopeCatalogStale.value = false
+      if (!telescopeJobId.value || !telescopeJobs.value.some((j: any) => j.jobId === telescopeJobId.value)) {
+        telescopeJobId.value = catalog.jobs[0]?.jobId || ''
       }
-      syncMappedProject()
-      catalogStatus.value = `已从人才望远镜读取 ${catalog.jobs.length} 个职位 · ${new Date().toLocaleTimeString('zh-CN', { hour12: false })}`
+      if (!mappings.value.length) mappings.value = await api.ListPlatformJobMappings() || []
+      const mapped = mappings.value.find(item => item.platform === '51job' &&
+        item.platformAccount === telescopeAccountScope.value && item.platformJobId === telescopeJobId.value)
+      if (mapped?.projectId && !projectId.value) projectId.value = mapped.projectId
+      telescopeCatalogStatus.value = `已从人才望远镜读取 ${catalog.jobs.length} 个职位 · ${new Date().toLocaleTimeString('zh-CN', { hour12: false })}`
       ElMessage.success(`已从人才望远镜读取 ${catalog.jobs.length} 个职位`)
     } else {
-      ElMessage.warning('望远镜页面未检测到职位')
+      telescopeCatalogStatus.value = '望远镜页面尚未显示职位，请从 51job 菜单进入并等待职位标签加载后重试'
     }
   } catch (e: any) {
-    ElMessage.error(e?.message || '读取人才望远镜职位失败，请确认已打开望远镜页面')
+    telescopeJobs.value = []
+    telescopeJobId.value = ''
+    telescopeCatalogStatus.value = e?.message || '读取人才望远镜职位失败，请确认已打开望远镜页面'
+    ElMessage.error(telescopeCatalogStatus.value)
   } finally {
-    loading.value = false
+    telescopeLoading.value = false
   }
 }
 
@@ -648,7 +651,7 @@ async function openBrowser() {
   try {
     const api: any = await import('../../wailsjs/go/main/App')
     await api.Open51JobManagementBrowser()
-    ElMessage.success('已为您呼出 51job 专用浏览器，请在浏览器中登录企业账号')
+    ElMessage.info('已呼出 51job 专用浏览器；若当前不是人才管理页，请从企业首页菜单进入「人才管理」后重新读取')
   } catch (error: any) {
     ElMessage.error(error?.message || String(error))
   }
@@ -822,26 +825,29 @@ onMounted(() => {
 })
 
 watch(activeTab, (tab) => {
-  if (tab === 'telescope' && (!jobs.value.length || catalogStale.value)) {
-    loadTelescopeCatalog()
-  }
+  if (tab === 'telescope' && !telescopeLoading.value && (!telescopeJobs.value.length || telescopeCatalogStale.value)) void loadTelescopeCatalog()
+  if (tab === 'sync' && (!jobs.value.length || catalogStale.value)) void load()
+})
+
+watch(telescopeJobId, () => {
+  telescopePreview.value = null
+  const mapped = mappings.value.find(item => item.platform === '51job' &&
+    item.platformAccount === telescopeAccountScope.value && item.platformJobId === telescopeJobId.value)
+  if (mapped?.projectId) projectId.value = mapped.projectId
 })
 
 async function openTelescope() {
   try {
     const api: any = await import('../../wailsjs/go/main/App')
     await api.Open51JobTelescopeBrowser()
-    ElMessage.success('已打开 51job 人才望远镜，正在读取望远镜职位…')
-    setTimeout(() => {
-      loadTelescopeCatalog()
-    }, 2000)
+    ElMessage.info('已呼出 51job 专用浏览器；请从「AI淘金」菜单进入「人才望远镜」后重新读取职位')
   } catch (error: any) {
     ElMessage.error(error?.message || String(error))
   }
 }
 
 async function scanTelescopePreview() {
-  if (!jobId.value || !projectId.value) {
+  if (!telescopeJobId.value || !projectId.value) {
     ElMessage.warning('请先选择 51job 望远镜职位与本地职位专属库')
     return
   }
@@ -850,10 +856,7 @@ async function scanTelescopePreview() {
   telescopeProgress.value = '正在读取人才望远镜当前职位并使用项目条件筛选…'
   try {
     const api: any = await import('../../wailsjs/go/main/App')
-    if (accountScope.value) {
-      await api.Bind51JobTalentManagementJob(accountScope.value, jobId.value, projectId.value)
-    }
-    const preview = await api.Scan51JobTelescopeBatch(accountScope.value, jobId.value, projectId.value)
+    const preview = await api.Scan51JobTelescopeBatch(telescopeAccountScope.value, telescopeJobId.value, projectId.value)
     telescopePreview.value = preview
     telescopeProgress.value = `只读筛选完成：合格 ${preview.qualifiedCount} 人，不合格 ${preview.unfitCount} 人，待核实 ${preview.pendingCount} 人`
     ElMessage.success(telescopeProgress.value)
@@ -862,22 +865,6 @@ async function scanTelescopePreview() {
     ElMessage.error(telescopeProgress.value)
   } finally {
     telescopeScanning.value = false
-  }
-}
-
-async function confirmImportQualified() {
-  if (!batchPreview.value?.batchId) return
-  executingAction.value = true
-  try {
-    const api: any = await import('../../wailsjs/go/main/App')
-    const count = await api.ConfirmScreeningImportQualified(batchPreview.value.batchId)
-    ElMessage.success(`成功将 ${count} 位合格人选导入本地专属分库！`)
-    batchPreview.value = await api.GetScreeningBatchPreview(batchPreview.value.batchId)
-    emit('completed')
-  } catch (err: any) {
-    ElMessage.error(err?.message || String(err))
-  } finally {
-    executingAction.value = false
   }
 }
 
@@ -971,7 +958,12 @@ watch(projectId, () => {
 watch(() => props.modelValue, value => {
   if (value) {
     activeTab.value = props.initialTab || 'sync'
-    void load()
+    if (activeTab.value === 'telescope') {
+      projectId.value = props.defaultProjectId || projectId.value
+      void loadTelescopeCatalog()
+    } else {
+      void load()
+    }
   }
 })
 

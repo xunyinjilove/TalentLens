@@ -100,7 +100,7 @@ type RecruitmentActivity struct {
 }
 
 var recruitmentStages = map[string]bool{
-	"new": true, "pending_analysis": true, "pending_contact": true,
+	"new": true, "pending_contact": true,
 	"communicating": true, "first_interview": true, "second_interview": true,
 	"offer": true, "hired": true, "on_hold": true, "rejected": true,
 }

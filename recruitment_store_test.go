@@ -79,6 +79,49 @@ func TestRecruitmentMigrationPreservesLegacyData(t *testing.T) {
 	}
 }
 
+func TestRecruitmentReopenRepairsProjectCatalogAndAnalysisStage(t *testing.T) {
+	dir := t.TempDir()
+	now := time.Now().UTC()
+	app := NewApp()
+	app.dataDirOverride = dir
+	defer app.closeRecruitmentDB()
+	if _, err := app.getRecruitmentDB(); err != nil {
+		t.Fatal(err)
+	}
+	app.closeRecruitmentDB()
+	project := &Project{ID: "proj_added_after_migration", Name: "测试职位", JobConfig: JobConfig{Title: "测试职位"}, CreatedAt: now, UpdatedAt: now}
+	writeLegacyJSON(t, dir, "projects", project.ID, project)
+	db, err := app.getRecruitmentDB()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var count int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM projects WHERE id=?`, project.ID).Scan(&count); err != nil || count != 1 {
+		t.Fatalf("missing project was not repaired: count=%d err=%v", count, err)
+	}
+	if _, err := db.Exec(`INSERT INTO candidates(id,display_name,created_at,updated_at) VALUES(?,?,?,?)`, "cand_stage", "测试人选", now.Format(time.RFC3339Nano), now.Format(time.RFC3339Nano)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`INSERT INTO resume_versions(id,candidate_id,content_sha256,created_at) VALUES(?,?,?,?)`, "rv_stage", "cand_stage", "stage-test-hash", now.Format(time.RFC3339Nano)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`INSERT INTO project_candidates(id,project_id,candidate_id,stage,created_at,updated_at) VALUES(?,?,?,?,?,?)`, "pc_stage", project.ID, "cand_stage", "pending_analysis", now.Format(time.RFC3339Nano), now.Format(time.RFC3339Nano)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`INSERT INTO evaluations(id,project_candidate_id,resume_version_id,status,created_at) VALUES(?,?,?,?,?)`, "ev_stage", "pc_stage", "rv_stage", "done", now.Format(time.RFC3339Nano)); err != nil {
+		t.Fatal(err)
+	}
+	app.closeRecruitmentDB()
+	db, err = app.getRecruitmentDB()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var stage string
+	if err := db.QueryRow(`SELECT stage FROM project_candidates WHERE id='pc_stage'`).Scan(&stage); err != nil || stage != "pending_contact" {
+		t.Fatalf("completed analysis stage = %q, err=%v", stage, err)
+	}
+}
+
 func TestRecruitmentMigrationDoesNotSilentlyDropInvalidLegacyRecord(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "projects", "broken.json")
