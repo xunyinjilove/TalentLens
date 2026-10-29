@@ -601,6 +601,10 @@ func (a *App) Scan51JobTalentManagementBatch(accountScope, jobID, projectID stri
 						if !detailResp.DocumentsComplete {
 							verdict = "pending_verification"
 							checks = append(checks, RuleCheckItem{Rule: "documents", Label: "简历资料完整性", Status: "unknown", Evidence: detailResp.DocumentStatus})
+						} else if detailResp.HasAttachment {
+							checks = append(checks, RuleCheckItem{Rule: "documents", Label: "简历资料完整性", Status: "pass", Evidence: "在线结构化简历完整（附带平台附件/导出版）"})
+						} else {
+							checks = append(checks, RuleCheckItem{Rule: "documents", Label: "简历资料完整性", Status: "pass", Evidence: "在线结构化简历完整"})
 						}
 					} else {
 						detailErr = fmt.Errorf("平台未返回可核验的完整简历")
@@ -1298,11 +1302,36 @@ func (a *App) retryPendingScreeningDetails(batchID, projectID, jobID string, lim
 		if !detail.DocumentsComplete {
 			verdict = "pending_verification"
 			checks = append(checks, RuleCheckItem{Rule: "documents", Label: "简历资料完整性", Status: "unknown", Evidence: detail.DocumentStatus})
+		} else if detail.HasAttachment {
+			checks = append(checks, RuleCheckItem{Rule: "documents", Label: "简历资料完整性", Status: "pass", Evidence: "在线结构化简历完整（附带平台附件/导出版）"})
+		} else {
+			checks = append(checks, RuleCheckItem{Rule: "documents", Label: "简历资料完整性", Status: "pass", Evidence: "在线结构化简历完整"})
 		}
 		evidence, _ := json.Marshal(checks)
 		if _, err := db.Exec(`UPDATE screening_candidate_results SET verdict=?,rule_evidence_json=?,raw_profile_json=?,detail_loaded=1 WHERE id=?`,
 			verdict, string(evidence), detail.ResumeText, item.id); err != nil {
 			return err
+		}
+	}
+
+	// 重新核验此前详情已完整但受附件过度保护置为 pending_verification 的人选
+	if loadedRows, err := db.Query(`SELECT id, raw_profile_json FROM screening_candidate_results
+		WHERE batch_id=? AND verdict='pending_verification' AND detail_loaded=1
+		AND rule_evidence_json LIKE '%附件存在但平台受限未授权%' AND action_status NOT IN ('completed','imported','verified_on_platform')`, batchID); err == nil {
+		type recheckItem struct{ id, raw string }
+		var recheckList []recheckItem
+		for loadedRows.Next() {
+			var it recheckItem
+			if err := loadedRows.Scan(&it.id, &it.raw); err == nil && strings.TrimSpace(it.raw) != "" {
+				recheckList = append(recheckList, it)
+			}
+		}
+		loadedRows.Close()
+		for _, it := range recheckList {
+			v, ch := EvaluateCandidateTriState(it.raw, *criteria)
+			ch = append(ch, RuleCheckItem{Rule: "documents", Label: "简历资料完整性", Status: "pass", Evidence: "在线结构化简历完整（附带平台附件/导出版）"})
+			ev, _ := json.Marshal(ch)
+			_, _ = db.Exec(`UPDATE screening_candidate_results SET verdict=?,rule_evidence_json=? WHERE id=?`, v, string(ev), it.id)
 		}
 	}
 	if err := a.retryQualifiedAutoImports(db, batchID, projectID, jobID, limit); err != nil {
