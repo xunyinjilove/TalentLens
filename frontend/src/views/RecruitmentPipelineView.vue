@@ -59,7 +59,7 @@ import { useProjectStore } from '../composables/useProjectStore'
 import { useRecruitmentStore, stageLabels, type TalentCandidate } from '../composables/useRecruitmentStore'
 import { getCandidateSurname } from '../utils/candidate'
 
-const stages = ['new', 'pending_analysis', 'pending_contact', 'communicating', 'first_interview', 'second_interview', 'offer', 'hired', 'on_hold', 'rejected']
+const stages = ['new', 'pending_contact', 'communicating', 'first_interview', 'second_interview', 'offer', 'hired', 'on_hold', 'rejected']
 const route = useRoute()
 const router = useRouter()
 const projects = useProjectStore()

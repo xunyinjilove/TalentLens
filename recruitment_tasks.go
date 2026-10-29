@@ -115,7 +115,7 @@ func (a *App) ListSourcingTasks(projectID string) ([]SourcingTask, error) {
 	rows, err := db.Query(`SELECT t.id,t.project_id,p.name,t.config_json,t.status,t.target_count,
 		t.captured_count,t.analyzed_count,t.failed_count,t.current_platform,t.message,t.created_at,t.updated_at
 		FROM search_tasks t JOIN projects p ON p.id=t.project_id
-		WHERE (?='' OR t.project_id=?) ORDER BY t.created_at DESC,t.id DESC`, projectID, projectID)
+		WHERE (?='' OR t.project_id=?) ORDER BY t.created_at DESC,t.rowid DESC`, projectID, projectID)
 	if err != nil {
 		return nil, err
 	}

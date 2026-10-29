@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -159,9 +160,70 @@ func resolveTalentManagementImportScript() string {
 
 // Open51JobManagementBrowser 启动或呼出 51job 专属浏览器至前台，导航至人才管理页面供 HR 登录或查看
 func (a *App) Open51JobManagementBrowser() error {
-	a.EnsurePlatformBrowser("51job")
-	time.Sleep(300 * time.Millisecond)
-	return a.OpenURL("https://ehire.51job.com/Revision/talent/management")
+	return a.activate51JobExistingPage("/Revision/talent/management")
+}
+
+// 只复用已有标签；平台深链可能缺少菜单建立的会话参数，不能自行新开猜测地址。
+func (a *App) activate51JobExistingPage(preferredPath string) error {
+	if !a.EnsurePlatformBrowser("51job") {
+		return fmt.Errorf("51job 专用浏览器未就绪，请检查 Edge/Chrome")
+	}
+	client := &http.Client{Timeout: 3 * time.Second}
+	resp, err := client.Get("http://127.0.0.1:9503/json/list")
+	if err != nil {
+		return fmt.Errorf("无法读取 51job 专用浏览器标签: %w", err)
+	}
+	defer resp.Body.Close()
+	var tabs []struct {
+		ID   string `json:"id"`
+		URL  string `json:"url"`
+		Type string `json:"type"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&tabs); err != nil {
+		return fmt.Errorf("51job 浏览器标签回执异常: %w", err)
+	}
+	selected := ""
+	for _, tab := range tabs {
+		parsed, parseErr := url.Parse(tab.URL)
+		if parseErr != nil || parsed.Hostname() != "ehire.51job.com" || tab.Type != "page" ||
+			strings.EqualFold(parsed.Path, "/Error.aspx") || tab.ID == "" {
+			continue
+		}
+		if selected == "" {
+			selected = tab.ID
+		}
+		if parsed.Path == preferredPath {
+			selected = tab.ID
+			break
+		}
+	}
+	if selected == "" {
+		return fmt.Errorf("51job 没有可用页面，请从企业首页重新登录")
+	}
+	activate, err := client.Get("http://127.0.0.1:9503/json/activate/" + selected)
+	if err != nil {
+		return fmt.Errorf("无法切换 51job 标签: %w", err)
+	}
+	_ = activate.Body.Close()
+	for _, script := range []string{
+		filepath.Join("scripts", "show_candidate_window.js"),
+		filepath.Join(filepath.Dir(os.Args[0]), "scripts", "show_candidate_window.js"),
+		filepath.Join(filepath.Dir(os.Args[0]), "..", "..", "scripts", "show_candidate_window.js"),
+	} {
+		if _, err := os.Stat(script); err != nil {
+			continue
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+		cmd := exec.CommandContext(ctx, "node", script, "--port", "9503", "--target", selected)
+		hideConsoleWindow(cmd)
+		out, runErr := cmd.CombinedOutput()
+		cancel()
+		if runErr != nil {
+			return fmt.Errorf("无法恢复 51job 浏览器窗口: %s", strings.TrimSpace(string(out)))
+		}
+		return nil
+	}
+	return fmt.Errorf("缺少 51job 浏览器窗口恢复脚本")
 }
 
 // Get51JobTalentManagementCatalog reads the actual logged-in account and job IDs.

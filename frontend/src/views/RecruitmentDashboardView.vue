@@ -125,7 +125,7 @@ const todoBusy = ref(false)
 const pendingTodoCount = computed(() => recruitment.todayTodos.filter(item => !item.completed).length)
 const sortedProjects = computed(() => [...projects.projects].sort((a, b) => (b.created_at || '').localeCompare(a.created_at || '')))
 const activeColumns = [
-  { key: 'new', label: '新简历', stages: ['new', 'pending_analysis'] },
+  { key: 'new', label: '新简历', stages: ['new'] },
   { key: 'screening', label: '筛选中', stages: ['pending_contact', 'communicating'] },
   { key: 'interview', label: '面试中', stages: ['first_interview', 'second_interview'] },
   { key: 'offer', label: 'Offer', stages: ['offer'] },

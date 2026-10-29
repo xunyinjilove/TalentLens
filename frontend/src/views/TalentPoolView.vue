@@ -71,9 +71,6 @@
               <el-dropdown-item command="talent51">
                 <el-icon><CircleCheck /></el-icon>51job 人才管理按职位导入
               </el-dropdown-item>
-              <el-dropdown-item command="import" :disabled="importing">
-                <el-icon><Download /></el-icon>导入 51job 投递
-              </el-dropdown-item>
               <el-dropdown-item command="inbox">
                 <el-icon><Tickets /></el-icon>待分配投递
                 <span v-if="pendingApplications.length" class="dropdown-item-count">{{ pendingApplications.length }}</span>
@@ -573,7 +570,7 @@
               {{ selectedProject ? `「${selectedProject.job_config?.title || selectedProject.name}」分库中暂无符合条件的候选人` : '当前筛选条件下暂无候选人' }}
             </h3>
             <p class="empty-subtitle">
-              该职位专属分库已就绪。点击下方按钮即可一键调起多平台矩阵寻才，或直接导入 51job 投递简历
+              该职位专属分库已就绪。点击下方按钮即可检索人才，也可从人才管理按职位筛选后入库。
             </p>
             <el-button
               v-if="selectedProject"
@@ -918,7 +915,6 @@ import {
   Collection,
   Grid,
   Tickets,
-  Download,
   FolderOpened,
   CopyDocument,
   ArrowDown,
@@ -1254,7 +1250,6 @@ async function checkActiveProjectReanalysis(projectId: string) {
     console.warn('checkActiveProjectReanalysis error:', e)
   }
 }
-const importing = ref(false)
 const inboxOpen = ref(false)
 const pendingApplications = ref<PendingApplication[]>([])
 const assignment = ref<Record<string, string>>({})
@@ -1268,7 +1263,6 @@ function handleLibraryAction(command: string) {
     talentImportInitialTab.value = 'sync'
     showTalentImportDialog.value = true
   }
-  if (command === 'import') void import51Job()
   if (command === 'inbox') showInbox()
   if (command === 'duplicates') showDuplicates()
 }
@@ -1734,20 +1728,6 @@ async function loadInbox(interactive = false) {
 function showInbox() {
   inboxOpen.value = true
   void loadInbox(true)
-}
-
-async function import51Job() {
-  importing.value = true
-  try {
-    const api: any = await import('../../wailsjs/go/main/App')
-    const result = await api.ImportApplications('51job')
-    ElMessage.success(`新增 ${result.addedCount}，重复 ${result.duplicateCount}，待分配 ${result.unassignedCount}，失败 ${result.failedCount}`)
-    await Promise.all([refresh(), loadInbox()])
-  } catch (err: any) {
-    ElMessage.error(err?.message || String(err))
-  } finally {
-    importing.value = false
-  }
 }
 
 async function assign(id: string) {

@@ -27,9 +27,10 @@ function normalizeCatalog(state) {
 }
 
 function normalizeCandidate(raw, expectedJobId) {
-  const candidateId = String(raw?.userid || '').trim();
-  const jobId = String(raw?.jobid || '').trim();
-  const recordId = String(raw?.cvlogid || '').trim();
+  const candidateId = String(raw?.userid || raw?.user_id || '').trim();
+  const rawJobId = String(raw?.jobid || raw?.job_id || '').trim();
+  const jobId = rawJobId || expectedJobId;
+  const recordId = String(raw?.cvlogid || raw?.cv_log_id || '').trim();
   if (!candidateId || !jobId || !recordId || jobId !== expectedJobId) return null;
   const hasAttachment = String(raw?.resume_has_enclosure || '') === '1';
   const name = String(raw?.username || raw?.base_info?.resume_name || raw?.base_info?.name || '').trim();
@@ -62,22 +63,17 @@ async function connectManagementPage() {
   }
   // Avoid calling browser.pages() directly because idle/sleeping tabs or background
   // web-workers can trigger CDP Network.enable timeouts.
-  const targets = browser.targets();
-  const target = targets.find(t => (t.type() === 'page' || t.type() === 'other') &&
+  let target = browser.targets().find(t => t.type() === 'page' &&
     t.url().startsWith('https://ehire.51job.com/Revision/talent/management'));
+  if (!target) target = await findManagementPageViaMenu(browser);
   let page = null;
   let isTempPage = false;
   if (target) {
     page = await target.page().catch(() => null);
   }
   if (!page) {
-    try {
-      page = await openBackgroundManagementPage(browser);
-      isTempPage = true;
-    } catch (e) {
-      await browser.disconnect().catch(() => {});
-      throw e;
-    }
+    await browser.disconnect().catch(() => {});
+    throw new Error('未找到可读取的人才管理页面。请从 51job 企业首页菜单进入「人才管理」后重试');
   } else {
     // 若页面已经存在，等待 Vue 组件就绪（最多 5 秒）
     try {
@@ -97,6 +93,27 @@ async function connectManagementPage() {
     }
   }
   return { browser, page, isTempPage };
+}
+
+async function findManagementPageViaMenu(browser) {
+  const siteTargets = browser.targets().filter(t => t.type() === 'page' &&
+    t.url().startsWith('https://ehire.51job.com/') && !t.url().toLowerCase().includes('/error.aspx'));
+  for (const target of siteTargets) {
+    const page = await target.page().catch(() => null);
+    if (!page) continue;
+    const hasMenu = await page.evaluate(() => Boolean(document.querySelector('#sensor_Talentmanagement'))).catch(() => false);
+    if (!hasMenu) continue;
+    await page.evaluate(() => document.querySelector('#sensor_Talentmanagement').click());
+    const deadline = Date.now() + 8000;
+    while (Date.now() < deadline) {
+      const found = browser.targets().find(t => t.type() === 'page' &&
+        t.url().startsWith('https://ehire.51job.com/Revision/talent/management'));
+      if (found) return found;
+      await new Promise(resolve => setTimeout(resolve, 200));
+    }
+    throw new Error('已点击 51job「人才管理」菜单，但页面未在 8 秒内打开；请检查登录状态或刷新企业首页');
+  }
+  throw new Error('未找到已登录且带「人才管理」菜单的 51job 页面，请先在专用浏览器登录企业账号');
 }
 
 async function readState(page) {
@@ -122,12 +139,16 @@ async function readState(page) {
   });
 }
 
-async function openBackgroundManagementPage(browser) {
+async function openBackgroundManagementPage(browser, readyTimeout = 12000) {
+  let existing = browser.targets().find(target => target.type() === 'page' &&
+    target.url().startsWith('https://ehire.51job.com/Revision/talent/management'));
+  if (!existing) existing = await findManagementPageViaMenu(browser);
+  if (!existing) throw new Error('未找到已打开的人才管理页面。请从 51job 企业首页菜单进入「人才管理」后重试');
   const session = await browser.target().createCDPSession();
   let page;
   try {
     const { targetId } = await session.send('Target.createTarget', {
-      url: 'https://ehire.51job.com/Revision/talent/management', background: true
+      url: existing.url(), background: true
     });
     const target = await browser.waitForTarget(item => item._targetId === targetId, { timeout: 10000 });
     page = await target.page();
@@ -155,7 +176,7 @@ async function openBackgroundManagementPage(browser) {
       }
       return false;
     // Background tabs may not schedule animation frames; use interval polling.
-    }, { timeout: 12000, polling: 250 }).then(async (handle) => {
+    }, { timeout: readyTimeout, polling: 250 }).then(async (handle) => {
       const val = await handle.jsonValue().catch(() => null);
       if (val === 'LOGIN_REDIRECT') {
         throw new Error('51job 尚未登录或会话已过期，请先点击【打开 51job 浏览器】登录企业账号');
@@ -168,13 +189,16 @@ async function openBackgroundManagementPage(browser) {
   } catch (error) {
     const currentURL = page.url();
     await page.close().catch(() => {});
+    if (currentURL.toLowerCase().includes('error.aspx')) {
+      throw new Error('51job 人才管理地址已失效。请从企业首页菜单重新进入「人才管理」，软件不会继续打开失效链接');
+    }
     if (currentURL.toLowerCase().includes('login') || currentURL.toLowerCase().includes('navigate.aspx') || currentURL.toLowerCase().includes('passport')) {
       throw new Error('51job 尚未登录或会话已过期，请先点击【打开 51job 浏览器】登录企业账号');
     }
     if (String(error?.message).includes('尚未登录') || String(error?.message).includes('页面结构可能已改变')) {
       throw error;
     }
-    throw new Error('51job 人才管理页面加载超时（超过12秒），请先点击【打开 51job 浏览器】登录并确认可查看人才管理');
+    throw new Error(`51job 人才管理后台页加载超时（超过${Math.ceil(readyTimeout / 1000)}秒），稍后自动补读`);
   }
 }
 
@@ -200,9 +224,17 @@ async function scanJobStatus(browser, accountScope, jobId, statusIndex, pageInde
       status.changeStatus(selectedStatus);
       await new Promise(resolve => management.$nextTick(resolve));
       management.$data.pagination.page_index = selectedPage;
-      const pending = management.updateList();
-      if (pending && typeof pending.then === 'function') await pending;
-      else await new Promise(resolve => setTimeout(resolve, 1800));
+      management.updateList();
+      const deadline = Date.now() + 8000;
+      while (Date.now() < deadline) {
+        if (!management.$data.loading) {
+          const items = management.$data.items || [];
+          if (items.length === 0 || String(items[0]?.jobid || items[0]?.job_id || '') === selectedJobId) {
+            break;
+          }
+        }
+        await new Promise(resolve => setTimeout(resolve, 150));
+      }
       return {
         jobId: String(management.$data.jobParams?.jobid || ''),
         stage: Number(management.getParams()?.resume_process_state),
@@ -234,7 +266,7 @@ async function readCandidateDetail(browser, accountScope, options) {
   const pageIndex = Number(options.pageIndex);
   if (![1, 2, 3, 4].includes(statusIndex) || !Number.isInteger(pageIndex) || pageIndex < 1 ||
       !jobId || !candidateId || !recordId) throw new Error('读取简历所需的平台标识不完整');
-  const page = await openBackgroundManagementPage(browser);
+  const page = await openBackgroundManagementPage(browser, 8000);
   let detailPage;
   let detailTargetId;
   try {
@@ -242,27 +274,6 @@ async function readCandidateDetail(browser, accountScope, options) {
     if (catalog.accountScope !== accountScope || !catalog.jobs.some(job => job.jobId === jobId)) {
       throw new Error('51job 账号或职位已变化');
     }
-    // Set 6s timeout for single candidate detail to avoid blocking the whole batch
-    const responsePromise = new Promise((resolve, reject) => {
-      const timer = setTimeout(() => { browser.off('targetcreated', onTarget); reject(new Error('简历详情加载超时')); }, 6000);
-      const onTarget = async target => {
-        if (target.type() !== 'page') return;
-        if (detailTargetId && target._targetId !== detailTargetId) return;
-        try {
-          const candidatePage = await target.page();
-          if (!candidatePage) return;
-          detailPage = candidatePage;
-          browser.off('targetcreated', onTarget);
-          detailPage.on('response', async response => {
-            if (!response.url().includes('/resumedtl/getresume') || response.request().method() === 'OPTIONS') return;
-            try { const payload = await response.json(); clearTimeout(timer); resolve(payload); }
-            catch { /* A cancelled preflight or duplicate request can have no body. */ }
-          });
-        } catch (error) { clearTimeout(timer); reject(error); }
-      };
-      browser.on('targetcreated', onTarget);
-    });
-    responsePromise.catch(() => {});
     const selected = await page.evaluate(async ({ jobId, statusIndex, pageIndex, candidateId, recordId }) => {
       const components = Array.from(document.querySelectorAll('*')).map(el => el.__vue__).filter(Boolean);
       const management = components.find(vm => vm.$options?.name === 'TalentManagement');
@@ -275,9 +286,17 @@ async function readCandidateDetail(browser, accountScope, options) {
       status.changeStatus(statusIndex);
       await new Promise(resolve => management.$nextTick(resolve));
       management.$data.pagination.page_index = pageIndex;
-      const pending = management.updateList();
-      if (pending && typeof pending.then === 'function') await pending;
-      else await new Promise(resolve => setTimeout(resolve, 1800));
+      management.updateList();
+      const deadline = Date.now() + 8000;
+      while (Date.now() < deadline) {
+        if (!management.$data.loading) {
+          const items = management.$data.items || [];
+          if (items.length === 0 || String(items[0]?.jobid || items[0]?.job_id || '') === jobId) {
+            break;
+          }
+        }
+        await new Promise(resolve => setTimeout(resolve, 150));
+      }
       const item = (management.$data.items || []).find(value => String(value.userid) === candidateId &&
         String(value.cvlogid) === recordId && String(value.jobid) === jobId);
       if (!item || String(management.$data.jobParams.jobid) !== jobId ||
@@ -287,24 +306,18 @@ async function readCandidateDetail(browser, accountScope, options) {
           String(vm.$props?.source?.userid) === candidateId && String(vm.$props?.source?.cvlogid) === recordId);
       if (!card) throw new Error('无法定位候选人的简历卡片');
 
-      // 劫持 window.open 拦截前台弹出，防止 Chromium 抢夺焦点激活窗口
+      // 平台先异步校验权限，回调后才打开详情。拦截必须持续到回调完成。
       let detailUrl = '';
-      const origOpen = window.open;
       window.open = function(url) {
-        detailUrl = url;
+        detailUrl = String(url || '');
         return { focus: () => {}, close: () => {} };
       };
-      try {
-        if (typeof card.toResumeDetail === 'function') {
-          card.toResumeDetail(candidateId, jobId);
-        }
-      } catch (_) {}
-      finally {
-        window.open = origOpen;
+      if (typeof card.toResumeDetail !== 'function') throw new Error('平台简历详情入口不可用');
+      card.toResumeDetail(candidateId, jobId);
+      for (let attempt = 0; attempt < 20 && !detailUrl; attempt++) {
+        await new Promise(resolve => setTimeout(resolve, 100));
       }
-      if (!detailUrl) {
-        detailUrl = `/Revision/talent/resumedtl?userid=${encodeURIComponent(candidateId)}&jobid=${encodeURIComponent(jobId)}&cvlogid=${encodeURIComponent(recordId)}`;
-      }
+      if (!detailUrl) throw new Error('平台未返回真实简历详情地址，已留待核实，不使用猜测链接');
 
       return {
         name: String(item.username || item.base_info?.resume_name || item.base_info?.name || '').trim(),
@@ -313,16 +326,34 @@ async function readCandidateDetail(browser, accountScope, options) {
       };
     }, { jobId, statusIndex, pageIndex, candidateId, recordId });
 
-    // 在底层以 background: true 静默打开后台目标标签页，零前台焦点抢占
+    // 只使用平台真实提供的地址，并先建立监听再后台导航，避免丢失详情响应。
+    const fullUrl = new URL(selected.detailUrl, 'https://ehire.51job.com');
+    if (fullUrl.protocol !== 'https:' || fullUrl.hostname !== 'ehire.51job.com' ||
+        fullUrl.pathname.toLowerCase().endsWith('/error.aspx')) {
+      throw new Error('平台返回的简历详情地址无效，已留待核实');
+    }
     const session = await browser.target().createCDPSession();
     try {
-      const fullUrl = selected.detailUrl.startsWith('http') ? selected.detailUrl : `https://ehire.51job.com${selected.detailUrl}`;
-      const created = await session.send('Target.createTarget', { url: fullUrl, background: true });
+      const created = await session.send('Target.createTarget', { url: 'about:blank', background: true });
       detailTargetId = created.targetId;
     } finally {
       await session.detach().catch(() => {});
     }
-
+    const detailTarget = await browser.waitForTarget(target => target._targetId === detailTargetId, { timeout: 2500 });
+    detailPage = await detailTarget.page();
+    if (!detailPage) throw new Error('平台简历详情后台页未就绪');
+    const responsePromise = new Promise((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error('简历详情回执超时，已留待核实')), 14000);
+      detailPage.on('response', async response => {
+        if (!response.url().includes('/resumedtl/getresume') || response.request().method() === 'OPTIONS') return;
+        try {
+          const payload = await response.json();
+          clearTimeout(timer);
+          resolve(payload);
+        } catch { /* Duplicate or cancelled response. */ }
+      });
+    });
+    void detailPage.goto(fullUrl.toString(), { waitUntil: 'domcontentloaded', timeout: 14000 }).catch(() => {});
     const response = await responsePromise;
     const data = response?.data;
     if (!data || String(data.resumeid) !== candidateId || String(data.cvlogid) !== recordId ||
