@@ -454,7 +454,7 @@
           <template #label>
             <div class="skills-label-wrapper">
               <div class="skills-label-title">必备关键技能 / 评分项 (回车分隔)</div>
-              <div class="skills-label-tip">（关键技能用于生成技能指标雷达，可分析八项以内的技能，若不足则AI自动匹配技能）</div>
+              <div class="skills-label-tip">（最多 8 项；只按已填写的必备关键技能生成雷达，留空则不显示雷达）</div>
               <el-button type="primary" link size="small" :loading="skillDraftGenerating" @click="generateSkillSuggestions()">✨ AI 建议技能</el-button>
             </div>
           </template>
@@ -1075,6 +1075,10 @@ async function saveJob() {
   saving.value = true
   try {
     const skills = splitTags(skillsInput.value)
+    if (new Set(skills.map(skill => skill.trim()).filter(Boolean)).size > 8) {
+      ElMessage.warning('必备关键技能最多填写 8 项，请删减后保存')
+      return
+    }
     const interviewQuestions = splitTags(interviewQuestionsInput.value)
     const expText = String(jobForm.experience_years ?? '').trim()
     const expYears = parseExperienceYears(expText)

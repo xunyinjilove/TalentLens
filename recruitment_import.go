@@ -30,15 +30,15 @@ type ApplicationRecord struct {
 }
 
 type ApplicationImportResult struct {
-	RunID           string `json:"runId"`
-	Platform        string `json:"platform"`
-	Status          string `json:"status"`
-	Message         string `json:"message"`
-	AddedCount      int    `json:"addedCount"`
-	DuplicateCount  int    `json:"duplicateCount"`
-	UnassignedCount int    `json:"unassignedCount"`
-	FailedCount     int    `json:"failedCount"`
-	PendingDocumentCount int `json:"pendingDocumentCount"`
+	RunID                string `json:"runId"`
+	Platform             string `json:"platform"`
+	Status               string `json:"status"`
+	Message              string `json:"message"`
+	AddedCount           int    `json:"addedCount"`
+	DuplicateCount       int    `json:"duplicateCount"`
+	UnassignedCount      int    `json:"unassignedCount"`
+	FailedCount          int    `json:"failedCount"`
+	PendingDocumentCount int    `json:"pendingDocumentCount"`
 }
 
 type ImportedApplication struct {
@@ -97,6 +97,64 @@ func (a *App) SetPlatformJobMapping(platform, account, jobID, projectID string) 
 	return err
 }
 
+// A position-specific library must have one current 51job position. Keep old
+// applications for audit, while hiding resumes imported through stale bindings.
+func (a *App) bindExclusive51JobProject(account, jobID, projectID string) error {
+	db, err := a.getRecruitmentDB()
+	if err != nil {
+		return err
+	}
+	tx, err := db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	rows, err := tx.Query(`SELECT platform_account,platform_application_id FROM applications
+		WHERE platform='51job' AND project_id=? AND (platform_account<>? OR platform_job_id<>?)`, projectID, account, jobID)
+	if err != nil {
+		return err
+	}
+	var stale []ApplicationRecord
+	for rows.Next() {
+		var item ApplicationRecord
+		item.Platform = "51job"
+		if err := rows.Scan(&item.PlatformAccount, &item.ApplicationID); err != nil {
+			rows.Close()
+			return err
+		}
+		stale = append(stale, item)
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return err
+	}
+	rows.Close()
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	for _, item := range stale {
+		_, err = tx.Exec(`UPDATE project_candidates SET archived_at=?,updated_at=? WHERE project_id=? AND archived_at='' AND id IN (
+			SELECT pcr.project_candidate_id FROM project_candidate_resumes pcr
+			JOIN resume_versions rv ON rv.id=pcr.resume_version_id WHERE rv.legacy_resume_id=?)`,
+			now, now, projectID, applicationResumeID(item))
+		if err != nil {
+			return err
+		}
+	}
+	if _, err = tx.Exec(`UPDATE applications SET status='wrong_job_archived' WHERE platform='51job' AND project_id=? AND (platform_account<>? OR platform_job_id<>?)`, projectID, account, jobID); err != nil {
+		return err
+	}
+	if _, err = tx.Exec(`UPDATE talent_management_sync_tasks SET state='paused',auto_sync_enabled=0,updated_at=? WHERE project_id=? AND (platform_account<>? OR platform_job_id<>?)`, now, projectID, account, jobID); err != nil {
+		return err
+	}
+	if _, err = tx.Exec(`DELETE FROM platform_job_mappings WHERE platform='51job' AND project_id=? AND (platform_account<>? OR platform_job_id<>?)`, projectID, account, jobID); err != nil {
+		return err
+	}
+	if _, err = tx.Exec(`INSERT INTO platform_job_mappings(platform,platform_account,platform_job_id,project_id)
+		VALUES('51job',?,?,?) ON CONFLICT(platform,platform_account,platform_job_id) DO UPDATE SET project_id=excluded.project_id`, account, jobID, projectID); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
 func (a *App) ListImportedApplications(status string) ([]ImportedApplication, error) {
 	db, err := a.getRecruitmentDB()
 	if err != nil {
@@ -135,14 +193,24 @@ func (a *App) createApplicationResume(record ApplicationRecord, projectID string
 		return fmt.Errorf("未指定岗位")
 	}
 	content := strings.TrimSpace(record.ResumeText)
+	rawProfile := ""
+	if record.Platform == "51job" && strings.HasPrefix(content, "{") {
+		formatted := format51JobResume(content)
+		if formatted != content {
+			rawProfile, content = content, formatted
+		}
+	}
 	status := "pending"
 	if content == "" || (record.DocumentsComplete != nil && !*record.DocumentsComplete) {
 		status = "pending_document"
-		if content == "" { content = "平台投递记录已导入，尚未取得可评估的完整简历。" }
+		if content == "" {
+			content = "平台投递记录已导入，尚未取得可评估的完整简历。"
+		}
 	}
 	resume := &Resume{ID: applicationResumeID(record), ProjectID: projectID, FileName: record.CandidateName,
 		Content: content, FileType: ".txt", FileSize: int64(len(content)), URL: record.ProfileURL,
-		SourcePlatform: record.Platform, PlatformCandidateID: record.PlatformCandidateID, Status: status, CreatedAt: time.Now()}
+		RawProfileJSON: rawProfile,
+		SourcePlatform: record.Platform, PlatformCandidateID: record.PlatformCandidateID, PlatformStatus: record.PlatformStatus, Status: status, CreatedAt: time.Now()}
 	return a.persistSearchCandidate(resume)
 }
 
@@ -175,8 +243,8 @@ func (a *App) ingestApplicationRecords(platform string, records []ApplicationRec
 		err = db.QueryRow(`SELECT id, project_id, status FROM applications WHERE platform=? AND platform_account=? AND platform_application_id=?`,
 			platform, record.PlatformAccount, record.ApplicationID).Scan(&appID, &assignedProject, &appStatus)
 		if err == nil {
-			targetProj := assignedProject.String
-			if targetProj == "" && record.PlatformJobID != "" {
+			targetProj := ""
+			if record.PlatformJobID != "" {
 				_ = db.QueryRow(`SELECT project_id FROM platform_job_mappings WHERE platform=? AND platform_account=? AND platform_job_id=?`,
 					platform, record.PlatformAccount, record.PlatformJobID).Scan(&targetProj)
 			}

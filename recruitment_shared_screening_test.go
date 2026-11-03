@@ -22,6 +22,19 @@ func TestTelescopeActivityLabels(t *testing.T) {
 	}
 }
 
+func TestApplicationDateCannotBeUsedAsActivityEvidence(t *testing.T) {
+	criteria := TalentManagementStrictCriteria{ActivityDays: 90}
+	for _, raw := range []string{
+		`{"applydate":"2026-01-01","active_type":"3日内活跃"}`,
+		`{"applydate":"2026-01-01"}`,
+	} {
+		verdict, checks := EvaluateCandidateTriState(raw, criteria)
+		if verdict != "qualified" {
+			t.Fatalf("old application date caused rejection or pending review: verdict=%s checks=%+v", verdict, checks)
+		}
+	}
+}
+
 func TestScreeningIgnoresAgeAndGender(t *testing.T) {
 	criteria := TalentManagementStrictCriteria{MinEducation: "本科", MinAge: 30, MaxAge: 40, Gender: "男"}
 	verdict, checks := EvaluateCandidateTriState(`{"degree":"本科","age":"25","sex":"女"}`, criteria)
@@ -180,12 +193,11 @@ func TestEvaluateCandidateTriState_OrderIndependence(t *testing.T) {
 		t.Fatalf("即使活跃度未知，有确凿年限不符应判定为 unfit，实际为: %s", verdict1)
 	}
 
-	// Case 2: 学历合格，年限合格 (5年)，活跃度缺失(unknown)
-	// 契约：无明确不符，但有未知项，使结果为待核实 (pending_verification)
+	// Case 2: 学历和年限合格；平台未提供可核验活跃时间时不阻断。
 	resume2 := `{"degree": "本科", "workyear": "5年"}`
 	verdict2, _ := EvaluateCandidateTriState(resume2, criteria)
-	if verdict2 != "pending_verification" {
-		t.Fatalf("无不符但活跃度未知应判定为 pending_verification，实际为: %s", verdict2)
+	if verdict2 != "qualified" {
+		t.Fatalf("活跃度未标记不应阻断，实际为: %s", verdict2)
 	}
 
 	// Case 3: 全部满足
@@ -356,10 +368,10 @@ func TestActivityDays_90DaysRuleAndConservativeBoundary(t *testing.T) {
 		t.Errorf("预期 1个月内活跃 在 90天要求下为 qualified，实际: %s", v2)
 	}
 
-	// 3. 半年内活跃 -> 模糊区间，保守边界，预期待核实 (pending_verification)，绝不直接拒绝
+	// 3. 半年内活跃 -> 模糊区间，不能作为超过90天的证据。
 	v3, _ := EvaluateCandidateTriState(`{"active_type":"半年内活跃"}`, criteria)
-	if v3 != "pending_verification" {
-		t.Errorf("预期 半年内活跃 在 90天要求下为 pending_verification，实际: %s", v3)
+	if v3 != "qualified" {
+		t.Errorf("预期 半年内活跃 不阻断，实际: %s", v3)
 	}
 
 	// 4. 3个月前活跃 -> 明确超过 90 天，预期 unfit

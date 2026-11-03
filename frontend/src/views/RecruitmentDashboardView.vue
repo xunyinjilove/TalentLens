@@ -12,16 +12,16 @@
           <div class="wb-kpi-label">{{ card.label }}</div>
         </div>
       </div>
-      <section class="wb-card overview-board" :class="{ 'is-collapsed': !boardExpanded }" aria-labelledby="overview-board-title" @click="!boardExpanded && (boardExpanded = true)">
-        <div class="overview-board-heading">
+      <section class="wb-card overview-board" :class="{ 'is-collapsed': !boardExpanded }" aria-labelledby="overview-board-title">
+        <div class="overview-board-heading" role="button" tabindex="0" :aria-expanded="boardExpanded" aria-controls="overview-board-content" @click="boardExpanded = !boardExpanded" @keydown.enter.prevent="boardExpanded = !boardExpanded" @keydown.space.prevent="boardExpanded = !boardExpanded">
           <div>
             <h2 id="overview-board-title" class="wb-section-title">候选人跟进看板</h2>
           </div>
           <div class="overview-board-controls">
-            <button type="button" class="overview-board-toggle" :aria-expanded="boardExpanded" aria-controls="overview-board-content" @click.stop="boardExpanded = !boardExpanded">
+            <button type="button" class="overview-board-toggle" :aria-expanded="boardExpanded" aria-controls="overview-board-content" @click.stop="boardExpanded = !boardExpanded" @keydown.stop>
               {{ boardExpanded ? '收起' : '展开' }}
             </button>
-            <el-select v-if="boardExpanded" v-model="selectedProjectId" aria-label="筛选招聘职位" class="overview-project-select" placeholder="全部职位">
+            <el-select v-if="boardExpanded" v-model="selectedProjectId" aria-label="筛选招聘职位" class="overview-project-select" placeholder="全部职位" @click.stop @keydown.stop>
               <el-option label="全部职位" value="" />
               <el-option v-for="project in sortedProjects" :key="project.id" :label="project.job_config?.title && project.job_config.title !== project.name ? `${project.job_config.title} · ${project.name}` : project.name" :value="project.id" />
             </el-select>
@@ -234,8 +234,9 @@ onMounted(() => { void refresh() })
 
 <style scoped>
 .overview-board { margin-bottom: 18px; padding: 20px; }
-.overview-board.is-collapsed { cursor: pointer; }
-.overview-board.is-collapsed:hover { background: var(--wb-surface-soft); }
+.overview-board-heading { cursor: pointer; }
+.overview-board-heading:hover { background: var(--wb-surface-soft); }
+.overview-board-heading:focus-visible { outline: 2px solid var(--wb-brand); outline-offset: 2px; }
 .overview-board-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 18px; margin-bottom: 18px; }
 .overview-board-heading .wb-section-title { margin-bottom: 4px; }
 .overview-board-controls { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 10px; }

@@ -54,3 +54,79 @@ func TestApplicationImportUsesPlatformJobIDAndIsIdempotent(t *testing.T) {
 		t.Fatalf("assigned resumes %d", len(got))
 	}
 }
+
+func TestDeleted51JobResumeCanBeImportedAgain(t *testing.T) {
+	app := NewApp()
+	app.dataDirOverride = t.TempDir()
+	defer app.closeRecruitmentDB()
+	project := app.CreateProject("测试岗位", "", 1, "", "", &JobConfig{Title: "测试岗位"})
+	if project == nil {
+		t.Fatal("create project failed")
+	}
+	const scope = "co:1:hr:2"
+	if err := app.SetPlatformJobMapping("51job", scope, "job-1", project.ID); err != nil {
+		t.Fatal(err)
+	}
+	complete := true
+	record := ApplicationRecord{Platform: "51job", PlatformAccount: scope, ApplicationID: "apply-1",
+		PlatformCandidateID: "candidate-1", PlatformJobID: "job-1", CandidateName: "测试人选",
+		ResumeText: "真实的完整简历内容", DocumentsComplete: &complete}
+	first, err := app.ingestApplicationRecords("51job", []ApplicationRecord{record})
+	if err != nil || first.AddedCount != 1 {
+		t.Fatalf("first import: %+v, %v", first, err)
+	}
+	if err := app.DeleteResume(applicationResumeID(record)); err != nil {
+		t.Fatal(err)
+	}
+	if got := len(app.GetProjectResumes(project.ID)); got != 0 {
+		t.Fatalf("resumes after delete = %d", got)
+	}
+	second, err := app.ingestApplicationRecords("51job", []ApplicationRecord{record})
+	if err != nil || second.AddedCount != 1 {
+		t.Fatalf("reimport: %+v, %v", second, err)
+	}
+	if got := len(app.GetProjectResumes(project.ID)); got != 1 {
+		t.Fatalf("resumes after reimport = %d", got)
+	}
+}
+
+func TestExclusive51JobBindingArchivesOtherJobResumes(t *testing.T) {
+	app := NewApp()
+	app.dataDirOverride = t.TempDir()
+	defer app.closeRecruitmentDB()
+	project := app.CreateProject("区域销售经理兰州", "", 1, "", "", &JobConfig{Title: "区域销售经理兰州"})
+	const scope = "co:1:hr:2"
+	for _, job := range []string{"regional", "international"} {
+		if err := app.SetPlatformJobMapping("51job", scope, job, project.ID); err != nil {
+			t.Fatal(err)
+		}
+	}
+	complete := true
+	for _, job := range []string{"regional", "international"} {
+		record := ApplicationRecord{Platform: "51job", PlatformAccount: scope, PlatformJobID: job,
+			ApplicationID: "apply-" + job, PlatformCandidateID: "candidate-" + job,
+			CandidateName: job, ResumeText: `{"topdegree":"本科"}`, DocumentsComplete: &complete}
+		if result, err := app.ingestApplicationRecords("51job", []ApplicationRecord{record}); err != nil || result.AddedCount != 1 {
+			t.Fatalf("import %s: %+v %v", job, result, err)
+		}
+	}
+	if got := len(app.GetProjectResumes(project.ID)); got != 2 {
+		t.Fatalf("before rebind: %d", got)
+	}
+	if err := app.bindExclusive51JobProject(scope, "regional", project.ID); err != nil {
+		t.Fatal(err)
+	}
+	resumes := app.GetProjectResumes(project.ID)
+	if len(resumes) != 1 || resumes[0].PlatformCandidateID != "candidate-regional" {
+		t.Fatalf("wrong resumes after rebind: %+v", resumes)
+	}
+	foreign := ApplicationRecord{Platform: "51job", PlatformAccount: scope, PlatformJobID: "international",
+		ApplicationID: "apply-international", PlatformCandidateID: "candidate-international", CandidateName: "international",
+		ResumeText: `{"topdegree":"本科"}`, DocumentsComplete: &complete}
+	if result, err := app.ingestApplicationRecords("51job", []ApplicationRecord{foreign}); err != nil || result.AddedCount != 0 {
+		t.Fatalf("stale job reimported: %+v %v", result, err)
+	}
+	if got := len(app.GetProjectResumes(project.ID)); got != 1 {
+		t.Fatalf("stale job returned to library: %d", got)
+	}
+}

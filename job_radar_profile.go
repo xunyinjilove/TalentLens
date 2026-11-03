@@ -38,7 +38,7 @@ func activeJobRadarHash(job *JobConfig) string {
 	if job != nil && job.RadarProfileHash != "" {
 		return job.RadarProfileHash
 	}
-	return jobMetricsHash(getUnifiedJobMetrics(job))
+	return jobMetricsHash(configuredJobRadarMetrics(job))
 }
 
 // configuredJobRadarMetrics reads the current job requirements instead of a
@@ -48,8 +48,29 @@ func configuredJobRadarMetrics(job *JobConfig) []string {
 		return nil
 	}
 	items := append([]string(nil), job.RequiredSkills...)
-	items = append(items, job.CoreCriteria...)
 	return uniqueJobMetrics(items)
+}
+
+func equalJobMetrics(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}
+
+func countUniqueSkills(items []string) int {
+	seen := make(map[string]bool)
+	for _, item := range items {
+		if item = strings.TrimSpace(item); item != "" {
+			seen[item] = true
+		}
+	}
+	return len(seen)
 }
 
 // ensureBatchJobRadar fixes one job-wide rubric before any resume worker starts.
@@ -60,19 +81,24 @@ func (a *App) ensureBatchJobRadar(projectID string, cfg *AIConfig) (*Project, er
 		return nil, fmt.Errorf("招聘项目不存在")
 	}
 	job := &p.JobConfig
-	sourceHash := jobRadarSourceHash(job)
-	if len(job.RadarMetrics) > 0 && job.RadarProfileHash != "" && job.RadarSourceHash == sourceHash {
-		return p, nil
+	if countUniqueSkills(job.RequiredSkills) > 8 {
+		return nil, fmt.Errorf("必备关键技能最多填写 8 项，请删减后分析")
 	}
+	sourceHash := jobRadarSourceHash(job)
 	metrics := configuredJobRadarMetrics(job)
 	if len(metrics) == 0 {
-		var err error
-		metrics, err = a.inferBatchJobRadar(job, cfg)
-		if err != nil {
-			return nil, err
+		if len(job.RadarMetrics) > 0 || job.RadarProfileHash != "" || job.RadarSourceHash != "" {
+			job.RadarMetrics = nil
+			job.RadarProfileHash = ""
+			job.RadarSourceHash = ""
+			if err := a.saveProject(p); err != nil {
+				return nil, err
+			}
 		}
-	} else if err := a.checkBatchRadarRelevance(job, metrics, cfg); err != nil {
-		return nil, err
+		return p, nil
+	}
+	if len(job.RadarMetrics) == len(metrics) && job.RadarProfileHash == confirmedJobRadarHash(metrics, sourceHash) && job.RadarSourceHash == sourceHash {
+		return p, nil
 	}
 	// AI checking can take time. Never save a profile against a newer job edit.
 	latest := a.GetProject(projectID)
@@ -166,47 +192,8 @@ func (a *App) PreviewProjectJobRadar(projectID string) (JobRadarDraft, error) {
 		return JobRadarDraft{}, fmt.Errorf("招聘项目不存在")
 	}
 	job := &p.JobConfig
-	current := getUnifiedJobMetrics(job)
-	draft := JobRadarDraft{ProjectID: projectID, SourceHash: jobRadarSourceHash(job), Metrics: append([]string(nil), current...), Origin: "job_requirements"}
-	if len(current) >= 5 {
-		draft.Note = "当前岗位指标已经达到建议数量；请确认是否保留这组固定指标。"
-		return draft, nil
-	}
-	var suggested []string
-	if a.config.AI.APIKey != "" && a.config.AI.BaseURL != "" {
-		prompt := fmt.Sprintf(`只根据招聘岗位资料提出与工作任务直接相关、互不重复的岗位能力雷达指标。岗位：%s。职责：%s。已有指标：%s。优先补到总数5至6项，最多8项；证据不足不凑数。不要使用候选人资料，不要加入无关技术。仅输出JSON对象 {"metrics":["维度1"]}。`, job.Title, job.JobDescription, strings.Join(current, "、"))
-		if reply, err := a.callAI(&a.config.AI, prompt); err == nil {
-			start, end := strings.Index(reply, "{"), strings.LastIndex(reply, "}")
-			if start >= 0 && end > start {
-				var parsed struct {
-					Metrics []string `json:"metrics"`
-				}
-				if json.Unmarshal([]byte(reply[start:end+1]), &parsed) == nil {
-					suggested = parsed.Metrics
-					draft.Origin = "ai_inferred"
-				}
-			}
-		}
-	}
-	if len(suggested) == 0 {
-		// Only a matching occupational template can contribute fallback metrics.
-		title := strings.ToLower(job.Title)
-		supported := strings.Contains(title, "销售") || strings.Contains(title, "客户经理") || strings.Contains(title, "测试") || strings.Contains(title, "前端") || strings.Contains(title, "器械")
-		if supported {
-			template := a.getFallbackJobMetrics(job.Title)
-			suggested = append(template.RequiredSkills, template.CoreCriteria...)
-			draft.Origin = "template_inferred"
-		} else {
-			draft.Note = "岗位资料不足，未找到可靠的职业模板，请补充职责后重试。"
-		}
-	}
-	draft.Metrics = uniqueJobMetrics(append(draft.Metrics, suggested...))
-	if len(draft.Metrics) > 6 && len(current) <= 6 {
-		draft.Metrics = draft.Metrics[:6]
-	}
-	if draft.Note == "" {
-		draft.Note = "AI/模板推定项只用于岗位雷达，须由 HR 核对；不会自动成为红线。"
-	}
+	current := configuredJobRadarMetrics(job)
+	draft := JobRadarDraft{ProjectID: projectID, SourceHash: jobRadarSourceHash(job), Metrics: append([]string(nil), current...), Origin: "required_skills", Note: "仅使用已填写的必备关键技能；请在岗位配置中修改指标。"}
 	return draft, nil
 }
 
@@ -219,8 +206,9 @@ func (a *App) ApplyProjectJobRadar(draft JobRadarDraft) (*Project, error) {
 		return nil, fmt.Errorf("岗位资料已变化，请重新生成雷达草稿")
 	}
 	metrics := uniqueJobMetrics(draft.Metrics)
-	if len(metrics) < 1 || len(metrics) > 8 {
-		return nil, fmt.Errorf("请确认 1 至 8 项相关、独立的岗位指标")
+	configured := configuredJobRadarMetrics(&p.JobConfig)
+	if !equalJobMetrics(metrics, configured) {
+		return nil, fmt.Errorf("雷达指标必须与岗位必备关键技能一致，请在岗位配置中修改")
 	}
 	oldHash := p.JobConfig.RadarProfileHash
 	newHash := confirmedJobRadarHash(metrics, draft.SourceHash)

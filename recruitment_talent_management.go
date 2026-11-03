@@ -15,6 +15,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
 type TalentManagementJob struct {
@@ -51,6 +53,7 @@ type talentManagementPage struct {
 	JobID        string                      `json:"jobId"`
 	StatusIndex  int                         `json:"statusIndex"`
 	PageIndex    int                         `json:"pageIndex"`
+	PageSize     int                         `json:"pageSize"`
 	Total        int                         `json:"total"`
 	HasMore      bool                        `json:"hasMore"`
 	Candidates   []talentManagementCandidate `json:"candidates"`
@@ -65,6 +68,7 @@ type talentManagementDetail struct {
 	RecordID          string `json:"recordId"`
 	Name              string `json:"name"`
 	ResumeText        string `json:"resumeText"`
+	ProfileURL        string `json:"profileUrl"`
 	HasAttachment     bool   `json:"hasAttachment"`
 	DocumentsComplete bool   `json:"documentsComplete"`
 	DocumentStatus    string `json:"documentStatus"`
@@ -72,13 +76,219 @@ type talentManagementDetail struct {
 
 type TalentManagementPageImport struct {
 	ApplicationImportResult
-	JobID            string `json:"jobId"`
-	StatusIndex      int    `json:"statusIndex"`
-	PageIndex        int    `json:"pageIndex"`
-	Total            int    `json:"total"`
-	HasMore          bool   `json:"hasMore"`
-	InterceptedCount int    `json:"interceptedCount"`
-	InterceptReason  string `json:"interceptReason"`
+	JobID                      string `json:"jobId"`
+	StatusIndex                int    `json:"statusIndex"`
+	PageIndex                  int    `json:"pageIndex"`
+	Total                      int    `json:"total"`
+	HasMore                    bool   `json:"hasMore"`
+	InterceptedCount           int    `json:"interceptedCount"`
+	InterceptReason            string `json:"interceptReason"`
+	PendingVerificationCount   int    `json:"pendingVerificationCount"`
+	PlatformRejectedCount      int    `json:"platformRejectedCount"`
+	PlatformRejectPendingCount int    `json:"platformRejectPendingCount"`
+	Interrupted                bool   `json:"interrupted"`
+}
+
+// applyTalentManagementStage only advances candidates that have not been moved
+// to a later stage by HR. The platform state is the source of the initial stage.
+func (a *App) applyTalentManagementStage(db *sql.DB, projectID string, record ApplicationRecord) error {
+	target := "new"
+	switch record.PlatformStatus {
+	case "合适":
+		target = "pending_contact"
+	case "面试":
+		target = "first_interview"
+	}
+	if target == "new" {
+		return nil
+	}
+	resumeID := applicationResumeID(record)
+	var candidateID, oldStage string
+	err := db.QueryRow(`SELECT pc.id,pc.stage FROM project_candidates pc
+		JOIN project_candidate_resumes pcr ON pcr.project_candidate_id=pc.id
+		JOIN resume_versions rv ON rv.id=pcr.resume_version_id
+		WHERE pc.project_id=? AND rv.legacy_resume_id=? AND pc.archived_at='' LIMIT 1`, projectID, resumeID).Scan(&candidateID, &oldStage)
+	if err == sql.ErrNoRows && record.PlatformCandidateID != "" {
+		err = db.QueryRow(`SELECT pc.id,pc.stage FROM project_candidates pc
+			JOIN candidate_sources cs ON cs.candidate_id=pc.candidate_id
+			WHERE pc.project_id=? AND pc.archived_at='' AND cs.platform='51job'
+			AND cs.platform_candidate_id=? LIMIT 1`, projectID, record.PlatformCandidateID).Scan(&candidateID, &oldStage)
+	}
+	if err != nil {
+		return err
+	}
+	if oldStage == target || (oldStage != "new" && !(target == "first_interview" && oldStage == "pending_contact")) {
+		return nil
+	}
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	_, err = db.Exec(`UPDATE project_candidates SET stage=?,updated_at=? WHERE id=? AND stage=?`, target, now, candidateID, oldStage)
+	return err
+}
+
+func archiveRejectedManagementCandidate(db *sql.DB, projectID, platformCandidateID string) error {
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	_, err := db.Exec(`UPDATE project_candidates SET archived_at=?,stage='rejected',updated_at=?
+		WHERE project_id=? AND archived_at='' AND candidate_id IN (
+			SELECT candidate_id FROM candidate_sources WHERE platform='51job' AND platform_candidate_id=?)`,
+		now, now, projectID, platformCandidateID)
+	return err
+}
+
+// Reconcile platform-rejected IDs without ever fetching or ingesting a resume.
+func reconcileUnfitManagementCandidates(db *sql.DB, projectID, accountScope, jobID string, candidates []talentManagementCandidate) error {
+	for _, candidate := range candidates {
+		if candidate.CandidateID == "" || candidate.RecordID == "" || candidate.JobID != jobID {
+			return fmt.Errorf("平台不合适名单的候选人标识不完整")
+		}
+		if err := archiveRejectedManagementCandidate(db, projectID, candidate.CandidateID); err != nil {
+			return err
+		}
+		if _, err := db.Exec(`DELETE FROM talent_management_pending_reviews WHERE project_id=? AND platform_account=? AND platform_job_id=? AND candidate_id=?`,
+			projectID, accountScope, jobID, candidate.CandidateID); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+type TalentManagementPendingReview struct {
+	CandidateID          string          `json:"candidateId"`
+	RecordID             string          `json:"recordId"`
+	CandidateName        string          `json:"candidateName"`
+	PlatformStatus       string          `json:"platformStatus"`
+	Verdict              string          `json:"verdict"`
+	PlatformActionStatus string          `json:"platformActionStatus"`
+	Reasons              []RuleCheckItem `json:"reasons"`
+	UpdatedAt            string          `json:"updatedAt"`
+}
+
+func (a *App) ListTalentManagementPendingReviews(projectID string) ([]TalentManagementPendingReview, error) {
+	db, err := a.getRecruitmentDB()
+	if err != nil {
+		return nil, err
+	}
+	rows, err := db.Query(`SELECT r.candidate_id,r.record_id,r.candidate_name,r.platform_status,r.verdict,r.reasons_json,r.updated_at,
+		COALESCE(l.status,'') FROM talent_management_pending_reviews r
+		LEFT JOIN platform_action_ledger l ON l.project_id=r.project_id AND l.candidate_id=r.candidate_id AND l.record_id=r.record_id AND l.action_type='reject'
+		WHERE r.project_id=? AND EXISTS (SELECT 1 FROM platform_job_mappings m
+			WHERE m.platform='51job' AND m.project_id=r.project_id AND m.platform_account=r.platform_account AND m.platform_job_id=r.platform_job_id)
+		ORDER BY r.updated_at DESC`, projectID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	result := make([]TalentManagementPendingReview, 0)
+	for rows.Next() {
+		var item TalentManagementPendingReview
+		var reasons string
+		if err := rows.Scan(&item.CandidateID, &item.RecordID, &item.CandidateName, &item.PlatformStatus, &item.Verdict, &reasons, &item.UpdatedAt, &item.PlatformActionStatus); err != nil {
+			return nil, err
+		}
+		if err := json.Unmarshal([]byte(reasons), &item.Reasons); err != nil {
+			return nil, err
+		}
+		result = append(result, item)
+	}
+	return result, rows.Err()
+}
+
+func saveTalentManagementPendingReview(db *sql.DB, projectID, accountScope, jobID string, candidate talentManagementCandidate, platformStatus, verdict string, reasons []RuleCheckItem) error {
+	raw, err := json.Marshal(reasons)
+	if err != nil {
+		return err
+	}
+	_, err = db.Exec(`INSERT INTO talent_management_pending_reviews
+		(project_id,platform_account,platform_job_id,candidate_id,record_id,candidate_name,platform_status,verdict,reasons_json,updated_at)
+		VALUES(?,?,?,?,?,?,?,?,?,?)
+		ON CONFLICT(project_id,platform_account,platform_job_id,candidate_id,record_id) DO UPDATE SET
+		candidate_name=excluded.candidate_name,platform_status=excluded.platform_status,verdict=excluded.verdict,
+		reasons_json=excluded.reasons_json,updated_at=excluded.updated_at`,
+		projectID, accountScope, jobID, candidate.CandidateID, candidate.RecordID, candidate.Name,
+		platformStatus, verdict, string(raw), time.Now().UTC().Format(time.RFC3339Nano))
+	return err
+}
+
+func (a *App) rejectUnfitManagementCandidate(ctx context.Context, db *sql.DB, projectID, accountScope, jobID string, pageIndex int, candidate talentManagementCandidate, checks []RuleCheckItem) (string, error) {
+	var priorStatus, priorError string
+	err := db.QueryRow(`SELECT status,error_message FROM platform_action_ledger WHERE project_id=? AND candidate_id=? AND record_id=? AND action_type='reject'`,
+		projectID, candidate.CandidateID, candidate.RecordID).Scan(&priorStatus, &priorError)
+	if err != nil && err != sql.ErrNoRows {
+		return "", err
+	}
+	if priorStatus == "success" {
+		return "success", nil
+	}
+	if priorStatus == "pending_retry" && !strings.Contains(priorError, "无法找到候选人的「不合适」操作按钮") &&
+		!strings.Contains(priorError, "无法在待处理列表中定位该候选人") {
+		return "pending_retry", nil // 回执未明时只查询，不再次点击。
+	}
+	reason := "其他原因"
+	evidence := ""
+	for _, check := range checks {
+		if check.Status != "fail" {
+			continue
+		}
+		evidence = check.Evidence
+		switch check.Rule {
+		case "MIN_EDUCATION":
+			reason = "学历不匹配"
+		case "MIN_WORK_YEARS":
+			reason = "工作年限不匹配"
+		case "TARGET_CITY":
+			reason = "工作地点不匹配"
+		}
+		break
+	}
+	if evidence == "" {
+		return "", fmt.Errorf("缺少明确不符合的核验证据")
+	}
+	out, actionErr := runTalentManagementAdapterContext(ctx, 30*time.Second, "--mode", "reject", "--job-id", jobID,
+		"--candidate-id", candidate.CandidateID, "--record-id", candidate.RecordID, "--page-index", fmt.Sprint(pageIndex), "--reason-label", reason)
+	if ctx.Err() != nil {
+		return "", ctx.Err()
+	}
+	status, receipt, errorText := "failed", "", ""
+	if actionErr != nil {
+		errorText = actionErr.Error()
+		receipt = "平台标记不合适失败: " + errorText
+		status = "pending_retry" // 点击是否已发生无法确认，下一轮不能盲目重复。
+		if strings.Contains(errorText, "无法找到候选人的「不合适」操作按钮") ||
+			strings.Contains(errorText, "无法在待处理列表中定位该候选人") {
+			status = "failed" // 按钮尚未点击，后续可重新定位并重试。
+		}
+	} else {
+		var response struct {
+			Status       string `json:"status"`
+			Verified     bool   `json:"verified"`
+			Receipt      string `json:"receipt"`
+			AccountScope string `json:"accountScope"`
+			JobID        string `json:"jobId"`
+			CandidateID  string `json:"candidateId"`
+			RecordID     string `json:"recordId"`
+		}
+		if json.Unmarshal(out, &response) != nil || response.AccountScope != accountScope || response.JobID != jobID || response.CandidateID != candidate.CandidateID || response.RecordID != candidate.RecordID {
+			errorText = "平台操作回执身份不一致"
+			status = "pending_retry"
+		} else if response.Status == "receipt_pending" || !response.Verified {
+			status = "pending_retry"
+		} else {
+			status = "success"
+		}
+		receipt = response.Receipt
+	}
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	_, err = db.Exec(`INSERT INTO platform_action_ledger(id,project_id,platform,platform_account,platform_job_id,candidate_id,record_id,candidate_name,action_type,confirmed_by,requested_at,receipt,status,error_message,retry_count)
+		VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,0)
+		ON CONFLICT(project_id,candidate_id,record_id,action_type) DO UPDATE SET requested_at=excluded.requested_at,receipt=excluded.receipt,status=excluded.status,error_message=excluded.error_message,retry_count=platform_action_ledger.retry_count+1`,
+		recruitmentID("pal"), projectID, "51job", accountScope, jobID, candidate.CandidateID, candidate.RecordID, candidate.Name,
+		"reject", "项目四类同步", now, receipt, status, errorText)
+	if err != nil {
+		return status, err
+	}
+	if status == "success" {
+		_, _ = db.Exec(`UPDATE applications SET status='unfit_archived' WHERE platform='51job' AND platform_account=? AND platform_application_id=?`, accountScope, candidate.RecordID)
+	}
+	return status, actionErr
 }
 
 type TalentManagementSyncTask struct {
@@ -95,6 +305,28 @@ type TalentManagementSyncTask struct {
 	LastSyncAt         string `json:"lastSyncAt"`
 	LastError          string `json:"lastError"`
 	UpdatedAt          string `json:"updatedAt"`
+}
+
+// CountTalentManagementPendingPages takes a read-only snapshot before any
+// "不合适" action shifts pagination. The caller processes pages last to first.
+func (a *App) CountTalentManagementPendingPages(accountScope, jobID string) (int, error) {
+	out, err := runTalentManagementAdapterContext(a.managementImportContext(), 90*time.Second,
+		"--mode", "scan", "--job-id", jobID, "--status-index", "1", "--page-index", "1")
+	if err != nil {
+		return 0, err
+	}
+	var page talentManagementPage
+	if err := json.Unmarshal(out, &page); err != nil {
+		return 0, err
+	}
+	if page.Status != "ok" || page.AccountScope != accountScope || page.JobID != jobID || page.PageSize < 1 {
+		return 0, fmt.Errorf("待处理名单的账号、职位或分页回执不一致")
+	}
+	count := (page.Total + page.PageSize - 1) / page.PageSize
+	if count < 1 {
+		count = 1
+	}
+	return count, nil
 }
 
 type TalentManagementStrictCriteria struct {
@@ -280,7 +512,10 @@ func (a *App) Bind51JobTalentManagementJob(accountScope, jobID, projectID string
 	}
 	for _, job := range catalog.Jobs {
 		if job.JobID == jobID {
-			if err := a.SetPlatformJobMapping("51job", accountScope, jobID, projectID); err != nil {
+			if err := a.bindExclusive51JobProject(accountScope, jobID, projectID); err != nil {
+				return err
+			}
+			if err := a.reconcileStored51JobHardCriteria(projectID, accountScope, jobID); err != nil {
 				return err
 			}
 			// 初始化或更新断点任务
@@ -291,12 +526,74 @@ func (a *App) Bind51JobTalentManagementJob(accountScope, jobID, projectID string
 	return fmt.Errorf("所选职位不属于当前 51job 账号")
 }
 
+// Correct older direct imports using their stored platform resume. A clear
+// hard-rule mismatch leaves the formal library immediately; this never clicks
+// a platform action, which remains tied to the person's current platform tab.
+func (a *App) reconcileStored51JobHardCriteria(projectID, accountScope, jobID string) error {
+	criteria, err := a.GetTalentManagementStrictCriteria(projectID)
+	if err != nil || criteria == nil {
+		return err
+	}
+	db, err := a.getRecruitmentDB()
+	if err != nil {
+		return err
+	}
+	rows, err := db.Query(`SELECT platform_application_id,raw_json FROM applications WHERE platform='51job' AND project_id=? AND platform_account=? AND platform_job_id=?`, projectID, accountScope, jobID)
+	if err != nil {
+		return err
+	}
+	records := make(map[string]ApplicationRecord)
+	for rows.Next() {
+		var recordID, raw string
+		if err := rows.Scan(&recordID, &raw); err != nil {
+			rows.Close()
+			return err
+		}
+		var record ApplicationRecord
+		if json.Unmarshal([]byte(raw), &record) != nil {
+			continue
+		}
+		record.Platform, record.PlatformAccount, record.ApplicationID = "51job", accountScope, recordID
+		records[applicationResumeID(record)] = record
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return err
+	}
+	rows.Close()
+	for _, resume := range a.GetProjectResumes(projectID) {
+		if resume == nil || resume.SourcePlatform != "51job" {
+			continue
+		}
+		record, ok := records[resume.ID]
+		if !ok || record.PlatformCandidateID == "" {
+			continue
+		}
+		verdict, checks := EvaluateCandidateTriState(resume.Content, *criteria)
+		if verdict != "unfit" {
+			continue
+		}
+		if err := archiveRejectedManagementCandidate(db, projectID, record.PlatformCandidateID); err != nil {
+			return err
+		}
+		candidate := talentManagementCandidate{CandidateID: record.PlatformCandidateID, RecordID: record.ApplicationID, JobID: jobID, Name: record.CandidateName}
+		if err := saveTalentManagementPendingReview(db, projectID, accountScope, jobID, candidate, record.PlatformStatus, verdict, checks); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func runTalentManagementAdapter(timeout time.Duration, args ...string) ([]byte, error) {
+	return runTalentManagementAdapterContext(context.Background(), timeout, args...)
+}
+
+func runTalentManagementAdapterContext(parent context.Context, timeout time.Duration, args ...string) ([]byte, error) {
 	script := resolveTalentManagementImportScript()
 	if script == "" {
 		return nil, fmt.Errorf("缺少 51job 人才管理导入脚本")
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	ctx, cancel := context.WithTimeout(parent, timeout)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, "node", append([]string{script}, args...)...)
 	hideConsoleWindow(cmd)
@@ -313,13 +610,49 @@ func runTalentManagementAdapter(timeout time.Duration, args ...string) ([]byte, 
 	return out, nil
 }
 
+func (a *App) Begin51JobManagementImport() {
+	a.talentImportMu.Lock()
+	defer a.talentImportMu.Unlock()
+	if a.talentImportCancel != nil {
+		a.talentImportCancel()
+	}
+	a.talentImportCtx, a.talentImportCancel = context.WithCancel(context.Background())
+}
+
+func (a *App) Stop51JobManagementImport() {
+	a.talentImportMu.Lock()
+	defer a.talentImportMu.Unlock()
+	if a.talentImportCancel != nil {
+		a.talentImportCancel()
+	}
+}
+
+func (a *App) End51JobManagementImport() {
+	a.talentImportMu.Lock()
+	defer a.talentImportMu.Unlock()
+	if a.talentImportCancel != nil {
+		a.talentImportCancel()
+	}
+	a.talentImportCtx, a.talentImportCancel = nil, nil
+}
+
+func (a *App) managementImportContext() context.Context {
+	a.talentImportMu.Lock()
+	defer a.talentImportMu.Unlock()
+	if a.talentImportCtx != nil {
+		return a.talentImportCtx
+	}
+	return context.Background()
+}
+
 // Import51JobTalentManagementPage reads one verified platform page (maximum 50
 // candidates). Incomplete attachments remain pending_document and never enter
 // automatic analysis or rejection.
 func (a *App) Import51JobTalentManagementPage(accountScope, jobID string, statusIndex, pageIndex int) (TalentManagementPageImport, error) {
 	result := TalentManagementPageImport{JobID: jobID, StatusIndex: statusIndex, PageIndex: pageIndex}
-	if statusIndex < 1 || statusIndex > 4 || pageIndex < 1 {
-		return result, fmt.Errorf("仅支持待处理、合适、面试、待定的有效页码")
+	importCtx := a.managementImportContext()
+	if statusIndex < 1 || statusIndex > 5 || pageIndex < 1 {
+		return result, fmt.Errorf("仅支持人才管理五类状态的有效页码")
 	}
 	catalog, err := a.Get51JobTalentManagementCatalog()
 	if err != nil {
@@ -336,7 +669,11 @@ func (a *App) Import51JobTalentManagementPage(accountScope, jobID string, status
 	if err := db.QueryRow(`SELECT project_id FROM platform_job_mappings WHERE platform='51job' AND platform_account=? AND platform_job_id=?`, accountScope, jobID).Scan(&projectID); err != nil || a.GetProject(projectID) == nil {
 		return result, fmt.Errorf("请先按 51job 职位 ID 绑定有效的本地专属库")
 	}
-	out, err := runTalentManagementAdapter(90*time.Second, "--mode", "scan", "--job-id", jobID,
+	if importCtx.Err() != nil {
+		result.Interrupted = true
+		return result, nil
+	}
+	out, err := runTalentManagementAdapterContext(importCtx, 90*time.Second, "--mode", "scan", "--job-id", jobID,
 		"--status-index", fmt.Sprint(statusIndex), "--page-index", fmt.Sprint(pageIndex))
 	if err != nil {
 		return result, err
@@ -349,58 +686,146 @@ func (a *App) Import51JobTalentManagementPage(accountScope, jobID string, status
 		return result, fmt.Errorf("51job 职位、账号或分页回执不一致")
 	}
 	result.Total, result.HasMore = page.Total, page.HasMore
+	// Platform "不合适" is an ID-only reconciliation pass. Never open its
+	// resume detail or ingest it into the formal project library.
+	if statusIndex == 5 {
+		if err := reconcileUnfitManagementCandidates(db, projectID, accountScope, jobID, page.Candidates); err != nil {
+			return result, err
+		}
+		result.ApplicationImportResult = ApplicationImportResult{Platform: "51job", Status: "completed"}
+		return result, nil
+	}
+	criteria, err := a.GetTalentManagementStrictCriteria(projectID)
+	if err != nil {
+		return result, fmt.Errorf("读取岗位硬性条件失败: %w", err)
+	}
+	if criteria == nil {
+		return result, fmt.Errorf("请先保存当前项目的岗位硬性条件")
+	}
 
-	criteria, _ := a.GetTalentManagementStrictCriteria(projectID)
-	hasStrictFilter := criteria != nil && (criteria.MinEducation != "" || criteria.MinWorkYears > 0 || (criteria.RejectNonLocalWillingness && criteria.TargetCity != ""))
-
-	interceptedCount := 0
-	lastInterceptReason := ""
 	records := make([]ApplicationRecord, 0, len(page.Candidates))
-	for _, candidate := range page.Candidates {
+	platformStatus := []string{"", "待处理", "合适", "面试", "待定"}[statusIndex]
+	alreadyImported := make(map[string]bool)
+	for _, resume := range a.GetProjectResumes(projectID) {
+		if resume != nil && resume.SourcePlatform == "51job" && resume.PlatformCandidateID != "" && resume.Status != "pending_document" {
+			alreadyImported[resume.PlatformCandidateID] = true
+		}
+	}
+	skippedExisting := 0
+	for index, candidate := range page.Candidates {
+		if importCtx.Err() != nil {
+			result.Interrupted = true
+			break
+		}
 		if candidate.CandidateID == "" || candidate.RecordID == "" || candidate.JobID != jobID {
 			return result, fmt.Errorf("平台候选人标识不完整")
 		}
 		candidateName := candidate.Name
-		completed := candidate.DocumentsComplete
-		resumeText := candidate.ResumeText
-		documentStatus := candidate.DocumentStatus
-
-		// 硬性条件第一层：导入源头拦截
-		if hasStrictFilter && resumeText != "" {
-			decision, _, reasonLabel, evidence := EvaluateCandidateStrictCriteria(resumeText, *criteria)
-			if decision == "UNFIT" {
-				interceptedCount++
-				lastInterceptReason = evidence
-				// 记录淘汰审计日志
-				nowStr := time.Now().Format("2006-01-02 15:04:05")
-				auditID := recruitmentID("tmaudit")
-				_, _ = db.Exec(`INSERT INTO talent_management_audit_logs
-					(id, project_id, platform, platform_account, platform_job_id, candidate_id, record_id, candidate_name, rule_code, reason_label, evidence, platform_receipt, action_status, created_at)
-					VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-					auditID, projectID, "51job", accountScope, jobID, candidate.CandidateID, candidate.RecordID, candidateName, "EDU_BELOW_MIN", reasonLabel, evidence, "导入源头识别硬性条件不符已自动拦截排除", "archived", nowStr)
-
-				// 登记到 applications 为 unfit_archived 状态，避免后续定时任务重复抓取
-				nowIso := time.Now().UTC().Format(time.RFC3339Nano)
-				appID := fmt.Sprintf("51job_%s_%s", accountScope, candidate.RecordID)
-				recordJson, _ := json.Marshal(map[string]interface{}{
-					"platform": "51job", "platform_account": accountScope, "application_id": candidate.RecordID,
-					"platform_candidate_id": candidate.CandidateID, "platform_job_id": jobID, "candidate_name": candidateName,
-					"status": "unfit_archived", "unfit_reason": evidence,
-				})
-				_, _ = db.Exec(`INSERT INTO applications (id, platform, platform_account, platform_application_id, platform_candidate_id, platform_job_id, project_id, status, applied_at, raw_json, created_at, updated_at)
-					VALUES (?, '51job', ?, ?, ?, ?, ?, 'unfit_archived', ?, ?, ?, ?)
-					ON CONFLICT(platform, platform_account, platform_application_id) DO UPDATE SET status='unfit_archived', updated_at=?`,
-					appID, accountScope, candidate.RecordID, candidate.CandidateID, jobID, projectID, nowIso, string(recordJson), nowIso, nowIso, nowIso)
-
-				// 若已授权合规确认且为人选“待处理”状态，联动 51job 平台点击不合适
-				if criteria.ComplianceConfirmed && statusIndex == 1 {
-					go func(scope, pJobId, cId, rId, reason string) {
-						_, _ = a.ExecuteStrictRejectCandidate(scope, pJobId, cId, rId, reason)
-					}(accountScope, jobID, candidate.CandidateID, candidate.RecordID, reasonLabel)
-				}
-				// 排除！不加入常规入库 records 列表
-				continue
+		completed := false
+		resumeText := ""
+		documentStatus := ""
+		profileURL := ""
+		detailFailure := "平台未返回可核验的简历详情"
+		if a.ctx != nil {
+			runtime.EventsEmit(a.ctx, "talent_management_import_progress", map[string]interface{}{
+				"statusText": fmt.Sprintf("正在导入%s · 第 %d 页 · 候选人 %s (%d/%d)", []string{"", "待处理", "合适", "面试", "待定"}[statusIndex], pageIndex, candidateName, index+1, len(page.Candidates)),
+			})
+		}
+		if detailOut, detailErr := runTalentManagementAdapterContext(importCtx, 15*time.Second, "--mode", "detail", "--job-id", jobID,
+			"--candidate-id", candidate.CandidateID, "--record-id", candidate.RecordID,
+			"--status-index", fmt.Sprint(statusIndex), "--page-index", fmt.Sprint(pageIndex)); detailErr == nil {
+			var detail talentManagementDetail
+			if json.Unmarshal(detailOut, &detail) == nil && detail.Status == "ok" && detail.CandidateID == candidate.CandidateID && detail.RecordID == candidate.RecordID && strings.TrimSpace(detail.ResumeText) != "" {
+				resumeText = detail.ResumeText
+				completed = detail.DocumentsComplete
+				documentStatus = detail.DocumentStatus
+				profileURL = detail.ProfileURL
 			}
+		} else {
+			detailFailure = detailErr.Error()
+		}
+		if importCtx.Err() != nil {
+			result.Interrupted = true
+			break
+		}
+		if resumeText == "" || !completed {
+			result.PendingVerificationCount++
+			reason := detailFailure
+			if resumeText != "" && !completed {
+				reason = documentStatus
+			}
+			if strings.TrimSpace(reason) == "" {
+				reason = "简历详情或资料完整性尚无法确认，请稍后补读"
+			}
+			if err := saveTalentManagementPendingReview(db, projectID, accountScope, jobID, candidate, platformStatus,
+				"pending_verification", []RuleCheckItem{{Rule: "detail_load", Label: "简历详情完整性", Status: "unknown", Evidence: reason}}); err != nil {
+				return result, err
+			}
+			continue
+		}
+		verdict, checks := EvaluateCandidateTriState(resumeText, *criteria)
+		if statusIndex != 1 && verdict == "unfit" {
+			result.InterceptedCount++
+			if err := archiveRejectedManagementCandidate(db, projectID, candidate.CandidateID); err != nil {
+				return result, err
+			}
+			// Keep the evidence for HR to select the person on 51job and mark
+			// 不合适. Other platform states cannot use the 待处理-only button.
+			if err := saveTalentManagementPendingReview(db, projectID, accountScope, jobID, candidate, platformStatus, verdict, checks); err != nil {
+				return result, err
+			}
+			continue
+		}
+		if statusIndex == 1 && verdict == "unfit" {
+			result.InterceptedCount++
+			if err := saveTalentManagementPendingReview(db, projectID, accountScope, jobID, candidate, platformStatus, verdict, checks); err != nil {
+				return result, err
+			}
+			actionStatus, actionErr := a.rejectUnfitManagementCandidate(importCtx, db, projectID, accountScope, jobID, pageIndex, candidate, checks)
+			if actionStatus == "success" {
+				result.PlatformRejectedCount++
+				if err := archiveRejectedManagementCandidate(db, projectID, candidate.CandidateID); err != nil {
+					return result, fmt.Errorf("平台已拒绝，但本地旧简历归档失败: %w", err)
+				}
+				if _, err := db.Exec(`DELETE FROM talent_management_pending_reviews WHERE project_id=? AND platform_account=? AND platform_job_id=? AND candidate_id=?`,
+					projectID, accountScope, jobID, candidate.CandidateID); err != nil {
+					return result, err
+				}
+			} else {
+				result.PlatformRejectPendingCount++
+				if actionErr != nil {
+					checks = append(checks, RuleCheckItem{Rule: "platform_reject", Label: "平台不合适操作", Status: "unknown", Evidence: actionErr.Error()})
+					_ = saveTalentManagementPendingReview(db, projectID, accountScope, jobID, candidate, platformStatus, verdict, checks)
+				}
+			}
+			if result.InterceptReason == "" {
+				for _, check := range checks {
+					if check.Status == "fail" {
+						result.InterceptReason = check.Evidence
+						break
+					}
+				}
+			}
+			continue
+		}
+		if verdict != "qualified" {
+			result.PendingVerificationCount++
+			if err := saveTalentManagementPendingReview(db, projectID, accountScope, jobID, candidate, platformStatus, verdict, checks); err != nil {
+				return result, err
+			}
+			continue
+		}
+		if alreadyImported[candidate.CandidateID] {
+			skippedExisting++
+			if statusIndex == 2 || statusIndex == 3 {
+				_ = a.applyTalentManagementStage(db, projectID, ApplicationRecord{
+					Platform: "51job", PlatformAccount: accountScope, ApplicationID: candidate.RecordID,
+					PlatformCandidateID: candidate.CandidateID, PlatformStatus: platformStatus,
+				})
+			}
+			_, _ = db.Exec(`DELETE FROM talent_management_pending_reviews WHERE project_id=? AND platform_account=? AND platform_job_id=? AND candidate_id=? AND record_id=?`,
+				projectID, accountScope, jobID, candidate.CandidateID, candidate.RecordID)
+			continue
 		}
 
 		record := ApplicationRecord{
@@ -410,17 +835,46 @@ func (a *App) Import51JobTalentManagementPage(accountScope, jobID string, status
 			PlatformCandidateID: candidate.CandidateID,
 			PlatformJobID:       jobID,
 			CandidateName:       candidateName,
-			PlatformStatus:      []string{"", "待处理", "合适", "面试", "待定"}[statusIndex],
+			PlatformStatus:      platformStatus,
 			DocumentsComplete:   &completed,
 			DocumentStatus:      documentStatus,
 			ResumeText:          resumeText,
+			ProfileURL:          profileURL,
 		}
 		records = append(records, record)
 	}
+	if len(records) == 0 {
+		result.ApplicationImportResult = ApplicationImportResult{Platform: "51job", Status: "completed", DuplicateCount: skippedExisting}
+		if result.Interrupted {
+			result.HasMore = true
+		}
+		return result, nil
+	}
 	imported, err := a.ingestApplicationRecords("51job", records)
+	imported.DuplicateCount += skippedExisting
 	result.ApplicationImportResult = imported
-	result.InterceptedCount = interceptedCount
-	result.InterceptReason = lastInterceptReason
+	if err == nil {
+		for _, record := range records {
+			if stageErr := a.applyTalentManagementStage(db, projectID, record); stageErr != nil && stageErr != sql.ErrNoRows {
+				return result, fmt.Errorf("设置候选人招聘阶段失败: %w", stageErr)
+			}
+		}
+		present := make(map[string]bool)
+		for _, resume := range a.GetProjectResumes(projectID) {
+			if resume != nil && resume.SourcePlatform == "51job" {
+				present[resume.PlatformCandidateID] = true
+			}
+		}
+		for _, record := range records {
+			if present[record.PlatformCandidateID] {
+				_, _ = db.Exec(`DELETE FROM talent_management_pending_reviews WHERE project_id=? AND platform_account=? AND platform_job_id=? AND candidate_id=? AND record_id=?`,
+					projectID, accountScope, jobID, record.PlatformCandidateID, record.ApplicationID)
+			}
+		}
+	}
+	if result.Interrupted {
+		result.HasMore = true
+	}
 	return result, err
 }
 
@@ -554,7 +1008,7 @@ func (a *App) RunTalentManagementNextBatch(accountScope, jobID string) (TalentMa
 	if importResult.HasMore {
 		nextPageIndex++
 	} else {
-		if nextStatusIndex < 4 {
+		if nextStatusIndex < 5 {
 			nextStatusIndex++
 			nextPageIndex = 1
 		} else {

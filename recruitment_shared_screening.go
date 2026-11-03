@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"fmt"
@@ -10,6 +11,33 @@ import (
 
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 )
+
+func (a *App) StopProjectScreening(projectID string) {
+	if strings.TrimSpace(projectID) != "" {
+		a.screeningStop.Store(projectID, true)
+	}
+}
+
+func (a *App) BeginProjectScreening(projectID string) {
+	if strings.TrimSpace(projectID) != "" {
+		a.screeningStop.Store(projectID, false)
+	}
+}
+
+func (a *App) screeningWasStopped(projectID string) bool {
+	stopped, _ := a.screeningStop.Load(projectID)
+	return stopped == true
+}
+
+func (a *App) interruptedScreeningPreview(db *sql.DB, batchID string) (*ScreeningBatchPreview, error) {
+	if _, err := db.Exec(`UPDATE screening_batches SET scan_status='manual_required',last_error='HR 已中止扫描，断点已保留' WHERE id=?`, batchID); err != nil {
+		return nil, err
+	}
+	if err := updateBatchCounts(db, batchID); err != nil {
+		return nil, err
+	}
+	return a.GetScreeningBatchPreview(batchID)
+}
 
 // RuleCheckItem 逐项判定规则检查明细（三态：pass / fail / unknown）
 type RuleCheckItem struct {
@@ -87,10 +115,12 @@ type PlatformActionLedgerItem struct {
 
 // parseCandidateActivityDays 从简历文本或结构化数据解析候选人活跃天数
 func parseCandidateActivityDays(text string) (days int, known bool) {
-	// 优先解析结构化时间戳字段如 active_time, modifydate, refresh_date, updatetime, applydate
+	// Only a dedicated activity timestamp is evidence of recent activity.
+	// Application, resume edit and generic refresh dates do not prove the
+	// candidate was active on the platform.
 	var data map[string]interface{}
 	if json.Unmarshal([]byte(text), &data) == nil {
-		for _, key := range []string{"active_time", "modifydate", "refresh_date", "updatetime", "applydate"} {
+		for _, key := range []string{"active_time", "activetime"} {
 			if val, ok := data[key].(string); ok && strings.TrimSpace(val) != "" {
 				val = strings.TrimSpace(val)
 				for _, layout := range []string{"2006-01-02 15:04:05", "2006-01-02", "2006/01/02", "2006.01.02"} {
@@ -106,7 +136,16 @@ func parseCandidateActivityDays(text string) (days int, known bool) {
 		}
 	}
 
-	lower := strings.ToLower(text)
+	activityLabel := text
+	if data != nil {
+		activityLabel = ""
+		for _, key := range []string{"active_type", "activetimelabel", "activeTimeLabel", "activity_label"} {
+			if value, ok := data[key].(string); ok {
+				activityLabel += " " + value
+			}
+		}
+	}
+	lower := strings.ToLower(activityLabel)
 	if strings.Contains(lower, "刚刚活跃") || strings.Contains(lower, "今日活跃") || strings.Contains(lower, "今天活跃") || strings.Contains(lower, "小时前活跃") {
 		return 0, true
 	}
@@ -352,8 +391,8 @@ func EvaluateCandidateTriState(resumeText string, criteria TalentManagementStric
 			checks = append(checks, RuleCheckItem{
 				Rule:     "ACTIVITY_DAYS",
 				Label:    "人才活跃度",
-				Status:   "unknown",
-				Evidence: "平台活跃/刷新时间未标记或无法核验",
+				Status:   "skipped",
+				Evidence: "平台活跃/刷新时间未标记或无法核验；本项不作拒绝依据",
 			})
 		} else if days > criteria.ActivityDays {
 			checks = append(checks, RuleCheckItem{
@@ -521,8 +560,14 @@ func (a *App) Scan51JobTalentManagementBatch(accountScope, jobID, projectID stri
 	}
 
 	for page := startPage; page <= pageLimit; page++ {
-		out, scanErr := runTalentManagementAdapter(90*time.Second, "--mode", "scan", "--job-id", jobID,
+		if a.screeningWasStopped(projectID) {
+			return a.interruptedScreeningPreview(db, batchID)
+		}
+		out, scanErr := a.runCancelableScreeningAdapter(projectID, 90*time.Second, "--mode", "scan", "--job-id", jobID,
 			"--status-index", "1", "--page-index", fmt.Sprint(page))
+		if a.screeningWasStopped(projectID) {
+			return a.interruptedScreeningPreview(db, batchID)
+		}
 		if scanErr != nil {
 			errStr := scanErr.Error()
 			nextScanStatus := "paused"
@@ -559,6 +604,9 @@ func (a *App) Scan51JobTalentManagementBatch(accountScope, jobID, projectID stri
 		}
 
 		for candIdx, cand := range pageData.Candidates {
+			if a.screeningWasStopped(projectID) {
+				return a.interruptedScreeningPreview(db, batchID)
+			}
 			if cand.CandidateID == "" || cand.RecordID == "" {
 				continue
 			}
@@ -591,7 +639,10 @@ func (a *App) Scan51JobTalentManagementBatch(accountScope, jobID, projectID stri
 			// 每人先读取平台真实详情。网络等待不能放在 SQLite 事务内，否则保存职位会被长时间阻塞。
 			verdict, checks := "pending_verification", []RuleCheckItem{}
 			{
-				detailOut, detailErr := a.readScreeningDetailWithCountdown(batchID, page, totalPagesEst, cand, candIdx+1, len(pageData.Candidates), jobID)
+				detailOut, detailErr := a.readScreeningDetailWithCountdown(batchID, projectID, page, totalPagesEst, cand, candIdx+1, len(pageData.Candidates), jobID)
+				if a.screeningWasStopped(projectID) {
+					return a.interruptedScreeningPreview(db, batchID)
+				}
 				if detailErr == nil {
 					var detailResp talentManagementDetail
 					if json.Unmarshal(detailOut, &detailResp) == nil && detailResp.Status == "ok" && strings.TrimSpace(detailResp.ResumeText) != "" {
@@ -667,14 +718,44 @@ func (a *App) Scan51JobTalentManagementBatch(accountScope, jobID, projectID stri
 	return a.GetScreeningBatchPreview(batchID)
 }
 
-func (a *App) readScreeningDetailWithCountdown(batchID string, page, totalPages int, cand talentManagementCandidate, index, total int, jobID string) ([]byte, error) {
+func (a *App) runCancelableScreeningAdapter(projectID string, timeout time.Duration, args ...string) ([]byte, error) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 	type response struct {
 		out []byte
 		err error
 	}
 	result := make(chan response, 1)
 	go func() {
-		out, err := runTalentManagementAdapter(15*time.Second, "--mode", "detail", "--job-id", jobID,
+		out, err := runTalentManagementAdapterContext(ctx, timeout, args...)
+		result <- response{out, err}
+	}()
+	ticker := time.NewTicker(200 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		select {
+		case done := <-result:
+			return done.out, done.err
+		case <-ticker.C:
+			if a.screeningWasStopped(projectID) {
+				cancel()
+				done := <-result
+				return done.out, done.err
+			}
+		}
+	}
+}
+
+func (a *App) readScreeningDetailWithCountdown(batchID, projectID string, page, totalPages int, cand talentManagementCandidate, index, total int, jobID string) ([]byte, error) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	type response struct {
+		out []byte
+		err error
+	}
+	result := make(chan response, 1)
+	go func() {
+		out, err := runTalentManagementAdapterContext(ctx, 15*time.Second, "--mode", "detail", "--job-id", jobID,
 			"--candidate-id", cand.CandidateID, "--record-id", cand.RecordID, "--status-index", "1", "--page-index", fmt.Sprint(page))
 		result <- response{out, err}
 	}()
@@ -686,6 +767,11 @@ func (a *App) readScreeningDetailWithCountdown(batchID string, page, totalPages 
 		case done := <-result:
 			return done.out, done.err
 		case <-ticker.C:
+			if a.screeningWasStopped(projectID) {
+				cancel()
+				done := <-result
+				return done.out, done.err
+			}
 			remaining--
 			if a.ctx != nil {
 				runtime.EventsEmit(a.ctx, "screening_scan_progress", map[string]interface{}{
@@ -1069,7 +1155,12 @@ func (a *App) RescreenProjectRepository(projectID string) (*OneClickFilterResult
 
 		resumeContent := cand.content
 		if strings.TrimSpace(cand.rawJSON) != "" {
-			resumeContent = cand.rawJSON
+			var saved struct {
+				RawProfileJSON string `json:"raw_profile_json"`
+			}
+			if json.Unmarshal([]byte(cand.rawJSON), &saved) == nil && saved.RawProfileJSON != "" {
+				resumeContent = saved.RawProfileJSON
+			}
 		}
 
 		verdict, checks := EvaluateCandidateTriState(resumeContent, *criteria)
@@ -1222,19 +1313,27 @@ func (a *App) GetScreeningBatchPreview(batchID string) (*ScreeningBatchPreview, 
 
 // CheckAndResumeProjectScreening HR 手动点击或定时调度执行：检查并恢复未完成的筛选与动作核验
 func (a *App) CheckAndResumeProjectScreening(projectID string) (*ScreeningBatchPreview, error) {
+	a.BeginProjectScreening(projectID)
 	db, err := a.getRecruitmentDB()
 	if err != nil {
 		return nil, err
 	}
-	var batchID, accountScope, jobID, scanStatus string
-	err = db.QueryRow(`SELECT id, platform_account, platform_job_id, COALESCE(scan_status, 'complete')
+	var batchID, accountScope, jobID, scanStatus, lastError string
+	err = db.QueryRow(`SELECT id, platform_account, platform_job_id, COALESCE(scan_status, 'complete'), COALESCE(last_error, '')
 		FROM screening_batches WHERE project_id=? AND source='talent_management'
-		ORDER BY started_at DESC LIMIT 1`, projectID).Scan(&batchID, &accountScope, &jobID, &scanStatus)
+		ORDER BY started_at DESC LIMIT 1`, projectID).Scan(&batchID, &accountScope, &jobID, &scanStatus, &lastError)
 	if err == sql.ErrNoRows {
 		return nil, fmt.Errorf("当前项目暂无筛选任务记录")
 	}
 	if err != nil {
 		return nil, err
+	}
+	if scanStatus == "manual_required" && lastError == "HR 已中止详情补读" {
+		_, _ = db.Exec(`UPDATE screening_batches SET scan_status='complete',last_error='' WHERE id=?`, batchID)
+		if err := a.retryPendingScreeningDetails(batchID, projectID, jobID, 50); err != nil {
+			return nil, err
+		}
+		return a.GetScreeningBatchPreview(batchID)
 	}
 
 	// 若扫描未完成，尝试断点续跑
@@ -1263,6 +1362,10 @@ func (a *App) retryPendingScreeningDetails(batchID, projectID, jobID string, lim
 	if err != nil {
 		return err
 	}
+	stopRetry := func() error {
+		_, err := db.Exec(`UPDATE screening_batches SET scan_status='manual_required',last_error='HR 已中止详情补读' WHERE id=?`, batchID)
+		return err
+	}
 	rows, err := db.Query(`SELECT id,candidate_id,record_id,source_page FROM screening_candidate_results
 		WHERE batch_id=? AND verdict='pending_verification' AND detail_loaded=0
 		AND rule_evidence_json LIKE '%detail_load%' AND action_status NOT IN ('completed','imported','verified_on_platform')
@@ -1289,8 +1392,14 @@ func (a *App) retryPendingScreeningDetails(batchID, projectID, jobID string, lim
 		return err
 	}
 	for _, item := range pending {
-		out, detailErr := runTalentManagementAdapter(15*time.Second, "--mode", "detail", "--job-id", jobID,
+		if a.screeningWasStopped(projectID) {
+			return stopRetry()
+		}
+		out, detailErr := a.runCancelableScreeningAdapter(projectID, 15*time.Second, "--mode", "detail", "--job-id", jobID,
 			"--candidate-id", item.candidateID, "--record-id", item.recordID, "--status-index", "1", "--page-index", fmt.Sprint(item.page))
+		if a.screeningWasStopped(projectID) {
+			return stopRetry()
+		}
 		if detailErr != nil {
 			continue
 		}
@@ -1333,6 +1442,9 @@ func (a *App) retryPendingScreeningDetails(batchID, projectID, jobID string, lim
 			ev, _ := json.Marshal(ch)
 			_, _ = db.Exec(`UPDATE screening_candidate_results SET verdict=?,rule_evidence_json=? WHERE id=?`, v, string(ev), it.id)
 		}
+	}
+	if a.screeningWasStopped(projectID) {
+		return stopRetry()
 	}
 	if err := a.retryQualifiedAutoImports(db, batchID, projectID, jobID, limit); err != nil {
 		return err

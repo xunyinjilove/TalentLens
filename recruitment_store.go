@@ -355,6 +355,9 @@ func (a *App) getRecruitmentDB() (*sql.DB, error) {
 	if err == nil {
 		_, err = db.Exec(`UPDATE project_candidates SET stage='pending_contact', updated_at=?
 			WHERE stage IN ('new','pending_analysis') AND
+			NOT EXISTS (SELECT 1 FROM project_candidate_resumes pcr JOIN resume_versions rv ON rv.id=pcr.resume_version_id
+				WHERE pcr.project_candidate_id=project_candidates.id AND json_valid(rv.raw_json)
+				AND json_extract(rv.raw_json,'$.source_platform')='51job' AND json_extract(rv.raw_json,'$.platform_status') IN ('待处理','待定')) AND
 			(SELECT ev.status FROM evaluations ev WHERE ev.project_candidate_id=project_candidates.id
 			 ORDER BY ev.created_at DESC,ev.id DESC LIMIT 1)='done'`, time.Now().UTC().Format(time.RFC3339Nano))
 	}
@@ -490,6 +493,19 @@ func ensureScreeningFrameworkTables(db *sql.DB) error {
 			UNIQUE(batch_id, candidate_id, record_id)
 		);`,
 		`CREATE INDEX IF NOT EXISTS idx_scr_cand_batch ON screening_candidate_results(batch_id, verdict);`,
+		`CREATE TABLE IF NOT EXISTS talent_management_pending_reviews (
+			project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+			platform_account TEXT NOT NULL,
+			platform_job_id TEXT NOT NULL,
+			candidate_id TEXT NOT NULL,
+			record_id TEXT NOT NULL,
+			candidate_name TEXT NOT NULL,
+			platform_status TEXT NOT NULL,
+			verdict TEXT NOT NULL,
+			reasons_json TEXT NOT NULL DEFAULT '[]',
+			updated_at TEXT NOT NULL,
+			PRIMARY KEY(project_id,platform_account,platform_job_id,candidate_id,record_id)
+		);`,
 		`CREATE TABLE IF NOT EXISTS platform_action_ledger (
 			id TEXT PRIMARY KEY,
 			project_id TEXT NOT NULL,
@@ -908,7 +924,7 @@ func (a *App) syncRecruitmentResume(resume *Resume) {
 			if err != nil {
 				return
 			}
-			if resume.Status == "done" {
+			if resume.Status == "done" && !(resume.SourcePlatform == "51job" && (resume.PlatformStatus == "待处理" || resume.PlatformStatus == "待定")) {
 				if _, err = tx.Exec(`UPDATE project_candidates SET stage='pending_contact',updated_at=?
 					WHERE id=? AND stage IN ('new','pending_analysis')`, now, linkID); err != nil {
 					return

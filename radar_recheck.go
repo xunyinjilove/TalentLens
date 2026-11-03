@@ -70,7 +70,7 @@ func (a *App) PreviewResumeAIRecheck(resumeID string) (RadarRecheckPreview, erro
 	if project == nil {
 		return RadarRecheckPreview{}, fmt.Errorf("招聘项目不存在")
 	}
-	metrics := getUnifiedJobMetrics(&project.JobConfig)
+	metrics := configuredJobRadarMetrics(&project.JobConfig)
 	if len(metrics) == 0 {
 		return RadarRecheckPreview{}, fmt.Errorf("岗位尚无技能指标，请先确认雷达草稿")
 	}

@@ -47,8 +47,7 @@ func (a *App) TranslateResumeSections(resumeID, language string, force bool, sec
 	if err := json.Unmarshal(data, &resume); err != nil || strings.TrimSpace(resume.Content) == "" {
 		return nil, fmt.Errorf("简历原文不可用")
 	}
-	hashData := sha256.Sum256([]byte(resume.Content + "\x00" + language + "\x00" + strings.Join(sections, "\x1f")))
-	hash := hex.EncodeToString(hashData[:])
+	hash := resumeTranslationHash(resume.Content, language, sections)
 	cachePath := filepath.Join(a.getDataDir(), "translations", resumeID+"_"+language+".json")
 	a.translationMutex.Lock()
 	defer a.translationMutex.Unlock()
@@ -108,6 +107,41 @@ func (a *App) TranslateResumeSections(resumeID, language string, force bool, sec
 		return nil, fmt.Errorf("保存译文缓存失败: %w", err)
 	}
 	return translated, nil
+}
+
+func resumeTranslationHash(content, language string, sections []string) string {
+	hashData := sha256.Sum256([]byte(content + "\x00" + language + "\x00" + strings.Join(sections, "\x1f")))
+	return hex.EncodeToString(hashData[:])
+}
+
+// GetCachedResumeTranslation reads a saved translation without invoking AI.
+func (a *App) GetCachedResumeTranslation(resumeID, language string, sections []string) ([]string, error) {
+	if !interviewIDPattern.MatchString(resumeID) || (language != "en" && language != "zh") {
+		return nil, fmt.Errorf("简历 ID 或译文语言无效")
+	}
+	data, err := os.ReadFile(filepath.Join(a.getDataDir(), "resumes", resumeID+".json"))
+	if err != nil {
+		return nil, err
+	}
+	var resume Resume
+	if err := json.Unmarshal(data, &resume); err != nil {
+		return nil, err
+	}
+	data, err = os.ReadFile(filepath.Join(a.getDataDir(), "translations", resumeID+"_"+language+".json"))
+	if os.IsNotExist(err) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	var cached resumeTranslationCache
+	if err := json.Unmarshal(data, &cached); err != nil {
+		return nil, err
+	}
+	if cached.SourceHash != resumeTranslationHash(resume.Content, language, sections) || cached.Language != language || len(cached.Sections) != len(sections) {
+		return nil, nil
+	}
+	return cached.Sections, nil
 }
 
 // Keep chunks below the common model output budget while preferring natural

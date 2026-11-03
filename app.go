@@ -193,9 +193,11 @@ type Resume struct {
 	FileType                  string          `json:"file_type"`
 	FileSize                  int64           `json:"file_size"`
 	Content                   string          `json:"content"`
+	RawProfileJSON            string          `json:"raw_profile_json,omitempty"`
 	URL                       string          `json:"url,omitempty"`
 	SourcePlatform            string          `json:"source_platform,omitempty"`
 	PlatformCandidateID       string          `json:"platform_candidate_id,omitempty"`
+	PlatformStatus            string          `json:"platform_status,omitempty"`
 	SnapshotCopyIDs           []string        `json:"snapshot_copy_ids,omitempty"`
 	Email                     string          `json:"email,omitempty"`
 	Status                    string          `json:"status"`
@@ -215,6 +217,8 @@ type Resume struct {
 	ErrorMessage              string          `json:"error_message,omitempty"`
 	AnalysisAutoRetryVersion  string          `json:"analysis_auto_retry_version,omitempty"`
 	Analysis                  *AnalysisResult `json:"analysis,omitempty"`
+	AnalysisCacheKey          string          `json:"analysis_cache_key,omitempty"`
+	AnalysisSuccessfulRounds  int             `json:"analysis_successful_rounds,omitempty"`
 	AnalysisRuleVersion       int             `json:"analysis_rule_version,omitempty"`
 	CreatedAt                 time.Time       `json:"created_at"`
 }
@@ -406,6 +410,9 @@ type App struct {
 	jobSyncMu            sync.Mutex
 	talentFilterMu       sync.Mutex
 	talentFilterStopFile string
+	talentImportMu       sync.Mutex
+	talentImportCtx      context.Context
+	talentImportCancel   context.CancelFunc
 	contactPending       map[string]pending51JobHiQuote
 	analysisMutex        sync.Mutex
 	activeAnalyses       map[string]bool
@@ -414,6 +421,7 @@ type App struct {
 	recruitmentDBMu      sync.Mutex
 	recruitmentDB        *sql.DB
 	recruitmentDir       string
+	screeningStop        sync.Map
 }
 
 func NewApp() *App {
@@ -573,7 +581,8 @@ func (a *App) startup(ctx context.Context) {
 		if err := a.interruptUnfinishedSourcingTasks(); err != nil {
 			log.Printf("[RecruitmentStore] 检索任务恢复状态失败: %v", err)
 		}
-		a.startScreeningFrameworkScheduler()
+		// Legacy standalone pending-only screening was removed from the UI.
+		// Existing batch records remain readable, but must not restart on launch.
 	}
 
 	// 监听原生文件拖拽（Wails 提供真实文件路径）
@@ -1058,6 +1067,9 @@ func (a *App) GetResumes() []*Resume {
 		if json.Unmarshal(data, &r) != nil {
 			continue
 		}
+		if r.SourcePlatform == "51job" {
+			r.Content = format51JobResume(r.Content)
+		}
 		if p := a.GetProject(r.ProjectID); p != nil {
 			a.prepareResumeDecision(&r, &p.JobConfig)
 		}
@@ -1090,7 +1102,9 @@ func (a *App) removeResumeFromAllProjects(resumeID string) {
 }
 
 func (a *App) DeleteResume(id string) error {
-	_ = a.deleteRecruitmentResume(id)
+	if err := a.deleteRecruitmentResume(id); err != nil {
+		return fmt.Errorf("删除本地简历记录失败: %w", err)
+	}
 	a.removeResumeFromAllProjects(id)
 	path := filepath.Join(a.getDataDir(), "resumes", id+".json")
 	if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
@@ -1219,12 +1233,12 @@ func (a *App) GetFreshResumeContent(id string) (string, error) {
 			resume.Content = freshContent
 			a.saveResume(&resume) // 更新磁盘缓存
 			log.Printf("[GetFreshResumeContent] 重新提取成功: %s, 长度=%d", resume.FileName, len(freshContent))
-			return freshContent, nil
+			return format51JobResume(freshContent), nil
 		}
 	}
 
 	// 回退到已有内容
-	return resume.Content, nil
+	return format51JobResume(resume.Content), nil
 }
 
 // SelectAndAttachResumeFile 弹出系统文件选择框为候选人选择并绑定 PDF/Word 完整附件简历
@@ -1347,6 +1361,10 @@ func (a *App) CreateProject(name string, department string, headcount int, recru
 	} else if jobCfg.Title == "" {
 		jobCfg.Title = name
 	}
+	if countUniqueSkills(jobCfg.RequiredSkills) > 8 {
+		log.Printf("[CreateProject] 必备关键技能超过 8 项: %s", name)
+		return nil
+	}
 	seq := projectIDSeq.Add(1)
 	p := &Project{
 		ID:         fmt.Sprintf("proj_%d_%d", time.Now().UnixNano(), seq),
@@ -1411,6 +1429,12 @@ func (a *App) GetProject(id string) *Project {
 
 // UpdateProject 更新项目
 func (a *App) UpdateProject(p *Project) error {
+	if p == nil {
+		return fmt.Errorf("职位数据为空")
+	}
+	if countUniqueSkills(p.JobConfig.RequiredSkills) > 8 {
+		return fmt.Errorf("必备关键技能最多填写 8 项，请删减后保存")
+	}
 	if p != nil {
 		if previous := a.GetProject(p.ID); previous != nil && jobRadarSourceHash(&previous.JobConfig) != jobRadarSourceHash(&p.JobConfig) {
 			// New job facts create a new rubric version. Its axes are fixed by the
@@ -1667,6 +1691,9 @@ func (a *App) GetProjectResumes(projectID string) []*Resume {
 		}
 		var r Resume
 		if json.Unmarshal(data, &r) == nil {
+			if r.SourcePlatform == "51job" {
+				r.Content = format51JobResume(r.Content)
+			}
 			if r.Status == "analyzing" && (a.activeAnalyses == nil || !a.activeAnalyses[r.ID]) {
 				r.Status = "pending"
 			}
@@ -1685,18 +1712,33 @@ func (a *App) prepareResumeDecision(resume *Resume, job *JobConfig) {
 		return
 	}
 	metrics := getUnifiedJobMetrics(job)
+	if len(metrics) == 0 {
+		// Refresh HR review rules while preserving an existing score when no
+		// skill rubric was configured for this project.
+		oldScore := resume.Score
+		oldOverall, oldAbility, oldCore := resume.Analysis.OverallScore, resume.Analysis.AbilityScore, resume.Analysis.CoreMatch
+		a.applyJobDecision(resume.Analysis, job, resume)
+		resume.Score = oldScore
+		resume.Analysis.OverallScore, resume.Analysis.AbilityScore, resume.Analysis.CoreMatch = oldOverall, oldAbility, oldCore
+		resume.Analysis.RadarStale = false
+		return
+	}
 	profileMismatch := !analysisMatchesRadar(resume.Analysis, metrics, activeJobRadarHash(job))
-	if job.RadarProfileVersion > 1 && resume.Analysis.RadarProfileHash == "" {
-		profileMismatch = true
-	}
-	if job.RadarProfileVersion >= 1 && job.RadarProfileHash == "" {
-		profileMismatch = true
-	}
-	if job.RadarSourceHash != "" && job.RadarSourceHash != jobRadarSourceHash(job) {
-		profileMismatch = true
-	}
-	if job.RadarProfileHash != "" && resume.Analysis.RadarProfileHash == "" && len(resume.Analysis.CoreCriterionChecks) != len(metrics) {
-		profileMismatch = true
+	if len(configuredJobRadarMetrics(job)) == 0 {
+		profileMismatch = false
+	} else {
+		if job.RadarProfileVersion > 1 && resume.Analysis.RadarProfileHash == "" {
+			profileMismatch = true
+		}
+		if job.RadarProfileVersion >= 1 && job.RadarProfileHash == "" {
+			profileMismatch = true
+		}
+		if job.RadarSourceHash != "" && job.RadarSourceHash != jobRadarSourceHash(job) {
+			profileMismatch = true
+		}
+		if job.RadarProfileHash != "" && resume.Analysis.RadarProfileHash == "" && len(resume.Analysis.CoreCriterionChecks) != len(metrics) {
+			profileMismatch = true
+		}
 	}
 	if profileMismatch {
 		oldScore := resume.Score
@@ -3227,8 +3269,8 @@ func (a *App) ExportProjectReport(projectID string) (string, error) {
 	sheet := "候选人排名"
 	f.SetSheetName("Sheet1", sheet)
 
-	// 提取岗位统一雷达指标（技能要求 + 核心能力）
-	radarMetrics := getUnifiedJobMetrics(&p.JobConfig)
+	// Radar columns use only explicitly configured required skills.
+	radarMetrics := configuredJobRadarMetrics(&p.JobConfig)
 	seenMetrics := make(map[string]bool)
 	for _, m := range radarMetrics {
 		seenMetrics[m] = true
@@ -3521,13 +3563,6 @@ func (a *App) emitEvent(name string, data ...interface{}) {
 
 // AnalyzeResume 分析单个简历
 func (a *App) AnalyzeResume(resumeID string, cfg *AIConfig, jobCfg *JobConfig) (*AnalysisResult, error) {
-	// 校验 AI 配置
-	if cfg == nil || cfg.APIKey == "" {
-		return nil, fmt.Errorf("AI 未配置: 请先在设置中填写 API Key")
-	}
-	if cfg.BaseURL == "" {
-		return nil, fmt.Errorf("AI 未配置: 请先在设置中填写 Base URL")
-	}
 	a.analysisMutex.Lock()
 	if a.activeAnalyses == nil {
 		a.activeAnalyses = make(map[string]bool)
@@ -3555,7 +3590,7 @@ func (a *App) AnalyzeResume(resumeID string, cfg *AIConfig, jobCfg *JobConfig) (
 	if err := json.Unmarshal(data, &resume); err != nil {
 		return nil, fmt.Errorf("解析简历失败: %v", err)
 	}
-	previousCompleted := resume.Status == "done" && resume.Analysis != nil
+	previousCompleted := resume.Analysis != nil
 	previousResume := resume
 	if db := a.activeRecruitmentDB(); db != nil && resume.ProjectID != "" {
 		_ = db.QueryRow(`SELECT COALESCE(MAX(version),0) FROM job_rules WHERE project_id=? AND status='approved'`,
@@ -3574,15 +3609,6 @@ func (a *App) AnalyzeResume(resumeID string, cfg *AIConfig, jobCfg *JobConfig) (
 		}
 	}
 
-	// 更新状态为分析中
-	resume.Status = "analyzing"
-	a.saveResume(&resume)
-	a.emitEvent("analysis:progress", map[string]interface{}{
-		"id":       resumeID,
-		"status":   "analyzing",
-		"progress": 10,
-	})
-
 	// 批量入口先固定岗位指标；分析只使用该批次的固定画像。
 	if resume.ProjectID != "" {
 		if updatedP := a.GetProject(resume.ProjectID); updatedP != nil {
@@ -3600,6 +3626,32 @@ func (a *App) AnalyzeResume(resumeID string, cfg *AIConfig, jobCfg *JobConfig) (
 			jobCfg = &updatedP.JobConfig
 		}
 	}
+	cacheKey := analysisVersionKey(&resume, jobCfg)
+	if resume.AnalysisCacheKey != cacheKey {
+		resume.AnalysisCacheKey = cacheKey
+		resume.AnalysisSuccessfulRounds = 0
+		if previousCompleted && previousResume.AnalysisCacheKey == "" {
+			// Legacy results have no reliable call history; count the saved result once.
+			resume.AnalysisSuccessfulRounds = 1
+		}
+	}
+	if resume.AnalysisSuccessfulRounds >= 2 && resume.Analysis != nil {
+		resume.Status = "done"
+		resume.ErrorMessage = ""
+		a.saveResume(&resume)
+		a.emitEvent("analysis:completed", map[string]interface{}{"id": resumeID, "score": resume.Analysis.OverallScore, "analysis": resume.Analysis, "cached": true})
+		return resume.Analysis, nil
+	}
+	if cfg == nil || cfg.APIKey == "" {
+		return nil, fmt.Errorf("AI 未配置: 请先在设置中填写 API Key")
+	}
+	if cfg.BaseURL == "" {
+		return nil, fmt.Errorf("AI 未配置: 请先在设置中填写 Base URL")
+	}
+	// Only a real model round enters analyzing state.
+	resume.Status = "analyzing"
+	a.saveResume(&resume)
+	a.emitEvent("analysis:progress", map[string]interface{}{"id": resumeID, "status": "analyzing", "progress": 10})
 
 	// 构建 Prompt - 进度 30%
 	prompt := a.buildAnalysisPrompt(&resume, jobCfg)
@@ -3683,6 +3735,11 @@ func (a *App) AnalyzeResume(resumeID string, cfg *AIConfig, jobCfg *JobConfig) (
 	}
 	resume.Score = scoreInt
 	resume.Analysis = analysis
+	resume.AnalysisCacheKey = cacheKey
+	resume.AnalysisSuccessfulRounds++
+	if resume.AnalysisSuccessfulRounds > 2 {
+		resume.AnalysisSuccessfulRounds = 2
+	}
 	a.saveResume(&resume)
 
 	// 发送完成事件
@@ -3854,31 +3911,13 @@ func (a *App) StartBatchAnalysis(resumeIDs []string, cfg *AIConfig, jobCfg *JobC
 	return nil
 }
 
-// getUnifiedJobMetrics 获取当前岗位的统一技能指标列表（技能要求 + 核心能力），与前端展示完全一致
+// getUnifiedJobMetrics supplies the wider evaluation rubric. The visual radar
+// uses configuredJobRadarMetrics, which contains required skills only.
 func getUnifiedJobMetrics(jobCfg *JobConfig) []string {
 	if jobCfg == nil {
 		return nil
 	}
-	if len(jobCfg.RadarMetrics) > 0 {
-		return uniqueJobMetrics(jobCfg.RadarMetrics)
-	}
-	var unifiedMetrics []string
-	seenMetrics := make(map[string]bool)
-	for _, s := range jobCfg.RequiredSkills {
-		s = strings.TrimSpace(s)
-		if s != "" && !seenMetrics[s] {
-			seenMetrics[s] = true
-			unifiedMetrics = append(unifiedMetrics, s)
-		}
-	}
-	for _, c := range jobCfg.CoreCriteria {
-		c = strings.TrimSpace(c)
-		if c != "" && !seenMetrics[c] {
-			seenMetrics[c] = true
-			unifiedMetrics = append(unifiedMetrics, c)
-		}
-	}
-	return unifiedMetrics
+	return uniqueJobMetrics(append(append([]string(nil), jobCfg.RequiredSkills...), jobCfg.CoreCriteria...))
 }
 
 func uniqueJobMetrics(items []string) []string {

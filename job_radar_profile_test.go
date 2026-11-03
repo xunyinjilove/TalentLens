@@ -19,14 +19,14 @@ func TestBatchRadarFixesExistingMetricsAndRanksOnlyWithEnoughEvidence(t *testing
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := len(fixed.JobConfig.RadarMetrics); got != 6 {
-		t.Fatalf("expected six fixed job axes, got %d", got)
+	if got := len(fixed.JobConfig.RadarMetrics); got != 4 {
+		t.Fatalf("expected exactly four explicitly required skills, got %d", got)
 	}
 	if fixed.JobConfig.RadarProfileHash == "" || fixed.JobConfig.RadarProfileVersion != 1 {
 		t.Fatal("the batch must fix a version before analyzing resumes")
 	}
 	checks := make([]CoreCriterionCheck, 0, 6)
-	for i, metric := range fixed.JobConfig.RadarMetrics {
+	for i, metric := range getUnifiedJobMetrics(&fixed.JobConfig) {
 		check := CoreCriterionCheck{Criterion: metric, Level: 3, EvidenceStatus: "known", Evidence: "可定位原文"}
 		if i == 0 {
 			check.EvidenceStatus, check.Evidence = "unknown", ""
@@ -36,13 +36,13 @@ func TestBatchRadarFixesExistingMetricsAndRanksOnlyWithEnoughEvidence(t *testing
 	result := &AnalysisResult{CoreCriterionChecks: checks}
 	a.applyJobDecision(result, &fixed.JobConfig, nil)
 	if !result.RankEligible || result.ScoreBasis != "rubric" || result.RadarCoverage < 0.8 {
-		t.Fatalf("five of six known axes should yield an official score: %+v", result)
+		t.Fatalf("the separate evaluation rubric retains five of six known criteria: %+v", result)
 	}
 	checks[1].EvidenceStatus, checks[1].Evidence, checks[1].Level = "unknown", "", 1
 	result = &AnalysisResult{CoreCriterionChecks: checks}
 	a.applyJobDecision(result, &fixed.JobConfig, nil)
 	if !result.RankEligible || result.ScoreBasis != "provisional" || result.RadarCoverage >= 0.8 {
-		t.Fatalf("four of six known axes should remain rank-eligible with provisional basis: %+v", result)
+		t.Fatalf("four of six known criteria should remain rank-eligible with provisional basis: %+v", result)
 	}
 	again, err := a.ensureBatchJobRadar(p.ID, nil)
 	if err != nil || again.JobConfig.RadarProfileVersion != 1 {
@@ -89,11 +89,9 @@ func TestBatchRadarRejectsObviousCrossOccupationMetricWithoutChangingProject(t *
 	a := NewApp()
 	a.dataDirOverride = t.TempDir()
 	p := a.CreateProject("器械工程师", "研发", 1, "HR", "", &JobConfig{Title: "器械工程师", RequiredSkills: []string{"Vue3 前端开发", "机械结构设计"}})
-	if _, err := a.ensureBatchJobRadar(p.ID, nil); err == nil {
-		t.Fatal("unrelated frontend metric must stop auto confirmation")
-	}
-	if updated := a.GetProject(p.ID); updated.JobConfig.RadarProfileHash != "" {
-		t.Fatal("invalid job metrics must not be saved as a profile")
+	updated, err := a.ensureBatchJobRadar(p.ID, nil)
+	if err != nil || !equalJobMetrics(updated.JobConfig.RadarMetrics, []string{"Vue3 前端开发", "机械结构设计"}) {
+		t.Fatalf("HR-entered skills must be retained verbatim without an AI relevance call: %+v err=%v", updated, err)
 	}
 }
 
@@ -101,8 +99,9 @@ func TestBatchRadarRequiresJobInformationWhenNoMetricsExist(t *testing.T) {
 	a := NewApp()
 	a.dataDirOverride = t.TempDir()
 	p := a.CreateProject("未知职位", "", 1, "HR", "", &JobConfig{Title: "未知职位"})
-	if _, err := a.ensureBatchJobRadar(p.ID, nil); err == nil {
-		t.Fatal("without configured metrics or an AI result, batch must stop before spending resume tokens")
+	updated, err := a.ensureBatchJobRadar(p.ID, nil)
+	if err != nil || len(updated.JobConfig.RadarMetrics) != 0 || updated.JobConfig.RadarProfileHash != "" {
+		t.Fatalf("empty skills must hide radar without blocking analysis: %+v err=%v", updated, err)
 	}
 }
 
@@ -124,8 +123,8 @@ func TestBatchRadarInfersMissingMetricsAndFreezesThemBeforeAnalysis(t *testing.T
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(fixed.JobConfig.RadarMetrics) != 3 || fixed.JobConfig.RadarProfileVersion != 1 {
-		t.Fatalf("AI-inferred job axes should be fixed before resumes are analyzed: %+v", fixed.JobConfig)
+	if len(fixed.JobConfig.RadarMetrics) != 0 || fixed.JobConfig.RadarProfileHash != "" {
+		t.Fatalf("empty skills must not infer axes: %+v", fixed.JobConfig)
 	}
 }
 
@@ -166,8 +165,8 @@ func TestJobRadarDraftNeedsHRConfirmationAndFreezesVersion(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(draft.Metrics) < 5 || len(draft.Metrics) > 6 {
-		t.Fatalf("expected relevant supplementary proposal, got %+v", draft)
+	if !equalJobMetrics(draft.Metrics, p.JobConfig.RequiredSkills) {
+		t.Fatalf("draft must exactly match required skills, got %+v", draft)
 	}
 	if a.GetProject(p.ID).JobConfig.RadarProfileVersion != 0 {
 		t.Fatal("preview must not mutate project")

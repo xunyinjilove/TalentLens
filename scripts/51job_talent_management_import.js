@@ -32,6 +32,7 @@ function normalizeCandidate(raw, expectedJobId) {
   if (!candidateId || !recordId) return null;
   const rawJobId = String(raw?.jobid || raw?.job_id || '').trim();
   const jobId = String(expectedJobId || rawJobId).trim();
+  if (!jobId || (rawJobId && expectedJobId && rawJobId !== String(expectedJobId).trim())) return null;
   const hasAttachment = String(raw?.resume_has_enclosure || '') === '1';
   const name = String(raw?.username || raw?.base_info?.resume_name || raw?.base_info?.name || '').trim();
   const resumeText = JSON.stringify(raw);
@@ -206,7 +207,7 @@ async function openBackgroundManagementPage(browser, readyTimeout = 12000) {
 }
 
 async function scanJobStatus(browser, accountScope, jobId, statusIndex, pageIndex = 1) {
-  if (![1, 2, 3, 4].includes(statusIndex)) throw new Error('仅支持读取待处理、合适、面试、待定');
+  if (![1, 2, 3, 4, 5].includes(statusIndex)) throw new Error('仅支持读取人才管理的五类平台状态');
   if (!Number.isInteger(pageIndex) || pageIndex < 1) throw new Error('页码无效');
   const page = await openBackgroundManagementPage(browser);
   try {
@@ -241,7 +242,12 @@ async function scanJobStatus(browser, accountScope, jobId, statusIndex, pageInde
         jobId: String(management.$data.jobParams?.jobid || ''),
         stage: Number(management.getParams()?.resume_process_state),
         total: Number(management.$data.total || 0),
-        items: management.$data.items || [],
+        items: selectedStatus === 5
+          ? (management.$data.items || []).map(item => ({
+              userid: item?.userid || item?.user_id,
+              cvlogid: item?.cvlogid || item?.cv_log_id
+            }))
+          : (management.$data.items || []),
         pageSize: Number(management.$data.pagination?.page_size || 0),
         pageIndex: Number(management.$data.pagination?.page_index || 0)
       };
@@ -249,7 +255,13 @@ async function scanJobStatus(browser, accountScope, jobId, statusIndex, pageInde
     if (outcome.jobId !== jobId || outcome.stage !== statusIndex || outcome.pageIndex !== pageIndex) {
       throw new Error('平台职位或处理状态回执不一致，已停止读取');
     }
-    const candidates = outcome.items.map(item => normalizeCandidate(item, jobId)).filter(Boolean);
+    const candidates = statusIndex === 5
+      ? outcome.items.map(item => ({
+          candidateId: String(item?.userid || item?.user_id || '').trim(),
+          recordId: String(item?.cvlogid || item?.cv_log_id || '').trim(),
+          jobId
+        })).filter(item => item.candidateId && item.recordId)
+      : outcome.items.map(item => normalizeCandidate(item, jobId)).filter(Boolean);
     if (outcome.pageSize < 1 || candidates.length > outcome.pageSize) throw new Error('平台分页回执异常');
     const hasMore = pageIndex * outcome.pageSize < outcome.total;
     return { status: 'ok', accountScope, jobId, statusIndex, pageIndex,
@@ -368,6 +380,7 @@ async function readCandidateDetail(browser, accountScope, options) {
     const content = JSON.stringify(data);
     if (content.length < 400) throw new Error('简历正文不完整');
     return { status: 'ok', accountScope, jobId, candidateId, recordId, name: candidateName,
+      profileUrl: fullUrl.toString(),
       resumeText: content, hasAttachment, documentsComplete: true,
       documentStatus: hasAttachment ? '在线结构化简历完整（附带平台附件）' : '在线结构化简历完整' };
   } finally {
@@ -384,7 +397,7 @@ async function readCandidateDetail(browser, accountScope, options) {
 }
 
 async function rejectCandidate(browser, accountScope, options) {
-  const { jobId, candidateId, recordId, reasonLabel } = options;
+  const { jobId, candidateId, recordId, reasonLabel, pageIndex } = options;
   if (!jobId || !candidateId || !recordId) {
     throw new Error('标记不合适所需的平台标识不完整');
   }
@@ -394,7 +407,7 @@ async function rejectCandidate(browser, accountScope, options) {
     if (catalog.accountScope !== accountScope || !catalog.jobs.some(job => job.jobId === jobId)) {
       throw new Error('51job 账号或职位已变化');
     }
-    const outcome = await page.evaluate(async ({ jobId, candidateId, recordId, reasonLabel }) => {
+    const outcome = await page.evaluate(async ({ jobId, candidateId, recordId, reasonLabel, pageIndex }) => {
       const components = Array.from(document.querySelectorAll('*')).map(el => el.__vue__).filter(Boolean);
       const management = components.find(vm => vm.$options?.name === 'TalentManagement');
       const menu = components.find(vm => vm.$options?.name === 'EhMenuPositions');
@@ -406,14 +419,21 @@ async function rejectCandidate(browser, accountScope, options) {
       management.getJobParams({ ...job, activeIndex: menu.$props.positionListsAll.indexOf(job) });
       status.changeStatus(1);
       await new Promise(resolve => management.$nextTick(resolve));
+      management.$data.pagination.page_index = Number(pageIndex) || 1;
+      management.updateList();
+      await new Promise(resolve => setTimeout(resolve, 300));
+      const listDeadline = Date.now() + 8000;
+      while (management.$data.loading && Date.now() < listDeadline) {
+        await new Promise(resolve => setTimeout(resolve, 150));
+      }
 
       const card = Array.from(document.querySelectorAll('*')).map(el => el.__vue__)
         .find(vm => vm?.$options?.name === 'EhResumeCard' &&
           String(vm.$props?.source?.userid) === candidateId && String(vm.$props?.source?.cvlogid) === recordId);
       if (!card) {
-        // 先只读复查是否已在「不合适」(statusIndex = 4)
+        // 先只读复查是否已在「不合适」(第五个处理状态)
         try {
-          status.changeStatus(4);
+          status.changeStatus(5);
           await new Promise(resolve => setTimeout(resolve, 1200));
           const unfitCard = Array.from(document.querySelectorAll('*')).map(el => el.__vue__)
             .find(vm => vm?.$options?.name === 'EhResumeCard' &&
@@ -431,14 +451,17 @@ async function rejectCandidate(browser, accountScope, options) {
         throw new Error('无法在待处理列表中定位该候选人（可能已被处理或转移）');
       }
 
-      const btn = document.getElementById(`unfit_reason_btn${recordId}`);
+      const btn = document.getElementById(`unfit_reason_btn${recordId}`) ||
+        Array.from(card.$el?.querySelectorAll('button, [role="button"], [id]') || [])
+          .find(el => (el.innerText || el.textContent || '').trim() === '不合适' &&
+            el.getClientRects().length > 0);
       if (!btn) throw new Error('无法找到候选人的「不合适」操作按钮');
 
       btn.click();
       await new Promise(resolve => setTimeout(resolve, 800));
 
       const popovers = Array.from(document.querySelectorAll('.el-popover, .el-dialog, [role="tooltip"], [class*="popover"], [class*="reason"]'))
-        .filter(el => el.getClientRects().length > 0 && /选择原因|优化推荐|其他原因|不匹配/.test(el.innerText || ''));
+        .filter(el => el.getClientRects().length > 0 && /选择(?:不感兴趣)?原因|优化推荐|其他原因|不匹配/.test(el.innerText || ''));
       if (!popovers.length) throw new Error('点击不合适后未弹出「选择原因」浮层');
 
       const pop = popovers[popovers.length - 1];
@@ -454,6 +477,15 @@ async function rejectCandidate(browser, accountScope, options) {
       const clickable = match.closest('button, li, [role="button"]') || match;
       clickable.click();
       await new Promise(resolve => setTimeout(resolve, 1200));
+      if (/其他原因/.test((match.textContent || '').trim())) {
+        const reasonInput = Array.from(document.querySelectorAll('textarea, input[type="text"]'))
+          .find(el => el.getClientRects().length > 0 && !el.disabled &&
+            /原因|说明|补充|其他/.test(el.getAttribute('placeholder') || el.closest('.el-dialog, .el-popover')?.innerText || ''));
+        if (!reasonInput) throw new Error('选择其他原因后未找到说明输入框，未提交');
+        const setter = Object.getOwnPropertyDescriptor(reasonInput.tagName === 'TEXTAREA' ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype, 'value')?.set;
+        setter.call(reasonInput, '不匹配');
+        reasonInput.dispatchEvent(new Event('input', { bubbles: true }));
+      }
 
       const confirmBtns = Array.from(document.querySelectorAll('.el-dialog__footer button, .el-message-box__btns button'))
         .filter(b => /确定|确认|提交/.test(b.innerText || ''));
@@ -481,7 +513,7 @@ async function rejectCandidate(browser, accountScope, options) {
         userid: candidateId,
         verified: !remainingCard
       };
-    }, { jobId, candidateId, recordId, reasonLabel });
+    }, { jobId, candidateId, recordId, reasonLabel, pageIndex });
 
     if (outcome.alreadyUnfit) {
       return {
