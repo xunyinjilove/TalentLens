@@ -724,9 +724,19 @@
                   <div class="parsed-section-heading">
                     <span class="parsed-section-number">{{ String(index + 1).padStart(2, '0') }}</span>
                     <h3>{{ section.title }}</h3>
+                    <el-button
+                      v-if="parsedTranslatedSections[index] && isModularTranslatedSection(section)"
+                      link
+                      size="small"
+                      type="primary"
+                      class="section-trans-toggle-btn"
+                      @click="toggleSectionTranslation(index)"
+                    >
+                      {{ isTranslationCollapsed(index) ? '展开本节译文' : '收起本节译文' }}
+                    </el-button>
                   </div>
 
-                  <!-- 个人优势：只保留工作上与生活/个人特质内容 -->
+                  <!-- 个人优势：只保留工作上与生活/个人特质内容，并在各子模块下直接生成对应中文译文 -->
                   <div v-if="section.title === '个人优势' && hasPersonalAdvantages(section)" class="personal-advantages-grid">
                     <div
                       v-if="parsePersonalAdvantages(section).workItems.length || parsePersonalAdvantages(section).skills.length"
@@ -746,6 +756,35 @@
                           {{ sk }}
                         </span>
                       </div>
+
+                      <!-- 工作与专业能力模块下方的就地中文译文 -->
+                      <div
+                        v-if="getMatchedTranslatedAdvantages(index) && (getMatchedTranslatedAdvantages(index)!.workItems.length || getMatchedTranslatedAdvantages(index)!.skills.length)"
+                        class="exp-inline-translation"
+                      >
+                        <div class="exp-trans-header" @click="toggleCardTranslation(index, 'adv-work')">
+                          <div class="exp-trans-badge">
+                            <el-icon><Reading /></el-icon>
+                            <span>中文译文 · 工作与专业能力</span>
+                          </div>
+                          <span class="exp-trans-toggle">
+                            {{ isCardTranslationCollapsed(index, 'adv-work') ? '展开译文' : '收起译文' }}
+                          </span>
+                        </div>
+                        <div v-show="!isCardTranslationCollapsed(index, 'adv-work')" class="exp-trans-body">
+                          <ul v-if="getMatchedTranslatedAdvantages(index)!.workItems.length" class="advantage-bullet-list">
+                            <li v-for="(tItem, twIdx) in getMatchedTranslatedAdvantages(index)!.workItems" :key="twIdx">
+                              <span class="bullet-dot trans-dot" aria-hidden="true">•</span>
+                              <span>{{ tItem }}</span>
+                            </li>
+                          </ul>
+                          <div v-if="getMatchedTranslatedAdvantages(index)!.skills.length" class="advantage-skill-tags">
+                            <span v-for="(tsk, tsIdx) in getMatchedTranslatedAdvantages(index)!.skills" :key="tsIdx" class="advantage-skill-chip">
+                              {{ tsk }}
+                            </span>
+                          </div>
+                        </div>
+                      </div>
                     </div>
 
                     <div
@@ -761,10 +800,34 @@
                           <span>{{ item }}</span>
                         </li>
                       </ul>
+
+                      <!-- 生活与个人特质模块下方的就地中文译文 -->
+                      <div
+                        v-if="getMatchedTranslatedAdvantages(index) && getMatchedTranslatedAdvantages(index)!.lifeItems.length"
+                        class="exp-inline-translation"
+                      >
+                        <div class="exp-trans-header" @click="toggleCardTranslation(index, 'adv-life')">
+                          <div class="exp-trans-badge">
+                            <el-icon><Reading /></el-icon>
+                            <span>中文译文 · 生活与个人特质</span>
+                          </div>
+                          <span class="exp-trans-toggle">
+                            {{ isCardTranslationCollapsed(index, 'adv-life') ? '展开译文' : '收起译文' }}
+                          </span>
+                        </div>
+                        <div v-show="!isCardTranslationCollapsed(index, 'adv-life')" class="exp-trans-body">
+                          <ul class="advantage-bullet-list">
+                            <li v-for="(tItem, tlIdx) in getMatchedTranslatedAdvantages(index)!.lifeItems" :key="tlIdx">
+                              <span class="bullet-dot trans-dot" aria-hidden="true">•</span>
+                              <span>{{ tItem }}</span>
+                            </li>
+                          </ul>
+                        </div>
+                      </div>
                     </div>
                   </div>
 
-                  <!-- 工作经历 & 任职履历快照：每一段经历独立模块化卡片 -->
+                  <!-- 工作经历 & 任职履历快照：每一段经历独立模块化卡片，并在每一段经历模块（#01、#02…）下方直接生成对应中文译文 -->
                   <div v-else-if="section.title === '工作经历' && parseWorkSection(section).length" class="experience-card-list">
                     <article
                       v-for="(exp, expIdx) in parseWorkSection(section)"
@@ -796,10 +859,71 @@
                       <div v-if="exp.tags.length" class="work-exp-tags">
                         <span v-for="(tag, tagIdx) in exp.tags" :key="tagIdx" class="exp-skill-tag">{{ tag }}</span>
                       </div>
+
+                      <!-- 当前工作经历模块（如 #01）正下方的就地中文译文 -->
+                      <div
+                        v-if="getMatchedTranslatedWorkExp(index, exp, expIdx)"
+                        class="exp-inline-translation"
+                      >
+                        <div class="exp-trans-header" @click="toggleCardTranslation(index, expIdx)">
+                          <div class="exp-trans-badge">
+                            <el-icon><Reading /></el-icon>
+                            <span>中文译文 · #{{ String(expIdx + 1).padStart(2, '0') }}</span>
+                            <strong
+                              v-if="getMatchedTranslatedWorkExp(index, exp, expIdx)?.company"
+                              class="exp-trans-company"
+                            >
+                              {{ getMatchedTranslatedWorkExp(index, exp, expIdx)?.company }}
+                            </strong>
+                            <span
+                              v-if="getMatchedTranslatedWorkExp(index, exp, expIdx)?.role"
+                              class="exp-trans-role"
+                            >
+                              {{ getMatchedTranslatedWorkExp(index, exp, expIdx)?.role }}
+                            </span>
+                            <span
+                              v-if="getMatchedTranslatedWorkExp(index, exp, expIdx)?.department"
+                              class="work-exp-dept"
+                            >
+                              {{ getMatchedTranslatedWorkExp(index, exp, expIdx)?.department }}
+                            </span>
+                          </div>
+                          <span class="exp-trans-toggle">
+                            {{ isCardTranslationCollapsed(index, expIdx) ? '展开译文' : '收起译文' }}
+                          </span>
+                        </div>
+
+                        <div v-show="!isCardTranslationCollapsed(index, expIdx)" class="exp-trans-body">
+                          <div
+                            v-if="getMatchedTranslatedWorkExp(index, exp, expIdx)?.meta || getMatchedTranslatedWorkExp(index, exp, expIdx)?.mainBusiness"
+                            class="work-exp-meta"
+                          >
+                            <span v-if="getMatchedTranslatedWorkExp(index, exp, expIdx)?.meta" class="meta-chip">
+                              {{ getMatchedTranslatedWorkExp(index, exp, expIdx)?.meta }}
+                            </span>
+                            <span v-if="getMatchedTranslatedWorkExp(index, exp, expIdx)?.mainBusiness" class="meta-chip business">
+                              主营业务：{{ getMatchedTranslatedWorkExp(index, exp, expIdx)?.mainBusiness }}
+                            </span>
+                          </div>
+
+                          <ul v-if="getMatchedTranslatedWorkExp(index, exp, expIdx)?.duties.length" class="work-exp-duties">
+                            <li v-for="(tDuty, tdIdx) in getMatchedTranslatedWorkExp(index, exp, expIdx)!.duties" :key="tdIdx">
+                              <span class="bullet-dot trans-dot" aria-hidden="true">•</span>
+                              <span>{{ tDuty }}</span>
+                            </li>
+                          </ul>
+
+                          <div v-if="getMatchedTranslatedWorkExp(index, exp, expIdx)?.tags.length" class="work-exp-tags">
+                            <span v-for="(tTag, ttIdx) in getMatchedTranslatedWorkExp(index, exp, expIdx)!.tags" :key="ttIdx" class="exp-skill-tag">
+                              {{ tTag }}
+                            </span>
+                          </div>
+                        </div>
+                      </div>
                     </article>
                   </div>
 
-                  <!-- 项目经验：每一段项目经历独立模块化卡片 -->
+                  <!-- 项目经验：每一段项目经历独立模块化卡片，并在每一段项目模块（#01、#02…）下方直接生成对应中文译文 -->
                   <div v-else-if="section.title === '项目经验' && parseProjectSection(section).length" class="experience-card-list">
                     <article
                       v-for="(proj, projIdx) in parseProjectSection(section)"
@@ -824,10 +948,45 @@
                           <span>{{ detail }}</span>
                         </li>
                       </ul>
+
+                      <!-- 当前项目经历模块（如 #01）正下方的就地中文译文 -->
+                      <div
+                        v-if="getMatchedTranslatedProjectExp(index, proj, projIdx)"
+                        class="exp-inline-translation"
+                      >
+                        <div class="exp-trans-header" @click="toggleCardTranslation(index, projIdx)">
+                          <div class="exp-trans-badge">
+                            <el-icon><Reading /></el-icon>
+                            <span>中文译文 · #{{ String(projIdx + 1).padStart(2, '0') }}</span>
+                            <strong
+                              v-if="getMatchedTranslatedProjectExp(index, proj, projIdx)?.name"
+                              class="exp-trans-company"
+                            >
+                              {{ getMatchedTranslatedProjectExp(index, proj, projIdx)?.name }}
+                            </strong>
+                          </div>
+                          <span class="exp-trans-toggle">
+                            {{ isCardTranslationCollapsed(index, projIdx) ? '展开译文' : '收起译文' }}
+                          </span>
+                        </div>
+
+                        <div v-show="!isCardTranslationCollapsed(index, projIdx)" class="exp-trans-body">
+                          <div v-if="getMatchedTranslatedProjectExp(index, proj, projIdx)?.company" class="project-exp-meta">
+                            <span class="meta-chip">所属公司：{{ getMatchedTranslatedProjectExp(index, proj, projIdx)?.company }}</span>
+                          </div>
+
+                          <ul v-if="getMatchedTranslatedProjectExp(index, proj, projIdx)?.details.length" class="project-exp-details">
+                            <li v-for="(tDetail, tdtIdx) in getMatchedTranslatedProjectExp(index, proj, projIdx)!.details" :key="tdtIdx">
+                              <span class="bullet-dot trans-dot" aria-hidden="true">•</span>
+                              <span>{{ tDetail }}</span>
+                            </li>
+                          </ul>
+                        </div>
+                      </div>
                     </article>
                   </div>
 
-                  <!-- 其余常规模块 -->
+                  <!-- 其余常规模块（如 01 基本信息、02 求职意向、06 教育经历、07 证书） -->
                   <div v-else class="parsed-section-body">
                     <template v-for="(line, lineIndex) in section.lines" :key="lineIndex">
                       <div v-if="line.kind === 'field'" class="parsed-field"><span class="parsed-field-label">{{ line.label }}</span><span class="parsed-field-value">{{ line.value }}</span></div>
@@ -836,8 +995,11 @@
                     </template>
                   </div>
 
-                  <!-- 对应模块下方的中文译文卡片 -->
-                  <div v-if="parsedTranslatedSections[index]" class="section-translation-container">
+                  <!-- 常规模块（01 基本信息 等）下方的中文译文卡片 -->
+                  <div
+                    v-if="parsedTranslatedSections[index] && !isModularTranslatedSection(section)"
+                    class="section-translation-container"
+                  >
                     <div class="translation-card-header" @click="toggleSectionTranslation(index)">
                       <div class="translation-badge">
                         <el-icon><Reading /></el-icon>
@@ -850,126 +1012,13 @@
                     </div>
 
                     <div v-show="!isTranslationCollapsed(index)" class="translation-card-body">
-                      <!-- 个人优势译文模块化 -->
-                      <div
-                        v-if="section.title === '个人优势' && hasPersonalAdvantages(parsedTranslatedSections[index])"
-                        class="personal-advantages-grid"
-                      >
-                        <div
-                          v-if="parsePersonalAdvantages(parsedTranslatedSections[index]).workItems.length || parsePersonalAdvantages(parsedTranslatedSections[index]).skills.length"
-                          class="advantage-module-card work-advantage"
-                        >
-                          <div class="advantage-module-header">
-                            <span class="advantage-module-badge work">工作与专业能力</span>
-                          </div>
-                          <ul v-if="parsePersonalAdvantages(parsedTranslatedSections[index]).workItems.length" class="advantage-bullet-list">
-                            <li v-for="(item, wIdx) in parsePersonalAdvantages(parsedTranslatedSections[index]).workItems" :key="wIdx">
-                              <span class="bullet-dot" aria-hidden="true">•</span>
-                              <span>{{ item }}</span>
-                            </li>
-                          </ul>
-                          <div v-if="parsePersonalAdvantages(parsedTranslatedSections[index]).skills.length" class="advantage-skill-tags">
-                            <span v-for="(sk, sIdx) in parsePersonalAdvantages(parsedTranslatedSections[index]).skills" :key="sIdx" class="advantage-skill-chip">
-                              {{ sk }}
-                            </span>
-                          </div>
+                      <template v-for="(tLine, tIdx) in parsedTranslatedSections[index].lines" :key="tIdx">
+                        <div v-if="tLine.kind === 'field'" class="parsed-field">
+                          <span class="parsed-field-label">{{ tLine.label }}</span>
+                          <span class="parsed-field-value">{{ tLine.value }}</span>
                         </div>
-
-                        <div
-                          v-if="parsePersonalAdvantages(parsedTranslatedSections[index]).lifeItems.length"
-                          class="advantage-module-card life-advantage"
-                        >
-                          <div class="advantage-module-header">
-                            <span class="advantage-module-badge life">生活与个人特质</span>
-                          </div>
-                          <ul class="advantage-bullet-list">
-                            <li v-for="(item, lIdx) in parsePersonalAdvantages(parsedTranslatedSections[index]).lifeItems" :key="lIdx">
-                              <span class="bullet-dot" aria-hidden="true">•</span>
-                              <span>{{ item }}</span>
-                            </li>
-                          </ul>
-                        </div>
-                      </div>
-
-                      <!-- 工作经历译文模块化 -->
-                      <div
-                        v-else-if="section.title === '工作经历' && parseWorkSection(parsedTranslatedSections[index]).length"
-                        class="experience-card-list"
-                      >
-                        <article
-                          v-for="(exp, expIdx) in parseWorkSection(parsedTranslatedSections[index])"
-                          :key="expIdx"
-                          class="work-exp-card"
-                        >
-                          <div class="work-exp-header">
-                            <div class="work-exp-title-group">
-                              <span class="exp-index-tag">#{{ String(expIdx + 1).padStart(2, '0') }}</span>
-                              <strong class="work-exp-company">{{ exp.company || '任职单位' }}</strong>
-                              <span v-if="exp.role" class="work-exp-role">{{ exp.role }}</span>
-                              <span v-if="exp.department" class="work-exp-dept">{{ exp.department }}</span>
-                            </div>
-                            <span v-if="exp.period" class="work-exp-period">{{ exp.period }}</span>
-                          </div>
-
-                          <div v-if="exp.meta || exp.mainBusiness" class="work-exp-meta">
-                            <span v-if="exp.meta" class="meta-chip">{{ exp.meta }}</span>
-                            <span v-if="exp.mainBusiness" class="meta-chip business">主营业务：{{ exp.mainBusiness }}</span>
-                          </div>
-
-                          <ul v-if="exp.duties.length" class="work-exp-duties">
-                            <li v-for="(duty, dIdx) in exp.duties" :key="dIdx">
-                              <span class="bullet-dot" aria-hidden="true">•</span>
-                              <span>{{ duty }}</span>
-                            </li>
-                          </ul>
-
-                          <div v-if="exp.tags.length" class="work-exp-tags">
-                            <span v-for="(tag, tagIdx) in exp.tags" :key="tagIdx" class="exp-skill-tag">{{ tag }}</span>
-                          </div>
-                        </article>
-                      </div>
-
-                      <!-- 项目经验译文模块化 -->
-                      <div
-                        v-else-if="section.title === '项目经验' && parseProjectSection(parsedTranslatedSections[index]).length"
-                        class="experience-card-list"
-                      >
-                        <article
-                          v-for="(proj, projIdx) in parseProjectSection(parsedTranslatedSections[index])"
-                          :key="projIdx"
-                          class="project-exp-card"
-                        >
-                          <div class="project-exp-header">
-                            <div class="project-exp-title-group">
-                              <span class="exp-index-tag project">#{{ String(projIdx + 1).padStart(2, '0') }}</span>
-                              <strong class="project-exp-name">{{ proj.name }}</strong>
-                            </div>
-                            <span v-if="proj.period" class="project-exp-period">{{ proj.period }}</span>
-                          </div>
-
-                          <div v-if="proj.company" class="project-exp-meta">
-                            <span class="meta-chip">所属公司：{{ proj.company }}</span>
-                          </div>
-
-                          <ul v-if="proj.details.length" class="project-exp-details">
-                            <li v-for="(detail, dtIdx) in proj.details" :key="dtIdx">
-                              <span class="bullet-dot" aria-hidden="true">•</span>
-                              <span>{{ detail }}</span>
-                            </li>
-                          </ul>
-                        </article>
-                      </div>
-
-                      <!-- 其余译文常规渲染 -->
-                      <template v-else>
-                        <template v-for="(tLine, tIdx) in parsedTranslatedSections[index].lines" :key="tIdx">
-                          <div v-if="tLine.kind === 'field'" class="parsed-field">
-                            <span class="parsed-field-label">{{ tLine.label }}</span>
-                            <span class="parsed-field-value">{{ tLine.value }}</span>
-                          </div>
-                          <div v-else-if="tLine.kind === 'bullet'" class="parsed-bullet"><span aria-hidden="true">•</span>{{ tLine.text }}</div>
-                          <p v-else class="parsed-paragraph">{{ tLine.text }}</p>
-                        </template>
+                        <div v-else-if="tLine.kind === 'bullet'" class="parsed-bullet"><span aria-hidden="true">•</span>{{ tLine.text }}</div>
+                        <p v-else class="parsed-paragraph">{{ tLine.text }}</p>
                       </template>
                     </div>
                   </div>
@@ -2069,13 +2118,40 @@ const originalParsedSections = computed<ParsedSection[]>(() => {
 })
 
 const collapsedTranslations = ref<Record<number, boolean>>({})
+const collapsedCardTranslations = ref<Record<string, boolean>>({})
 
 function isTranslationCollapsed(index: number): boolean {
   return !!collapsedTranslations.value[index]
 }
 
 function toggleSectionTranslation(index: number) {
-  collapsedTranslations.value[index] = !collapsedTranslations.value[index]
+  const nextState = !collapsedTranslations.value[index]
+  collapsedTranslations.value[index] = nextState
+  const nextCardMap = { ...collapsedCardTranslations.value }
+  for (const key of Object.keys(nextCardMap)) {
+    if (key.startsWith(`${index}-`)) {
+      delete nextCardMap[key]
+    }
+  }
+  collapsedCardTranslations.value = nextCardMap
+}
+
+function isCardTranslationCollapsed(sectionIndex: number, cardKey: string | number): boolean {
+  const k = `${sectionIndex}-${cardKey}`
+  if (k in collapsedCardTranslations.value) return !!collapsedCardTranslations.value[k]
+  return !!collapsedTranslations.value[sectionIndex]
+}
+
+function toggleCardTranslation(sectionIndex: number, cardKey: string | number) {
+  const k = `${sectionIndex}-${cardKey}`
+  collapsedCardTranslations.value[k] = !isCardTranslationCollapsed(sectionIndex, cardKey)
+}
+
+function isModularTranslatedSection(section: ParsedSection): boolean {
+  if (section.title === '个人优势' && hasPersonalAdvantages(section)) return true
+  if (section.title === '工作经历' && parseWorkSection(section).length > 0) return true
+  if (section.title === '项目经验' && parseProjectSection(section).length > 0) return true
+  return false
 }
 
 const allTranslationsCollapsed = computed(() => {
@@ -2090,10 +2166,18 @@ function toggleAllTranslations() {
     newMap[idx] = willCollapse
   })
   collapsedTranslations.value = newMap
+  collapsedCardTranslations.value = {}
 }
 
 const parsedTranslatedSections = computed<ParsedSection[]>(() => {
   if (!translatedSections.value.length) return []
+  if (translatedSections.value.length !== originalParsedSections.value.length) {
+    const reparsed = parseContentToSections(translatedSections.value.join('\n'))
+    return originalParsedSections.value.map(origSec => {
+      const matched = reparsed.find(r => r.title === origSec.title)
+      return matched || { title: origSec.title, lines: [] }
+    })
+  }
   return originalParsedSections.value.map((origSec, idx) => {
     const secText = translatedSections.value[idx] || ''
     if (!secText) return { title: origSec.title, lines: [] }
@@ -2102,6 +2186,62 @@ const parsedTranslatedSections = computed<ParsedSection[]>(() => {
     return parsed
   })
 })
+
+function getMatchedTranslatedAdvantages(sectionIndex: number): PersonalAdvantagesData | null {
+  const transSec = parsedTranslatedSections.value[sectionIndex]
+  if (!transSec || !hasPersonalAdvantages(transSec)) return null
+  return parsePersonalAdvantages(transSec)
+}
+
+function getMatchedTranslatedWorkExp(
+  sectionIndex: number,
+  origExp: WorkExperienceCard,
+  expIdx: number
+): WorkExperienceCard | null {
+  const transSec = parsedTranslatedSections.value[sectionIndex]
+  if (!transSec || !transSec.lines?.length) return null
+  const tExps = parseWorkSection(transSec)
+  if (!tExps.length) return null
+
+  const normPeriodKey = (p: string) => {
+    const m = (p || '').match(/(?:19|20)\d{2}[./-]\d{1,2}/)
+    return m ? m[0].replace(/[/-]/g, '.') : (p || '').replace(/\s+/g, '')
+  }
+  const origKey = normPeriodKey(origExp.period)
+  if (expIdx < tExps.length && normPeriodKey(tExps[expIdx].period) === origKey) {
+    return tExps[expIdx]
+  }
+  if (origKey) {
+    const matched = tExps.find(te => normPeriodKey(te.period) === origKey)
+    if (matched) return matched
+  }
+  return expIdx < tExps.length ? tExps[expIdx] : null
+}
+
+function getMatchedTranslatedProjectExp(
+  sectionIndex: number,
+  origProj: ProjectExperienceCard,
+  projIdx: number
+): ProjectExperienceCard | null {
+  const transSec = parsedTranslatedSections.value[sectionIndex]
+  if (!transSec || !transSec.lines?.length) return null
+  const tProjs = parseProjectSection(transSec)
+  if (!tProjs.length) return null
+
+  const normPeriodKey = (p: string) => {
+    const m = (p || '').match(/(?:19|20)\d{2}[./-]\d{1,2}/)
+    return m ? m[0].replace(/[/-]/g, '.') : (p || '').replace(/\s+/g, '')
+  }
+  const origKey = normPeriodKey(origProj.period)
+  if (projIdx < tProjs.length && normPeriodKey(tProjs[projIdx].period) === origKey) {
+    return tProjs[projIdx]
+  }
+  if (origKey) {
+    const matched = tProjs.find(tp => normPeriodKey(tp.period) === origKey)
+    if (matched) return matched
+  }
+  return projIdx < tProjs.length ? tProjs[projIdx] : null
+}
 
 const activeSections = computed<ParsedSection[]>(() => {
   return originalParsedSections.value
@@ -2858,6 +2998,7 @@ async function loadParsedContent() {
         translationRequest++
         translatedSections.value = []
         collapsedTranslations.value = {}
+        collapsedCardTranslations.value = {}
         translationBusy.value = false
       }
       parsedContent.value = content
@@ -2866,7 +3007,7 @@ async function loadParsedContent() {
       try {
         const api: any = await import('../../wailsjs/go/main/App')
         const cached: string[] | null = await api.GetCachedResumeTranslation(requestedId, 'zh', translationSourceSections())
-        if (request === translationRequest && resumeStore.selectedId === requestedId && parsedContent.value === content && cached?.length === originalParsedSections.value.length) {
+        if (request === translationRequest && resumeStore.selectedId === requestedId && parsedContent.value === content && cached && cached.length > 0) {
           translatedSections.value = cached
         }
       } catch { /* Missing or stale translation stays hidden until the user clicks translate. */ }
@@ -2889,6 +3030,7 @@ watch(() => resumeStore.selectedId, () => {
   translationRequest++
   translatedSections.value = []
   collapsedTranslations.value = {}
+  collapsedCardTranslations.value = {}
   translationBusy.value = false
   translationError.value = ''
   parsedContent.value = ''
@@ -5032,6 +5174,7 @@ details.candidate-portal-bar[open] > summary.portal-header { margin-bottom: 12px
       color: $text-primary;
 
       h3 { margin: 0; font-size: 15px; line-height: 1.4; overflow-wrap: anywhere; }
+      .section-trans-toggle-btn { margin-left: auto; }
     }
 
     .parsed-section-number {
@@ -5339,6 +5482,77 @@ details.candidate-portal-bar[open] > summary.portal-header { margin-bottom: 12px
       border: 1px solid $separator;
       color: $text-secondary;
       font-size: 11.5px;
+    }
+
+    /* 每一段经历模块（#01、#02…）正下方内嵌的中文译文子卡片 */
+    .exp-inline-translation {
+      margin-top: 6px;
+      padding: 10px 12px;
+      border-radius: 8px;
+      border: 1px solid rgba(16, 185, 129, 0.24);
+      border-left: 3px solid #10b981;
+      background: rgba(16, 185, 129, 0.04);
+      display: grid;
+      gap: 8px;
+      min-width: 0;
+
+      .exp-trans-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        flex-wrap: wrap;
+        gap: 6px 10px;
+        cursor: pointer;
+        user-select: none;
+      }
+
+      .exp-trans-badge {
+        display: flex;
+        align-items: center;
+        flex-wrap: wrap;
+        gap: 6px;
+        font-size: 12px;
+        font-weight: 700;
+        color: #059669;
+        min-width: 0;
+      }
+
+      .exp-trans-company {
+        color: $text-primary;
+        font-size: 13px;
+        font-weight: 700;
+        overflow-wrap: anywhere;
+      }
+
+      .exp-trans-role {
+        display: inline-flex;
+        align-items: center;
+        padding: 1px 7px;
+        border-radius: 5px;
+        background: rgba(16, 185, 129, 0.12);
+        color: #047857;
+        font-size: 11.5px;
+        font-weight: 600;
+      }
+
+      .exp-trans-toggle {
+        font-size: 11.5px;
+        font-weight: 600;
+        color: #059669;
+        white-space: nowrap;
+      }
+
+      .exp-trans-body {
+        display: grid;
+        gap: 8px;
+        min-width: 0;
+        padding-top: 6px;
+        border-top: 1px dashed rgba(16, 185, 129, 0.22);
+      }
+
+      .trans-dot {
+        color: #10b981 !important;
+      }
     }
 
     .section-translation-container {
