@@ -1560,12 +1560,43 @@ function canonicalResumeSectionTitle(title: string): string | null {
   return null
 }
 
+function cleanGoMapBlock(block: string): string {
+  const itemMatches = block.match(/map\[[^\]]*\]/g) || [block]
+  const cities: string[] = []
+  for (const item of itemMatches) {
+    const pcMatch = item.match(/(?:provincecity|city|area|location)[：:]\s*([^\s\]]+)/i)
+    const countyMatch = item.match(/(?:county|district)[：:]\s*([^\s\]]+)/i)
+    const pc = pcMatch && !/^(?:county|provincecity)[：:]/i.test(pcMatch[1]) ? pcMatch[1].trim() : ''
+    const county = countyMatch && !/^(?:county|provincecity)[：:]/i.test(countyMatch[1]) ? countyMatch[1].trim() : ''
+    if (pc && county && !pc.includes(county)) {
+      cities.push(`${pc}-${county}`)
+    } else if (pc) {
+      cities.push(pc)
+    } else if (county) {
+      cities.push(county)
+    }
+  }
+  return cities.join('/')
+}
+
+function cleanResumeTextArtifacts(text: string): string {
+  if (!text) return ''
+  return text
+    .replace(/\[(?:\s*map\[[^\]]*\]\s*)+\]|\bmap\[[^\]]*\]/g, match => cleanGoMapBlock(match))
+    .replace(/现居地[：:]\s*现居\s*[·•-]?\s*/g, '现居地：')
+    .replace(/^([^·\n]+·\s*[男女]\s*·\s*\d+岁\s*·\s*)(\d+)\s*$/gm, '$1$2年经验')
+    .replace(/\s*[·•]\s*1900[./-]0?1\b/g, '')
+    .replace(/(?:\s*[·•]\s*){2,}/g, ' · ')
+    .replace(/^[·•]\s+|\s+[·•]$/gm, '')
+}
+
 function parseContentToSections(content: string): ParsedSection[] {
+  const cleanedContent = cleanResumeTextArtifacts(content)
   const sections = new Map<string, ParsedSection>(resumeSectionOrder.map(title => [title, { title, lines: [] }]))
   let current = '基本信息'
   let inOnlinePreamble = false
 
-  for (const rawLine of content.replace(/\r\n?/g, '\n').split('\n')) {
+  for (const rawLine of cleanedContent.replace(/\r\n?/g, '\n').split('\n')) {
     const line = rawLine.trim()
     if (!line) continue
     if (/^【前程无忧\s*在线微简历完整正文】$/.test(line)) {
@@ -1630,7 +1661,7 @@ function isWorkSnapshot(label?: string, value?: string, text?: string): boolean 
 }
 
 function parseSectionText(text: string, defaultTitle: string): ParsedSection {
-  const lines = text.replace(/\r\n?/g, '\n').split('\n')
+  const lines = cleanResumeTextArtifacts(text).replace(/\r\n?/g, '\n').split('\n')
   let title = defaultTitle
   const parsedLines: ParsedLine[] = []
   let activeSnapshotLine: ParsedLine | null = null
@@ -2248,7 +2279,7 @@ const activeSections = computed<ParsedSection[]>(() => {
 })
 
 const activeRawContent = computed<string>(() => {
-  return parsedContent.value
+  return cleanResumeTextArtifacts(parsedContent.value)
 })
 
 function translationSourceSections(): string[] {
