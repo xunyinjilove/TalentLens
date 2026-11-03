@@ -190,9 +190,10 @@
               </button>
             </div>
             <div class="tab-actions" v-if="rightTab === 'ranking'">
-              <button class="action-btn primary" :disabled="!projectId || !rankedResumes.length" @click="showOutreach = true">
+              <el-input-number v-model="hiPointsLimit" :min="1" :max="100000" :step="100" size="small" style="width: 132px" title="本批 Hi聊点数上限" />
+              <button class="action-btn primary" :disabled="!projectId || hiBusy" @click="runLibraryHi">
                 <el-icon><Message /></el-icon>
-                批量打招呼
+                {{ hiBusy ? '逐人发送中…' : '一键打招呼' }}
               </button>
               <button class="action-btn" @click="handleExport">
                 <el-icon><Document /></el-icon>
@@ -298,13 +299,12 @@
                     <!-- 51job 快捷打招呼/索要简历 -->
                     <button v-if="resumeStore.selectedResume.snapshot_copy_ids?.length" class="hero-act-btn secondary" @click="showSnapshotHistory">快照历史（{{ resumeStore.selectedResume.snapshot_copy_ids.length + 1 }}）</button>
                     <template v-if="is51JobSource">
-                      <button v-if="!is51JobCandidate" class="hero-act-btn secondary" :disabled="contactBusy" @click="ensure51JobCandidateDetail">关联候选人网页</button>
                       <button
                         class="hero-act-btn platform"
                         :disabled="contactBusy || jobPickerVisible || !!resumeStore.selectedResume.contact_status"
                         @click="handle51JobGreeting"
                       >
-                        51job打招呼
+                        一键打招呼
                       </button>
                       <button
                         class="hero-act-btn platform"
@@ -466,23 +466,19 @@
                   </div>
 
                   <!-- 岗位统一技能指标雷达 -->
-                  <div class="score-section-card modern-competency-card">
+                  <div v-if="unifiedJobMetrics.length" class="score-section-card modern-competency-card">
                     <div class="section-card-header">
                       <div class="header-title">
                         <el-icon><Histogram /></el-icon>
                         <span>岗位统一技能指标雷达</span>
-                        <span v-if="isGeneratingMetrics" class="ai-generating-tag">
-                          <el-icon class="is-loading"><Loading /></el-icon>
-                          AI正在自动推导岗位技能画像...
-                        </span>
                       </div>
                     </div>
 
                     <el-alert v-if="resumeStore.selectedResume.analysis.competencyMessage" :title="resumeStore.selectedResume.analysis.competencyMessage" :type="resumeStore.selectedResume.analysis.competencyStatus === 'error' ? 'warning' : 'info'" :closable="false" show-icon style="margin:0 0 16px" />
+                    <el-alert v-if="unifiedJobMetrics.length > 8" title="必备关键技能超过 8 项，请在职位设置中删减后重新分析；当前仅展示前 8 项旧数据。" type="warning" :closable="false" style="margin:0 0 16px" />
 
                     <div class="radar-header-summary">
-                      <p class="score-explanation">基于当前岗位配置的【技能要求与核心能力】构建统一雷达坐标，所有候选人以相同标准横向对比评估。</p>
-                      <el-button size="small" type="primary" plain :loading="isGeneratingMetrics" @click="openRadarDraft">{{ unifiedJobMetrics.length < 5 ? 'AI 补充岗位雷达指标' : '核对岗位雷达指标' }}</el-button>
+                      <p class="score-explanation">仅依据岗位中填写的必备关键技能，按相同指标比较候选人。</p>
                       <el-alert v-if="resumeStore.selectedResume.analysis.radarStale" title="岗位指标已变更：此份旧测评待复核，旧分仅供参考，不参与正式排名。" type="warning" :closable="false" style="margin:12px 0" />
                       <div class="radar-meta-row">
                         <span class="coverage-pill" :class="{ 'is-eligible': isRankEligible }">
@@ -508,7 +504,10 @@
                           @select="handleSelectRadarIndex"
                         />
                         <div v-else class="radar-generating-box">
-                          <span>{{ radarDisplayChecks.length > 0 ? `当前岗位按 ${radarDisplayChecks.length} 项指标评分；雷达图至少需要 3 项。` : '当前岗位尚无技能指标，点击分析后将自动生成。' }}</span>
+                          <div v-for="item in radarDisplayChecks" :key="item.criterion" class="single-skill-bar">
+                            <span>{{ item.criterion }} · {{ item.level }}/4</span>
+                            <el-progress :percentage="Math.round(item.level / 4 * 100)" :show-text="false" />
+                          </div>
                         </div>
                       </div>
 
@@ -533,7 +532,7 @@
                           <p v-if="item.assessment" class="criterion-assessment">{{ item.assessment }}</p>
                         </div>
                         <p v-if="!activeRadarChecks.length" class="score-explanation empty">
-                          暂无岗位技能指标。请先在岗位配置中设置技能要求或核心能力。
+                          暂无岗位技能指标。请先在岗位配置中填写必备关键技能。
                         </p>
                       </div>
                     </div>
@@ -726,64 +725,114 @@
                     <span class="parsed-section-number">{{ String(index + 1).padStart(2, '0') }}</span>
                     <h3>{{ section.title }}</h3>
                   </div>
-                  <div class="parsed-section-body">
-                    <!-- 如果是【在线微简历完整正文】等在线卡片分区，采用高仿真网站卡片UI优化展示 -->
-                    <template v-if="isOnlineMicroResumeSection(section.title)">
-                      <MicroResumeWebView
-                        :raw-content="getSectionRawText(section)"
-                        :full-content="activeRawContent"
-                        :candidate-name="resumeStore.selectedResume.fileName"
-                      />
-                    </template>
-                    <template v-else>
-                      <template v-for="(line, lineIndex) in section.lines" :key="lineIndex">
-                        <div v-if="isLineWorkSnapshot(line)" class="work-snapshot">
-                          <h4>{{ line.label || '任职履历快照' }}</h4>
-                          <div v-if="parseWorkSnapshot(getSnapshotRaw(line)).facts.length" class="snapshot-facts">
-                            <span v-for="(fact, factIndex) in parseWorkSnapshot(getSnapshotRaw(line)).facts" :key="factIndex">{{ fact }}</span>
-                          </div>
-                          <template v-for="(experience, expIndex) in parseWorkSnapshot(getSnapshotRaw(line)).experiences" :key="expIndex">
-                            <!-- 原文任职履历小卡片 -->
-                            <div class="snapshot-experience">
-                              <span class="snapshot-period">{{ experience.period }}</span>
-                              <strong v-if="experience.company">{{ experience.company }}</strong>
-                              <span v-if="experience.role" class="snapshot-role">{{ experience.role }}</span>
-                              <p v-if="experience.details.length">{{ experience.details.join(' · ') }}</p>
-                            </div>
 
-                            <!-- 对应小模块正下方紧跟生成的中文翻译 -->
-                            <div
-                              v-if="getMatchedTranslatedExperience(index, lineIndex, experience, expIndex)"
-                              class="snapshot-experience translated-subcard"
-                            >
-                              <div class="translated-subcard-header">
-                                <span class="subcard-badge">
-                                  <el-icon><Reading /></el-icon>
-                                  <span>中文译文</span>
-                                </span>
-                                <span v-if="getMatchedTranslatedExperience(index, lineIndex, experience, expIndex)?.period" class="subcard-period">
-                                  {{ getMatchedTranslatedExperience(index, lineIndex, experience, expIndex)!.period }}
-                                </span>
-                              </div>
-                              <strong v-if="getMatchedTranslatedExperience(index, lineIndex, experience, expIndex)?.company">
-                                {{ getMatchedTranslatedExperience(index, lineIndex, experience, expIndex)!.company }}
-                              </strong>
-                              <span v-if="getMatchedTranslatedExperience(index, lineIndex, experience, expIndex)?.role" class="snapshot-role">
-                                {{ getMatchedTranslatedExperience(index, lineIndex, experience, expIndex)!.role }}
-                              </span>
-                              <p v-if="getMatchedTranslatedExperience(index, lineIndex, experience, expIndex)?.details?.length">
-                                {{ getMatchedTranslatedExperience(index, lineIndex, experience, expIndex)!.details.join(' · ') }}
-                              </p>
-                            </div>
-                          </template>
+                  <!-- 个人优势：只保留工作上与生活/个人特质内容 -->
+                  <div v-if="section.title === '个人优势' && hasPersonalAdvantages(section)" class="personal-advantages-grid">
+                    <div
+                      v-if="parsePersonalAdvantages(section).workItems.length || parsePersonalAdvantages(section).skills.length"
+                      class="advantage-module-card work-advantage"
+                    >
+                      <div class="advantage-module-header">
+                        <span class="advantage-module-badge work">工作与专业能力</span>
+                      </div>
+                      <ul v-if="parsePersonalAdvantages(section).workItems.length" class="advantage-bullet-list">
+                        <li v-for="(item, wIdx) in parsePersonalAdvantages(section).workItems" :key="wIdx">
+                          <span class="bullet-dot" aria-hidden="true">•</span>
+                          <span>{{ item }}</span>
+                        </li>
+                      </ul>
+                      <div v-if="parsePersonalAdvantages(section).skills.length" class="advantage-skill-tags">
+                        <span v-for="(sk, sIdx) in parsePersonalAdvantages(section).skills" :key="sIdx" class="advantage-skill-chip">
+                          {{ sk }}
+                        </span>
+                      </div>
+                    </div>
+
+                    <div
+                      v-if="parsePersonalAdvantages(section).lifeItems.length"
+                      class="advantage-module-card life-advantage"
+                    >
+                      <div class="advantage-module-header">
+                        <span class="advantage-module-badge life">生活与个人特质</span>
+                      </div>
+                      <ul class="advantage-bullet-list">
+                        <li v-for="(item, lIdx) in parsePersonalAdvantages(section).lifeItems" :key="lIdx">
+                          <span class="bullet-dot" aria-hidden="true">•</span>
+                          <span>{{ item }}</span>
+                        </li>
+                      </ul>
+                    </div>
+                  </div>
+
+                  <!-- 工作经历 & 任职履历快照：每一段经历独立模块化卡片 -->
+                  <div v-else-if="section.title === '工作经历' && parseWorkSection(section).length" class="experience-card-list">
+                    <article
+                      v-for="(exp, expIdx) in parseWorkSection(section)"
+                      :key="expIdx"
+                      class="work-exp-card"
+                    >
+                      <div class="work-exp-header">
+                        <div class="work-exp-title-group">
+                          <span class="exp-index-tag">#{{ String(expIdx + 1).padStart(2, '0') }}</span>
+                          <strong class="work-exp-company">{{ exp.company || '任职单位' }}</strong>
+                          <span v-if="exp.role" class="work-exp-role">{{ exp.role }}</span>
+                          <span v-if="exp.department" class="work-exp-dept">{{ exp.department }}</span>
                         </div>
-                        <div v-else-if="line.kind === 'field'" class="parsed-field">
-                          <span class="parsed-field-label">{{ line.label }}</span>
-                          <span class="parsed-field-value">{{ line.value }}</span>
+                        <span v-if="exp.period" class="work-exp-period">{{ exp.period }}</span>
+                      </div>
+
+                      <div v-if="exp.meta || exp.mainBusiness" class="work-exp-meta">
+                        <span v-if="exp.meta" class="meta-chip">{{ exp.meta }}</span>
+                        <span v-if="exp.mainBusiness" class="meta-chip business">主营业务：{{ exp.mainBusiness }}</span>
+                      </div>
+
+                      <ul v-if="exp.duties.length" class="work-exp-duties">
+                        <li v-for="(duty, dIdx) in exp.duties" :key="dIdx">
+                          <span class="bullet-dot" aria-hidden="true">•</span>
+                          <span>{{ duty }}</span>
+                        </li>
+                      </ul>
+
+                      <div v-if="exp.tags.length" class="work-exp-tags">
+                        <span v-for="(tag, tagIdx) in exp.tags" :key="tagIdx" class="exp-skill-tag">{{ tag }}</span>
+                      </div>
+                    </article>
+                  </div>
+
+                  <!-- 项目经验：每一段项目经历独立模块化卡片 -->
+                  <div v-else-if="section.title === '项目经验' && parseProjectSection(section).length" class="experience-card-list">
+                    <article
+                      v-for="(proj, projIdx) in parseProjectSection(section)"
+                      :key="projIdx"
+                      class="project-exp-card"
+                    >
+                      <div class="project-exp-header">
+                        <div class="project-exp-title-group">
+                          <span class="exp-index-tag project">#{{ String(projIdx + 1).padStart(2, '0') }}</span>
+                          <strong class="project-exp-name">{{ proj.name }}</strong>
                         </div>
-                        <div v-else-if="line.kind === 'bullet'" class="parsed-bullet"><span aria-hidden="true">•</span>{{ line.text }}</div>
-                        <p v-else class="parsed-paragraph">{{ line.text }}</p>
-                      </template>
+                        <span v-if="proj.period" class="project-exp-period">{{ proj.period }}</span>
+                      </div>
+
+                      <div v-if="proj.company" class="project-exp-meta">
+                        <span class="meta-chip">所属公司：{{ proj.company }}</span>
+                      </div>
+
+                      <ul v-if="proj.details.length" class="project-exp-details">
+                        <li v-for="(detail, dtIdx) in proj.details" :key="dtIdx">
+                          <span class="bullet-dot" aria-hidden="true">•</span>
+                          <span>{{ detail }}</span>
+                        </li>
+                      </ul>
+                    </article>
+                  </div>
+
+                  <!-- 其余常规模块 -->
+                  <div v-else class="parsed-section-body">
+                    <template v-for="(line, lineIndex) in section.lines" :key="lineIndex">
+                      <div v-if="line.kind === 'field'" class="parsed-field"><span class="parsed-field-label">{{ line.label }}</span><span class="parsed-field-value">{{ line.value }}</span></div>
+                      <div v-else-if="line.kind === 'bullet'" class="parsed-bullet"><span aria-hidden="true">•</span>{{ line.text }}</div>
+                      <p v-else class="parsed-paragraph">{{ line.text }}</p>
                     </template>
                   </div>
 
@@ -801,19 +850,126 @@
                     </div>
 
                     <div v-show="!isTranslationCollapsed(index)" class="translation-card-body">
-                      <template v-for="(tLine, tIdx) in parsedTranslatedSections[index].lines" :key="tIdx">
-                        <div v-if="isLineWorkSnapshot(tLine)" class="work-snapshot translation-snapshot">
-                          <div class="inline-trans-note">
-                            <el-icon><CircleCheck /></el-icon>
-                            <span>任职履历快照各段经历已在上方对应小卡片正下方生成就地中文对照</span>
+                      <!-- 个人优势译文模块化 -->
+                      <div
+                        v-if="section.title === '个人优势' && hasPersonalAdvantages(parsedTranslatedSections[index])"
+                        class="personal-advantages-grid"
+                      >
+                        <div
+                          v-if="parsePersonalAdvantages(parsedTranslatedSections[index]).workItems.length || parsePersonalAdvantages(parsedTranslatedSections[index]).skills.length"
+                          class="advantage-module-card work-advantage"
+                        >
+                          <div class="advantage-module-header">
+                            <span class="advantage-module-badge work">工作与专业能力</span>
+                          </div>
+                          <ul v-if="parsePersonalAdvantages(parsedTranslatedSections[index]).workItems.length" class="advantage-bullet-list">
+                            <li v-for="(item, wIdx) in parsePersonalAdvantages(parsedTranslatedSections[index]).workItems" :key="wIdx">
+                              <span class="bullet-dot" aria-hidden="true">•</span>
+                              <span>{{ item }}</span>
+                            </li>
+                          </ul>
+                          <div v-if="parsePersonalAdvantages(parsedTranslatedSections[index]).skills.length" class="advantage-skill-tags">
+                            <span v-for="(sk, sIdx) in parsePersonalAdvantages(parsedTranslatedSections[index]).skills" :key="sIdx" class="advantage-skill-chip">
+                              {{ sk }}
+                            </span>
                           </div>
                         </div>
-                        <div v-else-if="tLine.kind === 'field'" class="parsed-field">
-                          <span class="parsed-field-label">{{ tLine.label }}</span>
-                          <span class="parsed-field-value">{{ tLine.value }}</span>
+
+                        <div
+                          v-if="parsePersonalAdvantages(parsedTranslatedSections[index]).lifeItems.length"
+                          class="advantage-module-card life-advantage"
+                        >
+                          <div class="advantage-module-header">
+                            <span class="advantage-module-badge life">生活与个人特质</span>
+                          </div>
+                          <ul class="advantage-bullet-list">
+                            <li v-for="(item, lIdx) in parsePersonalAdvantages(parsedTranslatedSections[index]).lifeItems" :key="lIdx">
+                              <span class="bullet-dot" aria-hidden="true">•</span>
+                              <span>{{ item }}</span>
+                            </li>
+                          </ul>
                         </div>
-                        <div v-else-if="tLine.kind === 'bullet'" class="parsed-bullet"><span aria-hidden="true">•</span>{{ tLine.text }}</div>
-                        <p v-else class="parsed-paragraph">{{ tLine.text }}</p>
+                      </div>
+
+                      <!-- 工作经历译文模块化 -->
+                      <div
+                        v-else-if="section.title === '工作经历' && parseWorkSection(parsedTranslatedSections[index]).length"
+                        class="experience-card-list"
+                      >
+                        <article
+                          v-for="(exp, expIdx) in parseWorkSection(parsedTranslatedSections[index])"
+                          :key="expIdx"
+                          class="work-exp-card"
+                        >
+                          <div class="work-exp-header">
+                            <div class="work-exp-title-group">
+                              <span class="exp-index-tag">#{{ String(expIdx + 1).padStart(2, '0') }}</span>
+                              <strong class="work-exp-company">{{ exp.company || '任职单位' }}</strong>
+                              <span v-if="exp.role" class="work-exp-role">{{ exp.role }}</span>
+                              <span v-if="exp.department" class="work-exp-dept">{{ exp.department }}</span>
+                            </div>
+                            <span v-if="exp.period" class="work-exp-period">{{ exp.period }}</span>
+                          </div>
+
+                          <div v-if="exp.meta || exp.mainBusiness" class="work-exp-meta">
+                            <span v-if="exp.meta" class="meta-chip">{{ exp.meta }}</span>
+                            <span v-if="exp.mainBusiness" class="meta-chip business">主营业务：{{ exp.mainBusiness }}</span>
+                          </div>
+
+                          <ul v-if="exp.duties.length" class="work-exp-duties">
+                            <li v-for="(duty, dIdx) in exp.duties" :key="dIdx">
+                              <span class="bullet-dot" aria-hidden="true">•</span>
+                              <span>{{ duty }}</span>
+                            </li>
+                          </ul>
+
+                          <div v-if="exp.tags.length" class="work-exp-tags">
+                            <span v-for="(tag, tagIdx) in exp.tags" :key="tagIdx" class="exp-skill-tag">{{ tag }}</span>
+                          </div>
+                        </article>
+                      </div>
+
+                      <!-- 项目经验译文模块化 -->
+                      <div
+                        v-else-if="section.title === '项目经验' && parseProjectSection(parsedTranslatedSections[index]).length"
+                        class="experience-card-list"
+                      >
+                        <article
+                          v-for="(proj, projIdx) in parseProjectSection(parsedTranslatedSections[index])"
+                          :key="projIdx"
+                          class="project-exp-card"
+                        >
+                          <div class="project-exp-header">
+                            <div class="project-exp-title-group">
+                              <span class="exp-index-tag project">#{{ String(projIdx + 1).padStart(2, '0') }}</span>
+                              <strong class="project-exp-name">{{ proj.name }}</strong>
+                            </div>
+                            <span v-if="proj.period" class="project-exp-period">{{ proj.period }}</span>
+                          </div>
+
+                          <div v-if="proj.company" class="project-exp-meta">
+                            <span class="meta-chip">所属公司：{{ proj.company }}</span>
+                          </div>
+
+                          <ul v-if="proj.details.length" class="project-exp-details">
+                            <li v-for="(detail, dtIdx) in proj.details" :key="dtIdx">
+                              <span class="bullet-dot" aria-hidden="true">•</span>
+                              <span>{{ detail }}</span>
+                            </li>
+                          </ul>
+                        </article>
+                      </div>
+
+                      <!-- 其余译文常规渲染 -->
+                      <template v-else>
+                        <template v-for="(tLine, tIdx) in parsedTranslatedSections[index].lines" :key="tIdx">
+                          <div v-if="tLine.kind === 'field'" class="parsed-field">
+                            <span class="parsed-field-label">{{ tLine.label }}</span>
+                            <span class="parsed-field-value">{{ tLine.value }}</span>
+                          </div>
+                          <div v-else-if="tLine.kind === 'bullet'" class="parsed-bullet"><span aria-hidden="true">•</span>{{ tLine.text }}</div>
+                          <p v-else class="parsed-paragraph">{{ tLine.text }}</p>
+                        </template>
                       </template>
                     </div>
                   </div>
@@ -896,6 +1052,20 @@
       <template #footer><el-button type="primary" @click="replyDialogOpen=false">关闭</el-button></template>
     </el-dialog>
     <TopTenOutreachDialog v-model="showOutreach" :project-id="projectId" @updated="resumeStore.loadProjectResumes(projectId)" />
+    <el-dialog v-model="hiResultVisible" title="一键打招呼逐人结果" width="min(760px, 94vw)">
+      <p v-if="hiResult">已联系 {{ hiResult.sent }} 人，跳过 {{ hiResult.skipped }} 人，回执待核查 {{ hiResult.uncertain }} 人；已使用 {{ hiResult.pointsUsed }} / {{ hiResult.pointsLimit }} 点。</p>
+      <el-table :data="hiResult?.items || []" max-height="380" size="small">
+        <el-table-column prop="name" label="候选人" width="140" />
+        <el-table-column prop="status" label="状态" width="100" />
+        <el-table-column prop="points" label="预计点数" width="100" />
+        <el-table-column label="结果或原因" min-width="280">
+          <template #default="{ row }">
+            {{ row.reason }}
+            <el-button v-if="row.reason?.includes('项目文案待重试')" link type="primary" @click="retryLibraryProjectMessage(row)">重试项目文案</el-button>
+          </template>
+        </el-table-column>
+      </el-table>
+    </el-dialog>
     <el-dialog v-model="snapshotHistoryOpen" title="相同简历快照 · 历史评测" width="min(760px,94vw)">
       <p>相同文本曾被分别采集和评测，模型输出或当时岗位配置可能不同。列表已折叠相同快照；原文件、历史分数及沟通记录保留。</p>
       <el-table :data="snapshotHistory" max-height="420">
@@ -926,7 +1096,7 @@
       <p v-if="jobPickerHasMore" class="job-picker-more">51job 还有更多职位未列出，请输入职位名称搜索；当前列表不是全部职位。</p>
       <template #footer>
         <el-button @click="jobPickerVisible = false">取消</el-button>
-        <el-button type="primary" :disabled="!jobPickerSelectedID || jobPickerLoading" @click="confirm51JobSelectedJob">核对点数并继续</el-button>
+        <el-button type="primary" :disabled="!jobPickerSelectedID || jobPickerLoading" @click="confirm51JobSelectedJob">直接打招呼</el-button>
       </template>
     </el-dialog>
 
@@ -1001,7 +1171,6 @@ import TopTenOutreachDialog from '../components/TopTenOutreachDialog.vue'
 import SvgDonutRing from '../components/charts/SvgDonutRing.vue'
 import SvgRadarChart from '../components/charts/SvgRadarChart.vue'
 import InterviewAccordionCard from '../components/InterviewAccordionCard.vue'
-import MicroResumeWebView from '../components/MicroResumeWebView.vue'
 import { useResumeStore } from '../composables/useResumeStore'
 import { useProjectStore } from '../composables/useProjectStore'
 import { runWith51JobBrowser } from '../composables/51jobBrowserRecovery'
@@ -1018,6 +1187,35 @@ const projectStore = useProjectStore()
 const projectId = computed(() => (route.params.id as string) || projectStore.currentProjectId || '')
 const projectName = computed(() => projectStore.currentProject?.name || '')
 const showOutreach = ref(false)
+const hiBusy = ref(false)
+const hiPointsLimit = ref(1000)
+const hiResultVisible = ref(false)
+const hiResult = ref<any>(null)
+
+async function runLibraryHi() {
+  if (!projectId.value || hiBusy.value) return
+  hiBusy.value = true
+  try {
+    const api: any = await import('../../wailsjs/go/main/App')
+    hiResult.value = await runWith51JobBrowser(api, () => api.Run51JobOneClickHi(projectId.value, '', [], hiPointsLimit.value))
+    hiResultVisible.value = true
+    await resumeStore.loadProjectResumes(projectId.value)
+  } catch (error: any) {
+    ElMessage.error(error?.message || String(error))
+  } finally {
+    hiBusy.value = false
+  }
+}
+
+async function retryLibraryProjectMessage(row: any) {
+  try {
+    const api: any = await import('../../wailsjs/go/main/App')
+    const result = await runWith51JobBrowser(api, () => api.Retry51JobProjectMessage(projectId.value, row.candidateId))
+    row.reason = result.message || row.reason
+    if (result.status === 'sent') ElMessage.success(result.message)
+    else ElMessage.warning(result.message)
+  } catch (error: any) { ElMessage.error(error?.message || String(error)) }
+}
 const snapshotHistoryOpen = ref(false)
 const snapshotHistory = ref<any[]>([])
 interface RadarCheckItem {
@@ -1071,16 +1269,9 @@ async function applyRadarDraft() {
 const unifiedJobMetrics = computed<string[]>(() => {
   const jobCfg = projectStore.currentProject?.job_config
   const set = new Set<string>()
-  if (jobCfg?.radar_metrics?.length) return jobCfg.radar_metrics
   if (jobCfg?.required_skills && Array.isArray(jobCfg.required_skills)) {
     for (const s of jobCfg.required_skills) {
       const trimmed = (s || '').trim()
-      if (trimmed) set.add(trimmed)
-    }
-  }
-  if (jobCfg?.core_criteria && Array.isArray(jobCfg.core_criteria)) {
-    for (const c of jobCfg.core_criteria) {
-      const trimmed = (c || '').trim()
       if (trimmed) set.add(trimmed)
     }
   }
@@ -1279,22 +1470,6 @@ const parsedContent = ref('')
 const contentLoading = ref(false)
 const showRawContent = ref(false)
 
-function isOnlineMicroResumeSection(title: string): boolean {
-  if (!title) return false
-  return title.includes('在线微简历') ||
-    title.includes('在线卡片') ||
-    title.includes('微简历完整正文') ||
-    title.includes('推荐牛人档案')
-}
-
-function getSectionRawText(section: ParsedSection): string {
-  return section.lines.map(line => {
-    if (line.kind === 'field') return `${line.label}：${line.value}`
-    if (line.kind === 'bullet') return `• ${line.text}`
-    return line.text || ''
-  }).join('\n')
-}
-const isChineseView = ref(false)
 const translatedSections = ref<string[]>([])
 const translationBusy = ref(false)
 const translationError = ref('')
@@ -1303,25 +1478,98 @@ let translationRequest = 0
 type ParsedLine = { kind: 'field' | 'bullet' | 'text'; text?: string; label?: string; value?: string }
 type ParsedSection = { title: string; lines: ParsedLine[] }
 
+const resumeSectionOrder = ['基本信息', '求职意向', '个人优势', '工作经历', '项目经验', '教育经历', '证书'] as const
+
+const periodOnlyPattern = /^(?:19|20)\d{2}[./-]\d{1,2}\s*(?:[-—–~至]|到)\s*(?:(?:19|20)\d{2}[./-]\d{1,2}|至今|现在|今)(?:\s*[（(][^）)]*[）)])?$/
+const durationOnlyPattern = /^[（(]\s*\d+\s*年(?:\s*\d+\s*个月)?\s*[）)]$|^[\(（]?\d+\s*个月[\)）]?$/
+const industryScalePattern = /\d+\s*[-~至]\s*\d+\s*人|\d+\s*人以上|少于\s*\d+\s*人|外资|合资|民营|国企|上市公司|已上市|创业公司|事业单位|非营利|股份制|代表处|制药\/|医疗\/|生物工程|计算机\/|互联网\/|电子商务|电子\/|通信\/|金融\/|银行\/|机械\/|汽车\/|房地产\/|建筑\/|教育\/|贸易\/|快速消费品|专业服务/
+
+function is51JobNoiseLine(line: string): boolean {
+  const s = (line || '').trim()
+  if (!s) return true
+  if (/^【前程无忧\s*(?:真实推荐牛人档案|在线微简历完整正文)】$/.test(s)) return true
+  if (/^(?:通知|手机版|帮助|扫码分享|在线简历|Resume|简历|微简历|电话沟通|人才罗盘|解锁\d+项人才行为分析|竞争力分析|查看完整简历|活跃度|简历完整度|附件个人信息)$/.test(s)) return true
+  if (/^该人才偏好/.test(s)) return true
+  if (/^\d+$/.test(s)) return true
+  if (/^人才ID[：:]\s*\d+/i.test(s)) return true
+  if (/^(?:\d+小时内活跃|\d+天内活跃|\d+周内活跃|\d+个月内活跃|刚刚活跃|今日活跃|近期活跃|半年前活跃|近1年活跃)$/.test(s)) return true
+  if (/^(?:在职|离职|积极找工作|观望有好机会会考虑|暂时不找工作)(?:[（(][^）)]*[）)])?$/.test(s)) return true
+  if (/^\d{2}岁\s+\d+年经验\s+/.test(s) || (/现居·/.test(s) && /\d{2}岁/.test(s))) return true
+  if (/^[\u4e00-\u9fa5A-Za-z]{1,4}(?:先生|女士)$/.test(s)) return true
+  return false
+}
+
+function canonicalResumeSectionTitle(title: string): string | null {
+  const normalized = title.trim().replace(/[：:]$/, '').toLowerCase()
+  if (/^(基本信息|个人信息|personal information|basic information|contact information)$/.test(normalized)) return '基本信息'
+  if (/^(求职意向|求职目标|job objective|career objective|job intention|desired position)$/.test(normalized)) return '求职意向'
+  if (/^(个人优势|个人综合优势|自我评价|个人简介|专业总结|核心专业技能|专业技能|技能\/语言|技能特长|语言能力|personal strengths|professional summary|summary|profile|about me|skills)$/.test(normalized)) return '个人优势'
+  if (/^(工作经历|工作经验|任职履历|任职履历快照|work experience|professional experience|employment history|work history)$/.test(normalized)) return '工作经历'
+  if (/^(项目经验|项目经历|project experience|projects|project history)$/.test(normalized)) return '项目经验'
+  if (/^(教育经历|教育背景|学历信息|education|educational background)$/.test(normalized)) return '教育经历'
+  if (/^(证书|资格证书|证书与资质|培训经历|荣誉证书|所获证书|奖项与证书|certificates|certifications|licenses|training)$/.test(normalized)) return '证书'
+  return null
+}
+
 function parseContentToSections(content: string): ParsedSection[] {
-  const sections: ParsedSection[] = []
-  let current: ParsedSection = { title: '基本信息', lines: [] }
+  const sections = new Map<string, ParsedSection>(resumeSectionOrder.map(title => [title, { title, lines: [] }]))
+  let current = '基本信息'
+  let inOnlinePreamble = false
+
   for (const rawLine of content.replace(/\r\n?/g, '\n').split('\n')) {
     const line = rawLine.trim()
     if (!line) continue
-    const heading = line.match(/^[【\[]([^】\]]{2,60})[】\]]$/) || line.match(/^#{1,4}\s+(.+)$/)
-    if (heading) {
-      if (current.lines.length) sections.push(current)
-      current = { title: heading[1].trim(), lines: [] }
+    if (/^【前程无忧\s*在线微简历完整正文】$/.test(line)) {
+      inOnlinePreamble = true
       continue
     }
+    if (is51JobNoiseLine(line)) continue
+
+    const directTitle = canonicalResumeSectionTitle(line)
+    if (directTitle) {
+      current = directTitle
+      inOnlinePreamble = false
+      continue
+    }
+    if (line === '未填写' && current !== '基本信息') continue
+
+    const heading = line.match(/^[【\[]([^】\]]{2,60})[】\]]$/) || line.match(/^#{1,4}\s+(.+)$/) || line.match(/^([^：:]{2,40})[：:]$/)
+    if (heading) {
+      const title = canonicalResumeSectionTitle(heading[1])
+      if (title) {
+        current = title
+        inOnlinePreamble = false
+        continue
+      }
+    }
+
     const field = line.match(/^([^：:]{2,20})[：:]\s*(.+)$/)
-    if (field) current.lines.push({ kind: 'field', label: field[1].trim(), value: field[2].trim() })
-    else if (/^[•●·*\-]\s*/.test(line)) current.lines.push({ kind: 'bullet', text: line.replace(/^[•●·*\-]\s*/, '') })
-    else current.lines.push({ kind: 'text', text: line })
+    if (field) {
+      const label = field[1].trim()
+      const val = field[2].trim()
+      const target = canonicalResumeSectionTitle(label)
+      if (target === '工作经历' && label.includes('快照')) {
+        sections.get('工作经历')!.lines.push({ kind: 'field', label, value: val })
+        continue
+      }
+      if (/^(?:在线直达网址|联系方式|姓名\s*\/\s*称谓|来源渠道|检索岗位|分流同义词|平台活跃标记|目标城市|基本画像|现居地)$/.test(label)) {
+        sections.get('基本信息')!.lines.push({ kind: 'field', label, value: val })
+        continue
+      }
+      if (target && target !== '基本信息') {
+        current = target
+        inOnlinePreamble = false
+      }
+      sections.get(current)!.lines.push({ kind: 'field', label, value: val })
+    } else if (/^[•●·*\-]\s*/.test(line)) {
+      const targetSec = inOnlinePreamble ? '个人优势' : current
+      sections.get(targetSec)!.lines.push({ kind: 'bullet', text: line.replace(/^[•●·*\-]\s*/, '') })
+    } else {
+      const targetSec = inOnlinePreamble ? '个人优势' : current
+      sections.get(targetSec)!.lines.push({ kind: 'text', text: line })
+    }
   }
-  if (current.lines.length) sections.push(current)
-  return sections.length ? sections : [{ title: '原文内容', lines: [{ kind: 'text', text: content }] }]
+  return resumeSectionOrder.map(title => sections.get(title)!).filter(section => section.lines.length > 0)
 }
 
 function isWorkSnapshot(label?: string, value?: string, text?: string): boolean {
@@ -1332,16 +1580,6 @@ function isWorkSnapshot(label?: string, value?: string, text?: string): boolean 
   return candidate.includes('|') && /(?:19|20)\d{2}[./-]\d{1,2}/.test(candidate)
 }
 
-function isLineWorkSnapshot(line: ParsedLine): boolean {
-  if (line.kind === 'field' && isWorkSnapshot(line.label, line.value)) return true
-  const raw = line.value || line.text || ''
-  return raw.includes('|') && /(?:19|20)\d{2}[./-]\d{1,2}/.test(raw)
-}
-
-function getSnapshotRaw(line: ParsedLine): string {
-  return line.value || line.text || ''
-}
-
 function parseSectionText(text: string, defaultTitle: string): ParsedSection {
   const lines = text.replace(/\r\n?/g, '\n').split('\n')
   let title = defaultTitle
@@ -1350,10 +1588,17 @@ function parseSectionText(text: string, defaultTitle: string): ParsedSection {
 
   for (const rawLine of lines) {
     const line = rawLine.trim()
-    if (!line) continue
+    if (!line || is51JobNoiseLine(line)) continue
+    const directTitle = canonicalResumeSectionTitle(line)
+    if (directTitle && parsedLines.length === 0) {
+      title = directTitle
+      continue
+    }
     const heading = line.match(/^[【\[]([^】\]]{2,60})[】\]]$/) || line.match(/^#{1,4}\s+(.+)$/)
-    if (heading && parsedLines.length === 0) {
-      title = heading[1].trim()
+    if (heading) {
+      if (parsedLines.length === 0) {
+        title = heading[1].trim()
+      }
       continue
     }
     const field = line.match(/^([^：:]{2,20})[：:]\s*(.+)$/)
@@ -1363,7 +1608,7 @@ function parseSectionText(text: string, defaultTitle: string): ParsedSection {
       const newLine: ParsedLine = { kind: 'field', label, value }
       parsedLines.push(newLine)
       activeSnapshotLine = isWorkSnapshot(label, value) ? newLine : null
-    } else if (activeSnapshotLine && (line.includes('|') || /(?:19|20)\d{2}/.test(line) || /^[•●·*\-o]\s*/.test(line))) {
+    } else if (activeSnapshotLine && line.includes('|')) {
       activeSnapshotLine.value = (activeSnapshotLine.value ? activeSnapshotLine.value + ' | ' : '') + line
     } else if (line.includes('|') && /(?:19|20)\d{2}[./-]\d{1,2}/.test(line)) {
       activeSnapshotLine = { kind: 'field', label: '任职履历快照', value: line }
@@ -1377,6 +1622,446 @@ function parseSectionText(text: string, defaultTitle: string): ParsedSection {
     }
   }
   return { title, lines: parsedLines.length ? parsedLines : [{ kind: 'text', text }] }
+}
+
+export interface PersonalAdvantagesData {
+  workItems: string[]
+  lifeItems: string[]
+  skills: string[]
+}
+
+const personalAdvCache = new WeakMap<ParsedSection, PersonalAdvantagesData>()
+
+function parsePersonalAdvantages(section: ParsedSection): PersonalAdvantagesData {
+  if (!section) return { workItems: [], lifeItems: [], skills: [] }
+  const cached = personalAdvCache.get(section)
+  if (cached) return cached
+
+  const rawTexts: string[] = []
+  const skills: string[] = []
+
+  for (const line of section.lines) {
+    const t = (line.kind === 'field' ? `${line.label}：${line.value}` : (line.text || '')).trim()
+    if (!t || is51JobNoiseLine(t)) continue
+    if (line.kind === 'bullet' && t.length <= 24 && !/[，。；,.;]/.test(t)) {
+      if (!skills.includes(t)) skills.push(t)
+    } else {
+      rawTexts.push(t)
+    }
+  }
+
+  // 过滤微简历顶部被截断的预览残句（当存在完整段落包含该前缀时去重）
+  const dedupedTexts = rawTexts.filter((item, idx) => {
+    const cleanPrefix = item.replace(/[.…)+）\s]+$/, '').trim()
+    if (cleanPrefix.length < 10) return true
+    const matchKey = cleanPrefix.slice(0, Math.min(24, cleanPrefix.length))
+    return !rawTexts.some((other, oIdx) => oIdx !== idx && other.length > item.length && other.startsWith(matchKey))
+  })
+
+  const workItems: string[] = []
+  const lifeItems: string[] = []
+  const lifePattern = /适应|学习能力|快速融入|性格|开朗|乐观|爱好|生活|抗压|责任心|敬业|踏实|细致|耐心|自律|身心|运动|阅读|好奇心|自驱|待人|亲和|团队氛围|为人|沟通顺畅|情绪稳定|吃苦|注重工作质量/
+
+  for (let i = 0; i < dedupedTexts.length; i++) {
+    const text = dedupedTexts[i]
+    if (text.length <= 15 && i + 1 < dedupedTexts.length && /^(?:良好|熟练|精通|一般|优秀|流利|掌握)$/.test(dedupedTexts[i + 1])) {
+      const skillPair = `${text}（${dedupedTexts[i + 1]}）`
+      if (!skills.includes(skillPair)) skills.push(skillPair)
+      i++
+      continue
+    }
+
+    const clauses = text
+      .split(/(?<=[。；;！!\n])\s*/)
+      .map(c => c.trim())
+      .filter(Boolean)
+
+    for (const clause of clauses) {
+      const subClauses = clause.split(/[；;]\s*/).map(s => s.trim()).filter(Boolean)
+      for (const sc of subClauses) {
+        const cleanedSc = sc.replace(/^(?:[•●·*\-]|\d+[.、）)])\s*/, '').replace(/[。；;，,]+$/, '').trim()
+        if (!cleanedSc) continue
+
+        // 检查同一句话是否前半句为工作技能、后半句为生活/个人特质
+        const traitSplitMatch = cleanedSc.match(/^(.+?)[，,]\s*((?:适应性强|学习能力|性格|为人|爱好|抗压|责任心强|乐观|积极主动).*)$/)
+        if (traitSplitMatch && !lifePattern.test(traitSplitMatch[1])) {
+          const workPart = traitSplitMatch[1].trim()
+          const lifePart = traitSplitMatch[2].trim()
+          if (workPart && !workItems.includes(workPart)) workItems.push(workPart)
+          if (lifePart && !lifeItems.includes(lifePart)) lifeItems.push(lifePart)
+          continue
+        }
+
+        if (lifePattern.test(cleanedSc) && cleanedSc.length <= 80) {
+          if (!lifeItems.includes(cleanedSc)) lifeItems.push(cleanedSc)
+        } else {
+          if (!workItems.includes(cleanedSc)) workItems.push(cleanedSc)
+        }
+      }
+    }
+  }
+
+  const result = { workItems, lifeItems, skills }
+  personalAdvCache.set(section, result)
+  return result
+}
+
+function hasPersonalAdvantages(section?: ParsedSection): boolean {
+  if (!section) return false
+  const adv = parsePersonalAdvantages(section)
+  return adv.workItems.length > 0 || adv.lifeItems.length > 0 || adv.skills.length > 0
+}
+
+export interface WorkExperienceCard {
+  period: string
+  company: string
+  role: string
+  meta: string
+  mainBusiness: string
+  department: string
+  duties: string[]
+  tags: string[]
+}
+
+export interface ProjectExperienceCard {
+  name: string
+  period: string
+  company: string
+  details: string[]
+}
+
+function splitDutyText(text: string): string[] {
+  const cleaned = (text || '').trim()
+  if (!cleaned) return []
+  if (/^(?:Typical\s+Accountabilities|Key\s+Responsibilities|Main\s+Duties|Responsibilities|典型职责|工作职责|主要职责|工作内容|职责描述)[：:]?$/i.test(cleaned)) {
+    return []
+  }
+  if (/(?:^|\s)-\s+[A-Za-z\u4e00-\u9fa5]/.test(cleaned)) {
+    const parts = cleaned.split(/\s+-\s+/).map(p => p.trim()).filter(Boolean)
+    const result: string[] = []
+    for (let p of parts) {
+      p = p.replace(/^(?:Typical\s+Accountabilities|Key\s+Responsibilities|Main\s+Duties|Responsibilities|典型职责|工作职责|主要职责|工作内容|职责描述)[：:]?\s*/i, '').trim()
+      p = p.replace(/^[-•o]\s*/, '').trim()
+      if (p) result.push(p)
+    }
+    if (result.length > 0) return result
+  }
+  if (/(?:^|\s)1[.、）)]\s*\S+.*(?:^|\s)2[.、）)]\s*\S+/.test(cleaned)) {
+    const parts = cleaned.split(/(?=(?:^|\s)\d+[.、）)]\s*)/).map(p => p.trim()).filter(Boolean)
+    if (parts.length > 1) return parts
+  }
+  return [cleaned.replace(/^(?:典型职责|工作内容|工作职责|主要职责|职责描述)[：:]\s*/, '').replace(/^o\s+/, '').trim()].filter(Boolean)
+}
+
+function isSkillTagToken(token: string): boolean {
+  const s = (token || '').trim()
+  if (!s || s.length > 28) return false
+  if (/[，。；：,.;:（）()]/.test(s)) return false
+  if (/^(?:典型职责|工作内容|工作职责|主要职责|职责描述|主营业务)/.test(s)) return false
+  if (s.length <= 14) return true
+  if (!/\s/.test(s) && /^[A-Za-z]+$/.test(s)) return true
+  return false
+}
+
+function mergeBrokenLines(tokens: string[]): string[] {
+  const merged: string[] = []
+  for (const tk of tokens) {
+    if (merged.length > 0) {
+      const prev = merged[merged.length - 1]
+      const prevEndsIncomplete = /(?:[,，]\s*|\b(?:and|or|of|to|in|for|with|the|a|an|CRO|AZ|SOPs)\s*|及|与|和)$/i.test(prev)
+      const currStartsContinuation = /^[a-z]/.test(tk) || /^o\s+/.test(tk) || /^Project Manager to ensure/i.test(tk)
+      if ((prevEndsIncomplete || currStartsContinuation) && !isSkillTagToken(tk)) {
+        const cleanTk = tk.replace(/^o\s+/, '')
+        merged[merged.length - 1] = /[A-Za-z]$/.test(prev) ? `${prev} ${cleanTk}` : `${prev}${cleanTk}`
+        continue
+      }
+    }
+    merged.push(tk)
+  }
+  return merged
+}
+
+function parseWorkTokensToExperiences(rawTokens: string[]): WorkExperienceCard[] {
+  const tokens = rawTokens
+    .map(t => t.replace(/^[•●·*\-]\s*/, '').trim())
+    .filter(t => t && t !== '工作经历' && t !== '工作经验' && !is51JobNoiseLine(t))
+
+  // Format A: "2026.06—至今 · 上海透景生命科技股份有限公司 · ai实习生"
+  const dotHeaderPattern = /^((?:(?:19|20)\d{2}[./-]\d{1,2}\s*(?:[-—–~至]|到)\s*(?:(?:19|20)\d{2}[./-]\d{1,2}|至今|现在|今))|—)\s*·\s*([^·]+?)(?:\s*·\s*(.+))?$/
+  if (tokens.some(t => dotHeaderPattern.test(t))) {
+    const exps: WorkExperienceCard[] = []
+    let current: WorkExperienceCard | null = null
+    for (const tk of tokens) {
+      const m = tk.match(dotHeaderPattern)
+      if (m) {
+        current = {
+          period: m[1] === '—' ? '' : m[1].trim(),
+          company: (m[2] || '').trim(),
+          role: (m[3] || '').trim(),
+          meta: '',
+          mainBusiness: '',
+          department: '',
+          duties: [],
+          tags: []
+        }
+        exps.push(current)
+      } else if (current) {
+        current.duties.push(...splitDutyText(tk))
+      }
+    }
+    if (exps.length > 0) return exps
+  }
+
+  // Format B: 51job snapshot tokens or multi-line work experience blocks
+  const periodIndices: number[] = []
+  for (let i = 0; i < tokens.length; i++) {
+    if (periodOnlyPattern.test(tokens[i])) {
+      periodIndices.push(i)
+    }
+  }
+  if (periodIndices.length === 0) return []
+
+  const headers = periodIndices.map((pIdx, idx) => {
+    const prevBound = idx === 0 ? 0 : periodIndices[idx - 1] + 1
+    let meta = ''
+    let role = ''
+    let company = ''
+    let headerStart = pIdx
+
+    const t1 = pIdx - 1 >= prevBound ? tokens[pIdx - 1] : ''
+    const t2 = pIdx - 2 >= prevBound ? tokens[pIdx - 2] : ''
+    const t3 = pIdx - 3 >= prevBound ? tokens[pIdx - 3] : ''
+
+    if (t1 && industryScalePattern.test(t1)) {
+      meta = t1
+      role = t2
+      company = t3
+      headerStart = Math.max(prevBound, pIdx - (t3 ? 3 : t2 ? 2 : 1))
+    } else {
+      role = t1
+      company = t2
+      headerStart = Math.max(prevBound, pIdx - (t2 ? 2 : t1 ? 1 : 0))
+    }
+
+    return { pIdx, headerStart, company, role, meta }
+  })
+
+  const experiences: WorkExperienceCard[] = []
+  for (let k = 0; k < headers.length; k++) {
+    const h = headers[k]
+    const nextHeaderStart = k + 1 < headers.length ? headers[k + 1].headerStart : tokens.length
+    let period = tokens[h.pIdx]
+    let bodyStart = h.pIdx + 1
+
+    if (bodyStart < nextHeaderStart && durationOnlyPattern.test(tokens[bodyStart])) {
+      period = `${period}${tokens[bodyStart]}`
+      bodyStart++
+    }
+
+    let mainBusiness = ''
+    let department = ''
+    const rawBodyTokens: string[] = []
+
+    for (let idx = bodyStart; idx < nextHeaderStart; idx++) {
+      const tk = tokens[idx]
+      if (tk === '主营业务' && idx + 1 < nextHeaderStart) {
+        mainBusiness = tokens[idx + 1]
+        idx++
+        continue
+      }
+      if (/^主营业务[：:]/.test(tk)) {
+        mainBusiness = tk.replace(/^主营业务[：:]\s*/, '').trim()
+        continue
+      }
+      if (/^(?:所属)?部门[：:]/.test(tk)) {
+        department = tk.replace(/^(?:所属)?部门[：:]\s*/, '').trim()
+        continue
+      }
+      rawBodyTokens.push(tk)
+    }
+
+    const tags: string[] = []
+    while (rawBodyTokens.length > 1 && isSkillTagToken(rawBodyTokens[rawBodyTokens.length - 1])) {
+      const tag = rawBodyTokens.pop()!
+      if (!tags.includes(tag)) tags.unshift(tag)
+    }
+
+    const bodyTokens = mergeBrokenLines(rawBodyTokens)
+    const duties: string[] = []
+    for (const bt of bodyTokens) {
+      for (const d of splitDutyText(bt)) {
+        if (!duties.includes(d)) duties.push(d)
+      }
+    }
+
+    experiences.push({
+      period,
+      company: h.company,
+      role: h.role,
+      meta: h.meta,
+      mainBusiness,
+      department,
+      duties,
+      tags
+    })
+  }
+
+  return experiences
+}
+
+const workSecCache = new WeakMap<ParsedSection, WorkExperienceCard[]>()
+
+function parseWorkSection(section?: ParsedSection): WorkExperienceCard[] {
+  if (!section) return []
+  const cached = workSecCache.get(section)
+  if (cached) return cached
+
+  const allExperiences: WorkExperienceCard[] = []
+  const regularTokens: string[] = []
+
+  for (const line of section.lines) {
+    if (line.kind === 'field' && ((line.label && line.label.includes('快照')) || (line.value && line.value.includes('|')))) {
+      const snapExps = parseWorkTokensToExperiences((line.value || '').split(/\s*\|\s*/))
+      allExperiences.push(...snapExps)
+    } else if (line.kind === 'field') {
+      regularTokens.push(`${line.label}：${line.value}`)
+    } else if (line.text) {
+      if (line.text.includes('|') && /(?:19|20)\d{2}[./-]\d{1,2}/.test(line.text)) {
+        allExperiences.push(...parseWorkTokensToExperiences(line.text.split(/\s*\|\s*/)))
+      } else {
+        regularTokens.push(line.text)
+      }
+    }
+  }
+
+  if (regularTokens.length > 0) {
+    allExperiences.push(...parseWorkTokensToExperiences(regularTokens))
+  }
+
+  const deduped: WorkExperienceCard[] = []
+  const norm = (s: string) => (s || '').replace(/\s+/g, '').toLowerCase()
+  const normPeriodKey = (p: string) => {
+    const m = (p || '').match(/(?:19|20)\d{2}[./-]\d{1,2}/)
+    return m ? m[0].replace(/[/-]/g, '.') : norm(p)
+  }
+
+  for (const exp of allExperiences) {
+    const pKey = normPeriodKey(exp.period)
+    const cKey = norm(exp.company)
+    const existing = deduped.find(e =>
+      normPeriodKey(e.period) === pKey &&
+      (norm(e.company) === cKey || (cKey && norm(e.company).includes(cKey)) || (norm(e.company) && cKey.includes(norm(e.company))))
+    )
+    if (existing) {
+      if ((exp.period || '').length > (existing.period || '').length) existing.period = exp.period
+      if (!existing.role && exp.role) existing.role = exp.role
+      if (!existing.meta && exp.meta) existing.meta = exp.meta
+      if (!existing.mainBusiness && exp.mainBusiness) existing.mainBusiness = exp.mainBusiness
+      if (!existing.department && exp.department) existing.department = exp.department
+      if (exp.duties.length > existing.duties.length) existing.duties = exp.duties
+      for (const t of exp.tags) {
+        if (!existing.tags.includes(t)) existing.tags.push(t)
+      }
+    } else {
+      deduped.push(exp)
+    }
+  }
+
+  workSecCache.set(section, deduped)
+  return deduped
+}
+
+const projectSecCache = new WeakMap<ParsedSection, ProjectExperienceCard[]>()
+
+function parseProjectSection(section?: ParsedSection): ProjectExperienceCard[] {
+  if (!section) return []
+  const cached = projectSecCache.get(section)
+  if (cached) return cached
+
+  const rawLines = section.lines.map(l => {
+    if (l.kind === 'field') return `${l.label}：${l.value}`
+    return (l.text || '').trim()
+  }).filter(Boolean)
+
+  // Format A: "2026.05—2026.06 · 分布式异步任务处理系统 [· 所属公司]"
+  const dotHeaderPattern = /^((?:(?:19|20)\d{2}[./-]\d{1,2}\s*(?:[-—–~至]|到)\s*(?:(?:19|20)\d{2}[./-]\d{1,2}|至今|现在|今))|—)\s*·\s*([^·]+?)(?:\s*·\s*(.+))?$/
+  if (rawLines.some(l => dotHeaderPattern.test(l))) {
+    const projects: ProjectExperienceCard[] = []
+    let current: ProjectExperienceCard | null = null
+    for (const line of rawLines) {
+      const m = line.match(dotHeaderPattern)
+      if (m) {
+        current = {
+          name: (m[2] || '').trim(),
+          period: m[1] === '—' ? '' : m[1].trim(),
+          company: (m[3] || '').trim(),
+          details: []
+        }
+        projects.push(current)
+      } else if (current) {
+        current.details.push(...splitDutyText(line.replace(/^[•●·*\-]\s*/, '').trim()))
+      }
+    }
+    projectSecCache.set(section, projects)
+    return projects
+  }
+
+  // Format B: 51job Project Name -> Period -> Optional Company -> Description lines
+  const periodIndices: number[] = []
+  for (let i = 0; i < rawLines.length; i++) {
+    if (periodOnlyPattern.test(rawLines[i])) {
+      periodIndices.push(i)
+    }
+  }
+  if (periodIndices.length === 0) {
+    projectSecCache.set(section, [])
+    return []
+  }
+
+  const companyLikePattern = /公司|集团|研究院|实验室|医院|事务所|科技|大学|学院|中心|控股|银行|研究所|生物|医药|药业|医疗|股份|有限|corp|inc|ltd/i
+  const descStartPattern = /^(?:项目描述|项目职责|项目业绩|责任描述|主要职责|项目简介|项目内容|工作内容|负责|参与|作为|主要|通过|使用|基于|[•●·*\-]|\d+[.、）)])/
+
+  const projects: ProjectExperienceCard[] = []
+  for (let k = 0; k < periodIndices.length; k++) {
+    const pIdx = periodIndices[k]
+    const prevBound = k === 0 ? 0 : periodIndices[k - 1] + 1
+    const nextProjectNameIdx = k + 1 < periodIndices.length ? periodIndices[k + 1] - 1 : rawLines.length
+
+    const name = pIdx - 1 >= prevBound ? rawLines[pIdx - 1] : `项目 ${k + 1}`
+    let period = rawLines[pIdx]
+    let bodyStart = pIdx + 1
+
+    if (bodyStart < nextProjectNameIdx && durationOnlyPattern.test(rawLines[bodyStart])) {
+      period = `${period}${rawLines[bodyStart]}`
+      bodyStart++
+    }
+
+    let company = ''
+    if (bodyStart < nextProjectNameIdx) {
+      const candidateComp = rawLines[bodyStart]
+      if (
+        candidateComp.length <= 36 &&
+        !/[，。；：,.;:]/.test(candidateComp) &&
+        !descStartPattern.test(candidateComp) &&
+        companyLikePattern.test(candidateComp)
+      ) {
+        company = candidateComp
+        bodyStart++
+      }
+    }
+
+    const details: string[] = []
+    for (let idx = bodyStart; idx < nextProjectNameIdx; idx++) {
+      const line = rawLines[idx].replace(/^[•●·*\-]\s*/, '').trim()
+      if (!line || /^项目描述[：:]?$/.test(line) || /^项目业绩[：:]?$/.test(line) || /^责任描述[：:]?$/.test(line)) continue
+      details.push(...splitDutyText(line))
+    }
+
+    projects.push({ name, period, company, details })
+  }
+
+  projectSecCache.set(section, projects)
+  return projects
 }
 
 const originalParsedSections = computed<ParsedSection[]>(() => {
@@ -1423,104 +2108,8 @@ const activeSections = computed<ParsedSection[]>(() => {
 })
 
 const activeRawContent = computed<string>(() => {
-  if (isChineseView.value && translatedSections.value.length) {
-    return translatedSections.value.join('\n\n')
-  }
   return parsedContent.value
 })
-
-interface SnapshotExperience { period: string; company: string; role: string; details: string[] }
-function parseWorkSnapshot(value: string): { facts: string[]; experiences: SnapshotExperience[] } {
-  const cleanedValue = value.replace(/\r?\n+/g, ' | ')
-  const tokens = cleanedValue.split(/\s*\|\s*/).map(part => {
-    let p = part.trim()
-    p = p.replace(/^[•●·*\-o]\s*/, '').trim()
-    return p
-  }).filter(part => part && part !== '•' && part !== '·' && part !== 'o' && part !== '-')
-  const facts: string[] = []
-  const experiences: SnapshotExperience[] = []
-  const periodPattern = /(?:19|20)\d{2}[./-]\d{1,2}\s*(?:[-—–~至]|到)\s*(?:(?:19|20)\d{2}[./-]\d{1,2}|至今|现在|今)/
-  const companyPattern = /公司|集团|研究院|实验室|医院|事务所|科技|大学|学院|中心$|控股|电子商务|银行|研究所|生物|医疗|tech|corp|inc|ltd/i
-  const rolePattern = /工程师|经理|总监|主管|专员|顾问|负责人|设计师|研究员|助理|分析师|架构师|测试员|开发者|开发|专家|采购员|技术员|代表|manager|lead|director|developer/i
-  let current: SnapshotExperience | null = null
-  for (const token of tokens) {
-    if (periodPattern.test(token)) {
-      current = { period: token, company: '', role: '', details: [] }
-      experiences.push(current)
-    } else if (!current) {
-      facts.push(token)
-    } else if (!current.company && companyPattern.test(token)) {
-      current.company = token
-    } else if (!current.role && rolePattern.test(token)) {
-      current.role = token
-    } else {
-      current.details.push(token)
-    }
-  }
-  return { facts, experiences }
-}
-
-// 精准匹配任职履历快照中每段工作经历对应的中文译文小模块
-function getMatchedTranslatedExperience(
-  sectionIndex: number,
-  lineIndex: number,
-  origExp: SnapshotExperience,
-  expIndex: number
-): SnapshotExperience | null {
-  const transSec = parsedTranslatedSections.value[sectionIndex]
-  if (!transSec || !transSec.lines?.length) return null
-
-  // 1. 查找对应的翻译快照行
-  let targetTLine: ParsedLine | null = null
-  if (transSec.lines[lineIndex] && isLineWorkSnapshot(transSec.lines[lineIndex])) {
-    targetTLine = transSec.lines[lineIndex]
-  } else {
-    targetTLine = transSec.lines.find(l => isLineWorkSnapshot(l)) || null
-  }
-
-  if (!targetTLine) return null
-
-  const parsedSnapshot = parseWorkSnapshot(getSnapshotRaw(targetTLine))
-  const tExperiences = parsedSnapshot.experiences
-  if (!tExperiences || tExperiences.length === 0) {
-    const rawText = getSnapshotRaw(targetTLine).trim()
-    if (rawText) {
-      return {
-        period: origExp.period,
-        company: origExp.company,
-        role: origExp.role,
-        details: [rawText]
-      }
-    }
-    return null
-  }
-
-  // 2. 匹配规则：优先按时间段 (period) 匹配
-  const cleanPeriod = (p: string) => (p || '').replace(/\s+/g, '')
-  const origP = cleanPeriod(origExp.period)
-  if (origP) {
-    const matchedByPeriod = tExperiences.find(te => {
-      const tp = cleanPeriod(te.period)
-      return tp && (tp === origP || tp.includes(origP) || origP.includes(tp))
-    })
-    if (matchedByPeriod) return matchedByPeriod
-  }
-
-  // 3. 次优匹配：按公司名关键词模糊匹配
-  if (origExp.company) {
-    const matchedByCompany = tExperiences.find(te => {
-      return te.company && (te.company.includes(origExp.company) || origExp.company.includes(te.company))
-    })
-    if (matchedByCompany) return matchedByCompany
-  }
-
-  // 4. 下标对齐兜底
-  if (expIndex < tExperiences.length) {
-    return tExperiences[expIndex]
-  }
-
-  return null
-}
 
 function translationSourceSections(): string[] {
   return originalParsedSections.value.map(section => [
@@ -1537,7 +2126,6 @@ async function handleTranslateToChinese(force: boolean) {
   const resumeID = resumeStore.selectedId
   if (!resumeID || !parsedContent.value || translationBusy.value) return
   if (!force && translatedSections.value.length === originalParsedSections.value.length) {
-    isChineseView.value = true
     return
   }
   const request = ++translationRequest
@@ -1550,7 +2138,6 @@ async function handleTranslateToChinese(force: boolean) {
     if (request !== translationRequest || resumeStore.selectedId !== resumeID) return
     if (result.length !== sections.length) throw new Error('译文分区与原文不一致，请重新翻译')
     translatedSections.value = result
-    isChineseView.value = true
     ElMessage.success('已一键翻译为中文')
   } catch (err: any) {
     if (request === translationRequest) translationError.value = err?.message || String(err)
@@ -1742,6 +2329,7 @@ async function handle51JobGreeting() {
   jobPickerError.value = ''
   jobPickerVisible.value = true
   await load51JobOptions()
+  if (jobPickerVisible.value && jobPickerSelectedID.value) await confirm51JobSelectedJob()
 }
 
 async function ensure51JobCandidateDetail(): Promise<boolean> {
@@ -1749,16 +2337,15 @@ async function ensure51JobCandidateDetail(): Promise<boolean> {
   const resume = resumeStore.selectedResume
   if (!resume || !is51JobSource.value || contactBusy.value) return false
   try {
-    const response = await ElMessageBox.prompt('请在 51job 企业工作台找到此人，核对其姓名和经历，再复制包含 resumeId 的新版详情链接。软件会再次核对页面姓名。', '关联候选人网页', { inputPlaceholder: 'https://ehire.51job.com/Revision/talent/resume/detail?resumeId=…', confirmButtonText: '已核对此人，关联链接', cancelButtonText: '取消' })
     contactBusy.value = true
     const api: any = await import('../../wailsjs/go/main/App')
-    const result = await runWith51JobBrowser(api, () => api.Bind51JobCandidateDetail(resume.id, response.value.trim()), { isActive: () => resumeStore.selectedResume?.id === resume.id })
-    if (result.status !== 'verified') { ElMessage.warning(result.message || '关联未完成'); return false }
+    const result = await runWith51JobBrowser(api, () => api.AutoLink51JobCandidateDetail(resume.id), { isActive: () => resumeStore.selectedResume?.id === resume.id })
+    if (result.status !== 'verified') { ElMessage.warning(result.message || '未能自动定位候选人网页，已跳过'); return false }
     await resumeStore.loadProjectResumes(projectId.value)
-    ElMessage.success('候选人网页已关联，可继续打招呼')
+    ElMessage.success('已自动定位候选人网页')
     return resumeStore.selectedResume?.id === resume.id && is51JobCandidate.value
   } catch (err: any) {
-    if (err !== 'cancel' && err !== 'close') ElMessage.error(err?.message || String(err))
+    ElMessage.error(err?.message || String(err))
     return false
   } finally { contactBusy.value = false }
 }
@@ -1821,15 +2408,8 @@ async function confirm51JobSelectedJob() {
       ElMessage.warning({ message: preview.message || '无法核实 51job 职位和点数，未发起Hi聊', duration: 10000, showClose: true })
       return
     }
-    const name = resume.analysis?.candidateName || resume.fileName
-    try {
-      await ElMessageBox.confirm(
-        `候选人：${name}。招聘项目岗位：${projectStore.currentProject?.job_config?.title || '未设置'}。HR 选择的 51job 沟通职位：${preview.jobTitle}（ID ${job.id}）。51job 显示本次预计消耗 ${preview.points} 个Hi聊数。确认后软件将点击平台“发起Hi聊”，由 51job 发送平台招呼语；软件不会再额外发送一条自定义招呼。`,
-        '确认 51job Hi聊点数',
-        { confirmButtonText: '确认消耗并发起Hi聊', cancelButtonText: '取消', type: 'warning' }
-      )
-    } catch {
-      ElMessage.info('已取消，未点击发起Hi聊')
+    if (preview.points > 100) {
+      ElMessage.warning(`预计消耗 ${preview.points} 点，超过单次 100 点上限，已跳过`)
       return
     }
     const result = await App.Confirm51JobHiChat(resume.id, preview.quoteId)
@@ -2278,10 +2858,18 @@ async function loadParsedContent() {
         translationRequest++
         translatedSections.value = []
         collapsedTranslations.value = {}
-        isChineseView.value = false
         translationBusy.value = false
       }
       parsedContent.value = content
+      // Reopen saved Chinese text without issuing a translation model call.
+      const request = translationRequest
+      try {
+        const api: any = await import('../../wailsjs/go/main/App')
+        const cached: string[] | null = await api.GetCachedResumeTranslation(requestedId, 'zh', translationSourceSections())
+        if (request === translationRequest && resumeStore.selectedId === requestedId && parsedContent.value === content && cached?.length === originalParsedSections.value.length) {
+          translatedSections.value = cached
+        }
+      } catch { /* Missing or stale translation stays hidden until the user clicks translate. */ }
     }
   } catch {
     if (resumeStore.selectedId === requestedId) parsedContent.value = ''
@@ -2301,7 +2889,6 @@ watch(() => resumeStore.selectedId, () => {
   translationRequest++
   translatedSections.value = []
   collapsedTranslations.value = {}
-  isChineseView.value = false
   translationBusy.value = false
   translationError.value = ''
   parsedContent.value = ''
@@ -4469,75 +5056,289 @@ details.candidate-portal-bar[open] > summary.portal-header { margin-bottom: 12px
     .parsed-bullet { display: flex; gap: 9px; }
     .parsed-bullet > span { color: $system-blue; font-weight: 700; }
 
-    .work-snapshot { display: grid; gap: 10px; min-width: 0; }
-    .work-snapshot h4 { margin: 0; color: $text-secondary; font-size: 12px; }
-    .snapshot-facts { display: flex; flex-wrap: wrap; gap: 6px; }
-    .snapshot-facts span { padding: 4px 8px; border-radius: 6px; background: $bg-primary; border: 1px solid $separator; color: $text-secondary; font-size: 12px; overflow-wrap: anywhere; }
-    .snapshot-experience {
-      display: flex;
-      flex-wrap: wrap;
-      align-items: baseline;
-      gap: 6px 10px;
+    /* 个人优势双模块排版（工作与专业能力 + 生活与个人特质） */
+    .personal-advantages-grid {
+      display: grid;
+      gap: 10px;
+      min-width: 0;
+    }
+
+    .advantage-module-card {
       padding: 12px 14px;
+      border-radius: 10px;
       border: 1px solid $separator;
-      border-left: 3px solid $system-blue;
-      border-radius: 8px;
       background: $bg-primary;
+      display: grid;
+      gap: 8px;
 
-      &.translated-subcard {
-        margin-top: -4px;
-        margin-bottom: 8px;
+      &.work-advantage {
+        border-left: 3px solid $system-blue;
+      }
+
+      &.life-advantage {
         border-left: 3px solid #10b981;
-        background: rgba(16, 185, 129, 0.04);
-        border-color: rgba(16, 185, 129, 0.22);
-
-        .translated-subcard-header {
-          width: 100%;
-          display: flex;
-          align-items: center;
-          justify-content: space-between;
-          margin-bottom: 4px;
-
-          .subcard-badge {
-            display: inline-flex;
-            align-items: center;
-            gap: 4px;
-            font-size: 11px;
-            font-weight: 700;
-            color: #059669;
-            background: rgba(16, 185, 129, 0.12);
-            padding: 2px 7px;
-            border-radius: 4px;
-          }
-
-          .subcard-period {
-            font-size: 11.5px;
-            font-weight: 600;
-            color: #059669;
-          }
-        }
-
-        .snapshot-period {
-          color: #059669;
-        }
       }
     }
-    .snapshot-period { color: $system-blue; font-size: 12px; font-weight: 700; }
-    .snapshot-experience strong { color: $text-primary; font-size: 13px; overflow-wrap: anywhere; }
-    .snapshot-role { color: $text-secondary; font-size: 12px; }
-    .snapshot-experience p { flex-basis: 100%; margin: 0; color: $text-secondary; font-size: 12px; line-height: 1.6; overflow-wrap: anywhere; }
 
-    .inline-trans-note {
+    .advantage-module-header {
       display: flex;
       align-items: center;
-      gap: 6px;
-      margin: 0;
-      padding: 8px 12px;
-      font-size: 12px;
-      color: #059669;
-      background: rgba(16, 185, 129, 0.08);
+      gap: 8px;
+    }
+
+    .advantage-module-badge {
+      display: inline-flex;
+      align-items: center;
+      padding: 2px 9px;
       border-radius: 6px;
-      border: 1px solid rgba(16, 185, 129, 0.2);
+      font-size: 11.5px;
+      font-weight: 700;
+
+      &.work {
+        background: rgba(79, 70, 229, 0.10);
+        color: $system-blue;
+      }
+
+      &.life {
+        background: rgba(16, 185, 129, 0.12);
+        color: #059669;
+      }
+    }
+
+    .advantage-bullet-list {
+      margin: 0;
+      padding: 0;
+      list-style: none;
+      display: grid;
+      gap: 6px;
+
+      li {
+        display: flex;
+        align-items: flex-start;
+        gap: 8px;
+        color: $text-primary;
+        font-size: 13px;
+        line-height: 1.65;
+        overflow-wrap: anywhere;
+      }
+
+      .bullet-dot {
+        color: $system-blue;
+        font-weight: 700;
+        flex-shrink: 0;
+      }
+    }
+
+    .life-advantage .advantage-bullet-list .bullet-dot {
+      color: #10b981;
+    }
+
+    .advantage-skill-tags {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      padding-top: 4px;
+      border-top: 1px dashed $separator;
+    }
+
+    .advantage-skill-chip {
+      display: inline-flex;
+      align-items: center;
+      padding: 3px 9px;
+      border-radius: 6px;
+      background: $bg-secondary;
+      border: 1px solid $separator;
+      color: $text-secondary;
+      font-size: 12px;
+      font-weight: 500;
+    }
+
+    /* 工作经历 & 项目经验：每一段经历独立模块化小卡片 */
+    .experience-card-list {
+      display: grid;
+      gap: 12px;
+      min-width: 0;
+    }
+
+    .work-exp-card,
+    .project-exp-card {
+      padding: 14px 16px;
+      border-radius: 10px;
+      border: 1px solid $separator;
+      background: $bg-primary;
+      display: grid;
+      gap: 9px;
+      min-width: 0;
+      box-shadow: 0 1px 2px rgba(15, 23, 42, 0.03);
+
+      &:nth-child(n + 4) {
+        content-visibility: auto;
+        contain-intrinsic-size: auto none auto 140px;
+      }
+    }
+
+    .work-exp-card {
+      border-left: 3.5px solid $system-blue;
+    }
+
+    .project-exp-card {
+      border-left: 3.5px solid #0ea5e9;
+    }
+
+    .work-exp-header,
+    .project-exp-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      flex-wrap: wrap;
+      gap: 8px 12px;
+      padding-bottom: 6px;
+      border-bottom: 1px solid rgba(148, 163, 184, 0.18);
+    }
+
+    .work-exp-title-group,
+    .project-exp-title-group {
+      display: flex;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 8px;
+      min-width: 0;
+    }
+
+    .exp-index-tag {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      padding: 1px 6px;
+      border-radius: 5px;
+      background: rgba(79, 70, 229, 0.10);
+      color: $system-blue;
+      font-size: 11px;
+      font-weight: 700;
+      font-family: 'SF Mono', 'Consolas', monospace;
+
+      &.project {
+        background: rgba(14, 165, 233, 0.12);
+        color: #0284c7;
+      }
+    }
+
+    .work-exp-company,
+    .project-exp-name {
+      color: $text-primary;
+      font-size: 14px;
+      font-weight: 700;
+      line-height: 1.4;
+      overflow-wrap: anywhere;
+    }
+
+    .work-exp-role {
+      display: inline-flex;
+      align-items: center;
+      padding: 2px 8px;
+      border-radius: 6px;
+      background: rgba(79, 70, 229, 0.08);
+      color: $system-blue;
+      font-size: 12px;
+      font-weight: 600;
+      overflow-wrap: anywhere;
+    }
+
+    .work-exp-dept {
+      display: inline-flex;
+      align-items: center;
+      padding: 2px 8px;
+      border-radius: 6px;
+      background: $bg-secondary;
+      border: 1px solid $separator;
+      color: $text-secondary;
+      font-size: 11.5px;
+    }
+
+    .work-exp-period,
+    .project-exp-period {
+      display: inline-flex;
+      align-items: center;
+      padding: 2px 9px;
+      border-radius: 999px;
+      background: $bg-secondary;
+      border: 1px solid $separator;
+      color: $text-secondary;
+      font-size: 12px;
+      font-weight: 600;
+      white-space: nowrap;
+    }
+
+    .work-exp-meta,
+    .project-exp-meta {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+    }
+
+    .meta-chip {
+      display: inline-flex;
+      align-items: center;
+      padding: 2px 8px;
+      border-radius: 5px;
+      background: $bg-secondary;
+      color: $text-secondary;
+      font-size: 11.5px;
+      line-height: 1.45;
+      overflow-wrap: anywhere;
+
+      &.business {
+        background: rgba(14, 165, 233, 0.07);
+        color: #0369a1;
+      }
+    }
+
+    .work-exp-duties,
+    .project-exp-details {
+      margin: 0;
+      padding: 0;
+      list-style: none;
+      display: grid;
+      gap: 6px;
+
+      li {
+        display: flex;
+        align-items: flex-start;
+        gap: 8px;
+        color: $text-primary;
+        font-size: 13px;
+        line-height: 1.68;
+        overflow-wrap: anywhere;
+      }
+
+      .bullet-dot {
+        color: $system-blue;
+        font-weight: 700;
+        flex-shrink: 0;
+      }
+    }
+
+    .project-exp-details .bullet-dot {
+      color: #0284c7;
+    }
+
+    .work-exp-tags {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      padding-top: 6px;
+      border-top: 1px dashed $separator;
+    }
+
+    .exp-skill-tag {
+      display: inline-flex;
+      align-items: center;
+      padding: 2px 8px;
+      border-radius: 5px;
+      background: $bg-secondary;
+      border: 1px solid $separator;
+      color: $text-secondary;
+      font-size: 11.5px;
     }
 
     .section-translation-container {
@@ -4575,11 +5376,6 @@ details.candidate-portal-bar[open] > summary.portal-header { margin-bottom: 12px
         display: grid;
         gap: 9px;
         min-width: 0;
-        max-width: 78ch;
-      }
-
-      .translation-snapshot {
-        background: rgba(255, 255, 255, 0.7);
       }
     }
 

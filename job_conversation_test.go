@@ -25,6 +25,17 @@ func Test51JobContactUsesExactCandidateIdentityAndPreventsDuplicateGreeting(t *t
 	}
 }
 
+func Test51JobContactRejectsDifferentResumeIDInStoredURL(t *testing.T) {
+	a := NewApp()
+	a.dataDirOverride = t.TempDir()
+	r := &Resume{ID: "resume_wrong_link", ProjectID: "project_1", SourcePlatform: "51job", PlatformCandidateID: "123",
+		URL: "https://ehire.51job.com/Revision/talent/resume/detail?resumeId=456"}
+	a.saveResume(r)
+	if _, err := a.load51JobContactResume(r.ID); err == nil {
+		t.Fatal("candidate URL for another platform resume was accepted")
+	}
+}
+
 func Test51JobCommunicationUsesTheCandidateProjectJobTitle(t *testing.T) {
 	a := NewApp()
 	a.dataDirOverride = t.TempDir()

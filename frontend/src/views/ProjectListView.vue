@@ -143,7 +143,7 @@
             <div class="expand-full" style="margin-top: 12px;">
               <div class="label-row" style="flex-direction: column; align-items: flex-start; gap: 3px;">
                 <label class="expand-label">必备关键技能 / 评分项 (回车分隔)</label>
-                <span class="label-tip" style="color: #2563eb !important; font-weight: 500;">（关键技能用于生成技能指标雷达，可分析八项以内的技能，若不足则AI自动匹配技能）</span>
+                <span class="label-tip" style="color: #2563eb !important; font-weight: 500;">（最多填写 8 项；只按已填写的技能生成雷达，留空则不显示雷达）</span>
               </div>
               <el-select
                 v-model="currentJobConfig.requiredSkills"
@@ -693,6 +693,10 @@ function openProject(id: string) {
 
 async function handleCreate() {
   if (!newProject.name.trim()) return
+  if (new Set(currentJobConfig.requiredSkills.map(skill => skill.trim()).filter(Boolean)).size > 8) {
+    ElMessage.warning('必备关键技能最多填写 8 项，请删减后保存')
+    return
+  }
   const jobCfg = {
     title: currentJobConfig.title,
     requirements: [],

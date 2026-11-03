@@ -72,6 +72,7 @@ function telescopeSnapshot() {
     hruid,
     accountScope: (coid && hruid) ? `co:${coid}:hr:${hruid}` : '',
     jobs,
+    listLoaded: Boolean(list),
     candidates: groups.flatMap(group => group.dataList || []).map(item => JSON.parse(JSON.stringify(item)))
   };
 }
@@ -92,32 +93,75 @@ async function readTelescopePage(target) {
   }
 }
 
+async function reloadSkeletonPage(target) {
+  const session = await target.createCDPSession();
+  try { await session.send('Page.enable'); await session.send('Page.reload', { ignoreCache: false }); }
+  finally { await session.detach().catch(() => {}); }
+}
+
+async function findTelescopeTargets(browser) {
+  const matching = () => browser.targets().filter(target => target.type() === 'page' &&
+    target.url().startsWith('https://ehire.51job.com/Revision/talent/search-recommend'));
+  if (matching().length) return matching();
+  const siteTargets = browser.targets().filter(target => target.type() === 'page' &&
+    target.url().startsWith('https://ehire.51job.com/') && !target.url().toLowerCase().includes('/error.aspx'));
+  for (const target of siteTargets) {
+    const page = await target.page().catch(() => null);
+    if (!page) continue;
+    const hasMenu = await page.evaluate(() => Boolean(document.querySelector('#sensor_recommand_menu'))).catch(() => false);
+    if (!hasMenu) continue;
+    await page.evaluate(() => document.querySelector('#sensor_recommand_menu').click());
+    const deadline = Date.now() + 8000;
+    while (Date.now() < deadline) {
+      if (matching().length) return matching();
+      await new Promise(resolve => setTimeout(resolve, 200));
+    }
+    throw new Error('已点击 51job「人才望远镜」菜单，但页面未在 8 秒内打开；请检查登录状态');
+  }
+  throw new Error('未找到已登录且带「人才望远镜」菜单的 51job 页面，请先在专用浏览器登录企业账号');
+}
+
 async function readTelescopeCatalog() {
   const browser = await puppeteer.connect({
     browserURL: 'http://127.0.0.1:9503', defaultViewport: null, protocolTimeout: 8000
   });
   try {
-    const targets = browser.targets().filter(target => target.type() === 'page' &&
-      target.url().startsWith('https://ehire.51job.com/Revision/talent/search-recommend'));
+    const targets = await findTelescopeTargets(browser);
     if (!targets.length) {
       throw new Error('未找到已打开的人才望远镜页面，请先在 51job 专用浏览器打开「AI淘金 → 人才望远镜」');
     }
     let lastError = null;
     for (const target of targets) {
-      try {
-        const state = await readTelescopePage(target);
-        if (state && (state.jobs?.length > 0 || state.jobId)) {
-          return {
-            status: 'ok',
-            accountScope: state.accountScope,
-            activeJobId: state.jobId,
-            activeJobTitle: state.jobTitle,
-            companyId: state.companyId,
-            jobs: state.jobs
-          };
+      for (let attempt = 0; attempt < 20; attempt++) {
+        try {
+          const state = await readTelescopePage(target);
+          if (state && (state.jobs?.length > 0 || state.jobId)) {
+            return {
+              status: 'ok',
+              accountScope: state.accountScope,
+              activeJobId: state.jobId,
+              activeJobTitle: state.jobTitle,
+              companyId: state.companyId,
+              jobs: state.jobs
+            };
+          }
+        } catch (err) {
+          lastError = err;
         }
-      } catch (err) {
-        lastError = err;
+        await new Promise(resolve => setTimeout(resolve, 400));
+      }
+    }
+    // An old telescope tab can remain on a Vue loading skeleton after login
+    // expires. Refresh that tab once without activating its window.
+    for (const target of targets) {
+      await reloadSkeletonPage(target).catch(() => {});
+      for (let attempt = 0; attempt < 20; attempt++) {
+        await new Promise(resolve => setTimeout(resolve, 400));
+        const state = await readTelescopePage(target).catch(() => null);
+        if (state && (state.jobs?.length > 0 || state.jobId)) {
+          return { status: 'ok', accountScope: state.accountScope, activeJobId: state.jobId,
+            activeJobTitle: state.jobTitle, companyId: state.companyId, jobs: state.jobs };
+        }
       }
     }
     throw lastError || new Error('未能从人才望远镜页面解析出职位列表');
@@ -132,20 +176,22 @@ async function scanTelescope(jobId, limit = 100) {
     browserURL: 'http://127.0.0.1:9503', defaultViewport: null, protocolTimeout: 8000
   });
   try {
-    const targets = browser.targets().filter(target => target.type() === 'page' &&
-      target.url().startsWith('https://ehire.51job.com/Revision/talent/search-recommend'));
+    const targets = await findTelescopeTargets(browser);
     if (!targets.length) throw new Error('未找到已打开的人才望远镜页面，请先在 51job 专用浏览器打开「AI淘金 → 人才望远镜」');
     const visibleJobs = [];
     const readErrors = [];
     for (const target of targets) {
       let state;
-      try {
-        state = await readTelescopePage(target);
-      } catch (error) {
-        readErrors.push(error.message);
-        continue;
+      for (let attempt = 0; attempt < 20; attempt++) {
+        try {
+          state = await readTelescopePage(target);
+          if (state?.jobId && state.listLoaded) break;
+        } catch (error) {
+          readErrors.push(error.message);
+        }
+        await new Promise(resolve => setTimeout(resolve, 400));
       }
-      if (!state?.jobId) continue;
+      if (!state?.jobId || !state.listLoaded) continue;
       visibleJobs.push(state.jobTitle ? `${state.jobTitle} (${state.jobId})` : state.jobId);
       if (state.jobId !== jobId) continue;
       if (!state.companyId) throw new Error('人才望远镜未返回可核验的企业 ID');
@@ -175,11 +221,92 @@ async function scanTelescope(jobId, limit = 100) {
   }
 }
 
+async function rejectTelescopeCandidate(jobId, candidateId, accountScope, reasonLabel) {
+  if (!jobId || !candidateId || !accountScope) throw new Error('缺少可核对的职位、人才或账号 ID');
+  const browser = await puppeteer.connect({ browserURL: 'http://127.0.0.1:9503', defaultViewport: null, protocolTimeout: 10000 });
+  try {
+    const targets = await findTelescopeTargets(browser);
+    for (const target of targets) {
+      const state = await readTelescopePage(target).catch(() => null);
+      if (!state || state.jobId !== jobId || state.accountScope !== accountScope) continue;
+      if (!state.candidates.some(raw => String(raw.userid || '') === candidateId)) {
+        throw new Error('目标人才已不在当前望远镜名单，未重复点击');
+      }
+      const page = await target.page();
+      const outcome = await page.evaluate(async ({ candidateId, reasonLabel }) => {
+        const visible = el => !!el && el.getClientRects().length > 0;
+        const components = [...document.querySelectorAll('*')].map(el => el.__vue__).filter(Boolean);
+        const list = components.find(vm => vm.$options?.name === 'EhFossicksList');
+        const hiddenMismatch = (list?.$props?.list || []).some(group =>
+          (group.notMatchList || []).some(raw => String(raw.userid || '') === candidateId) && group.notMatchListCollapse);
+        if (hiddenMismatch) {
+          const toggles = [...list.$el.querySelectorAll('.not-match .collapse-btn')]
+            .filter(el => visible(el) && /展开/.test(el.innerText || ''));
+          if (toggles.length !== 1) throw new Error('无法展开平台未推荐人才列表，未点击平台');
+          toggles[0].click();
+          await new Promise(resolve => setTimeout(resolve, 250));
+        }
+        const cards = [...document.querySelectorAll('*')].map(el => el.__vue__).filter(vm => vm?.$options?.name === 'EhFossicksResumeCard' &&
+          String(vm.$props?.source?.userid || '') === candidateId && visible(vm.$el));
+        if (cards.length !== 1) {
+          throw new Error('无法唯一定位该人才的望远镜卡片，未点击平台');
+        }
+        const button = document.getElementById(`no_interested_${candidateId}`);
+        if (!visible(button) || !cards[0].$el.contains(button) || !button.classList.contains('no_interested_div')) {
+          throw new Error('无法核对该人才的不感兴趣按钮，未点击平台');
+        }
+        button.click();
+        await new Promise(resolve => setTimeout(resolve, 500));
+        const dialogs = [...document.querySelectorAll('.el-popover,.el-dialog,[role="dialog"]')]
+          .filter(el => visible(el) && /选择不感兴趣原因|其他原因/.test(el.innerText || ''));
+        if (!dialogs.length) throw new Error('平台未显示不感兴趣原因，回执待核查');
+        const dialog = dialogs[dialogs.length - 1];
+        const options = [...dialog.querySelectorAll('button,li,[role="button"],span,div')]
+          .filter(el => visible(el) && el.children.length === 0);
+        let option = options.find(el => (el.textContent || '').trim() === reasonLabel);
+        if (!option) option = options.find(el => (el.textContent || '').trim() === '其他原因');
+        if (!option) throw new Error('平台未显示可选原因，回执待核查');
+        const other = /其他原因/.test(option.textContent || '');
+        (option.closest('button,li,[role="button"]') || option).click();
+        await new Promise(resolve => setTimeout(resolve, 350));
+        if (other) {
+          const input = [...document.querySelectorAll('textarea,input[type="text"]')].find(el => visible(el) && !el.disabled &&
+            /原因|说明|补充|其他/.test(el.placeholder || el.closest('.el-dialog,.el-popover')?.innerText || ''));
+          if (!input) throw new Error('已选其他原因，但没有说明输入框，回执待核查');
+          const setter = Object.getOwnPropertyDescriptor(input.tagName === 'TEXTAREA' ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype, 'value')?.set;
+          if (!setter) throw new Error('无法填写其他原因，回执待核查');
+          setter.call(input, '不匹配');
+          input.dispatchEvent(new Event('input', { bubbles: true }));
+        }
+        const submit = [...document.querySelectorAll('.el-dialog__footer button,.el-popover button')]
+          .filter(el => visible(el) && /确定|确认|提交/.test(el.innerText || ''));
+        if (submit.length === 1) submit[0].click();
+        return { selectedReason: other ? '其他原因：不匹配' : reasonLabel };
+      }, { candidateId, reasonLabel });
+      let verified = false;
+      for (let i = 0; i < 8; i++) {
+        await new Promise(resolve => setTimeout(resolve, 400));
+        const after = await readTelescopePage(target).catch(() => null);
+        if (after && after.jobId === jobId && after.accountScope === accountScope &&
+            !after.candidates.some(raw => String(raw.userid || '') === candidateId)) { verified = true; break; }
+      }
+      return { status: verified ? 'ok' : 'receipt_pending', verified, candidateId, jobId,
+        receipt: verified ? `平台已移除该人才（${outcome.selectedReason}）` : '已点击不感兴趣，但候选人仍在列表；仅核查回执，不重复点击' };
+    }
+    throw new Error('当前没有与所选账号及职位一致的望远镜页面');
+  } finally { await browser.disconnect(); }
+}
+
 if (require.main === module) {
   const modeIndex = process.argv.indexOf('--mode');
   const mode = modeIndex >= 0 ? process.argv[modeIndex + 1] : 'scan';
   if (mode === 'catalog') {
     readTelescopeCatalog()
+      .then(result => process.stdout.write(JSON.stringify(result) + '\n'))
+      .catch(error => { process.stdout.write(JSON.stringify({ status: 'error', message: error.message }) + '\n'); process.exitCode = 1; });
+  } else if (mode === 'reject') {
+    const argument = name => { const i = process.argv.indexOf(name); return i >= 0 ? process.argv[i + 1] : ''; };
+    rejectTelescopeCandidate(argument('--job-id'), argument('--candidate-id'), argument('--account-scope'), argument('--reason-label'))
       .then(result => process.stdout.write(JSON.stringify(result) + '\n'))
       .catch(error => { process.stdout.write(JSON.stringify({ status: 'error', message: error.message }) + '\n'); process.exitCode = 1; });
   } else {
@@ -190,4 +317,4 @@ if (require.main === module) {
   }
 }
 
-module.exports = { normalizeTelescopeCandidate, scanTelescope, readTelescopePage, readTelescopeCatalog };
+module.exports = { normalizeTelescopeCandidate, scanTelescope, readTelescopePage, readTelescopeCatalog, rejectTelescopeCandidate };

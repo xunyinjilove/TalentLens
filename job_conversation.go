@@ -68,7 +68,7 @@ func (a *App) load51JobContactResume(resumeID string) (*Resume, error) {
 	if err := json.Unmarshal(data, &resume); err != nil {
 		return nil, fmt.Errorf("候选人档案无法读取：%w", err)
 	}
-	if !is51JobCandidateDetailURL(resume.URL) {
+	if !is51JobCandidateDetailURL(resume.URL) || (resume.PlatformCandidateID != "" && !is51JobResumeURLForCandidate(resume.URL, resume.PlatformCandidateID)) {
 		return nil, fmt.Errorf("该候选人没有可核对的 51job 详情地址")
 	}
 	// A verified platform identity may have several local document versions.
@@ -121,6 +121,14 @@ func is51JobCandidateDetailURL(raw string) bool {
 		}
 	}
 	return true
+}
+
+func is51JobResumeURLForCandidate(raw, candidateID string) bool {
+	if !is51JobCandidateDetailURL(raw) || candidateID == "" {
+		return false
+	}
+	parsed, _ := url.Parse(raw)
+	return parsed.Query().Get("resumeId") == candidateID
 }
 
 func conversationCandidateName(resume *Resume) string {
@@ -323,6 +331,9 @@ func (a *App) Prepare51JobHiChatForJob(resumeID, jobID, jobTitle string) JobConv
 	if resume.ContactStatus != "" {
 		return JobConversationResult{Status: "error", Message: "此候选人已有沟通记录，请先查看 51job 聊天记录"}
 	}
+	if reason := a.known51JobHardFailure(resume); reason != "" {
+		return JobConversationResult{Status: "error", Message: "候选人已知不符合项目硬性条件，已跳过打招呼：" + reason}
+	}
 	jobID, jobTitle = strings.TrimSpace(jobID), strings.TrimSpace(jobTitle)
 	if jobID == "" || jobTitle == "" || len([]rune(jobID)) > 100 || len([]rune(jobTitle)) > 200 {
 		return JobConversationResult{Status: "error", Message: "请选择 51job 返回的有效沟通职位"}
@@ -353,6 +364,12 @@ func (a *App) Confirm51JobHiChat(resumeID, quoteID string) JobConversationResult
 	}
 	if resume.ContactStatus != "" || a.conversationJobTitle(resume) != quote.ProjectTitle {
 		return JobConversationResult{Status: "error", Message: "候选人沟通状态或岗位已变化，未点击发起Hi聊"}
+	}
+	if reason := a.known51JobHardFailure(resume); reason != "" {
+		return JobConversationResult{Status: "error", Message: "候选人已知不符合项目硬性条件，已跳过打招呼：" + reason}
+	}
+	if quote.Points > 100 {
+		return JobConversationResult{Status: "error", Message: "本次超过 100 点限额，未发起Hi聊"}
 	}
 	result := a.run51JobConversation(resume, "confirm_hi", "", &quote)
 	if result.Status != "sent" {

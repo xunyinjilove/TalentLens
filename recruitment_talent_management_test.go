@@ -6,6 +6,172 @@ import (
 	"time"
 )
 
+func TestTalentManagementPendingReviewKeepsFailedRuleReason(t *testing.T) {
+	app := NewApp()
+	app.dataDirOverride = t.TempDir()
+	defer app.closeRecruitmentDB()
+	project := app.CreateProject("测试岗位", "", 1, "", "", &JobConfig{Title: "测试岗位"})
+	if project == nil {
+		t.Fatal("create project failed")
+	}
+	if err := app.SetPlatformJobMapping("51job", "co:1:hr:2", "job-1", project.ID); err != nil {
+		t.Fatal(err)
+	}
+	db, err := app.getRecruitmentDB()
+	if err != nil {
+		t.Fatal(err)
+	}
+	candidate := talentManagementCandidate{CandidateID: "candidate-1", RecordID: "record-1", Name: "测试人选"}
+	reasons := []RuleCheckItem{{Rule: "MIN_EDUCATION", Label: "最低学历", Status: "fail", Evidence: "最高学历大专，要求本科"}}
+	if err := saveTalentManagementPendingReview(db, project.ID, "co:1:hr:2", "job-1", candidate, "待处理", "unfit", reasons); err != nil {
+		t.Fatal(err)
+	}
+	items, err := app.ListTalentManagementPendingReviews(project.ID)
+	if err != nil || len(items) != 1 || len(items[0].Reasons) != 1 || items[0].Reasons[0].Evidence != reasons[0].Evidence {
+		t.Fatalf("pending reasons: %+v, err=%v", items, err)
+	}
+}
+
+func TestTalentManagementImportCanBeStopped(t *testing.T) {
+	app := NewApp()
+	app.Begin51JobManagementImport()
+	ctx := app.managementImportContext()
+	app.Stop51JobManagementImport()
+	if ctx.Err() == nil {
+		t.Fatal("stop did not cancel the active import")
+	}
+	app.End51JobManagementImport()
+	if app.managementImportContext().Err() != nil {
+		t.Fatal("cancelled context remained active")
+	}
+}
+
+func TestTalentManagementPlatformStageMapping(t *testing.T) {
+	app := NewApp()
+	app.dataDirOverride = t.TempDir()
+	defer app.closeRecruitmentDB()
+	project := app.CreateProject("阶段映射岗位", "", 1, "", "", &JobConfig{Title: "阶段映射岗位"})
+	if project == nil {
+		t.Fatal("create project failed")
+	}
+	const scope = "co:1:hr:2"
+	if err := app.SetPlatformJobMapping("51job", scope, "job-1", project.ID); err != nil {
+		t.Fatal(err)
+	}
+	complete := true
+	for _, tc := range []struct{ status, expected string }{
+		{"待处理", "new"}, {"合适", "pending_contact"}, {"面试", "first_interview"}, {"待定", "new"},
+	} {
+		record := ApplicationRecord{Platform: "51job", PlatformAccount: scope,
+			ApplicationID: "record-" + tc.status, PlatformCandidateID: "candidate-" + tc.status,
+			PlatformJobID: "job-1", CandidateName: tc.status + "人选", ResumeText: "完整简历正文",
+			DocumentsComplete: &complete, PlatformStatus: tc.status}
+		if result, err := app.ingestApplicationRecords("51job", []ApplicationRecord{record}); err != nil || result.AddedCount != 1 {
+			t.Fatalf("import %s: %+v, %v", tc.status, result, err)
+		}
+		db, _ := app.getRecruitmentDB()
+		if err := app.applyTalentManagementStage(db, project.ID, record); err != nil {
+			t.Fatalf("stage %s: %v", tc.status, err)
+		}
+		var resume *Resume
+		for _, candidateResume := range app.GetProjectResumes(project.ID) {
+			if candidateResume.ID == applicationResumeID(record) {
+				resume = candidateResume
+				break
+			}
+		}
+		if resume == nil {
+			t.Fatalf("missing resume for %s", tc.status)
+		}
+		resume.Status = "done"
+		app.syncRecruitmentResume(resume)
+		var stage string
+		if err := db.QueryRow(`SELECT pc.stage FROM project_candidates pc JOIN candidate_sources cs ON cs.candidate_id=pc.candidate_id
+			WHERE pc.project_id=? AND cs.platform_candidate_id=?`, project.ID, record.PlatformCandidateID).Scan(&stage); err != nil || stage != tc.expected {
+			t.Fatalf("%s stage=%q, want %q, err=%v", tc.status, stage, tc.expected, err)
+		}
+	}
+}
+
+func TestArchiveRejectedManagementCandidateRemovesFormalLibraryLink(t *testing.T) {
+	app := NewApp()
+	app.dataDirOverride = t.TempDir()
+	defer app.closeRecruitmentDB()
+	project := app.CreateProject("测试岗位", "", 1, "", "", &JobConfig{Title: "测试岗位"})
+	if err := app.SetPlatformJobMapping("51job", "co:1:hr:2", "job-1", project.ID); err != nil {
+		t.Fatal(err)
+	}
+	complete := true
+	record := ApplicationRecord{Platform: "51job", PlatformAccount: "co:1:hr:2", PlatformJobID: "job-1", ApplicationID: "rec-1", PlatformCandidateID: "cand-1", CandidateName: "测试人选", PlatformStatus: "合适", ResumeText: "完整简历正文", DocumentsComplete: &complete}
+	if _, err := app.ingestApplicationRecords("51job", []ApplicationRecord{record}); err != nil {
+		t.Fatal(err)
+	}
+	db, _ := app.getRecruitmentDB()
+	if err := archiveRejectedManagementCandidate(db, project.ID, "cand-1"); err != nil {
+		t.Fatal(err)
+	}
+	if got := app.GetProjectResumes(project.ID); len(got) != 0 {
+		t.Fatalf("archived candidate remains in formal library: %d", len(got))
+	}
+}
+
+func TestReconcileUnfitManagementCandidatesNeverImportsRejectedResume(t *testing.T) {
+	app := NewApp()
+	app.dataDirOverride = t.TempDir()
+	defer app.closeRecruitmentDB()
+	project := app.CreateProject("测试岗位", "", 1, "", "", &JobConfig{Title: "测试岗位"})
+	if err := app.SetPlatformJobMapping("51job", "co:1:hr:2", "job-1", project.ID); err != nil {
+		t.Fatal(err)
+	}
+	complete := true
+	record := ApplicationRecord{Platform: "51job", PlatformAccount: "co:1:hr:2", PlatformJobID: "job-1", ApplicationID: "rec-old", PlatformCandidateID: "cand-old", CandidateName: "旧简历", PlatformStatus: "面试", ResumeText: "完整简历", DocumentsComplete: &complete}
+	if _, err := app.ingestApplicationRecords("51job", []ApplicationRecord{record}); err != nil {
+		t.Fatal(err)
+	}
+	db, _ := app.getRecruitmentDB()
+	ids := []talentManagementCandidate{
+		{CandidateID: "cand-old", RecordID: "rec-old", JobID: "job-1"},
+		{CandidateID: "cand-only-on-platform", RecordID: "rec-new", JobID: "job-1"},
+	}
+	if err := reconcileUnfitManagementCandidates(db, project.ID, "co:1:hr:2", "job-1", ids); err != nil {
+		t.Fatal(err)
+	}
+	if got := app.GetProjectResumes(project.ID); len(got) != 0 {
+		t.Fatalf("平台不合适对账后正式库仍有 %d 份简历", len(got))
+	}
+}
+
+func TestStoredAssociateFromPendingStatusIsArchivedBeforeSync(t *testing.T) {
+	app := NewApp()
+	app.dataDirOverride = t.TempDir()
+	defer app.closeRecruitmentDB()
+	project := app.CreateProject("区域销售经理", "", 1, "", "", &JobConfig{Title: "区域销售经理"})
+	const scope = "co:1:hr:2"
+	if err := app.SetPlatformJobMapping("51job", scope, "job-1", project.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := app.SetTalentManagementStrictCriteria(TalentManagementStrictCriteria{ProjectID: project.ID, MinEducation: "本科", ActivityDays: 90}); err != nil {
+		t.Fatal(err)
+	}
+	complete := true
+	record := ApplicationRecord{Platform: "51job", PlatformAccount: scope, PlatformJobID: "job-1",
+		ApplicationID: "rec-1", PlatformCandidateID: "cand-1", CandidateName: "大专人选", PlatformStatus: "待定",
+		ResumeText: `{"degree":"大专","topdegree":"大专","activetimelabel":"3日内活跃"}`, DocumentsComplete: &complete}
+	if result, err := app.ingestApplicationRecords("51job", []ApplicationRecord{record}); err != nil || result.AddedCount != 1 {
+		t.Fatalf("old import: %+v %v", result, err)
+	}
+	if err := app.reconcileStored51JobHardCriteria(project.ID, scope, "job-1"); err != nil {
+		t.Fatal(err)
+	}
+	if got := app.GetProjectResumes(project.ID); len(got) != 0 {
+		t.Fatalf("大专旧简历仍在正式库: %d", len(got))
+	}
+	reviews, err := app.ListTalentManagementPendingReviews(project.ID)
+	if err != nil || len(reviews) != 1 || reviews[0].Verdict != "unfit" {
+		t.Fatalf("missing actionable reason: %+v %v", reviews, err)
+	}
+}
+
 func TestParseEducationRank(t *testing.T) {
 	cases := []struct {
 		input    string
