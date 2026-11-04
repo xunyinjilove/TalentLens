@@ -35,8 +35,23 @@
               <div class="interview-day-heading"><span class="interview-day-number">{{ group.day }}</span><div><h3>{{ group.label }}</h3><span class="wb-muted">共 {{ group.items.length }} 场面试</span></div></div>
               <article v-for="item in group.items" :key="item.id" class="interview-agenda-card">
                 <div class="interview-agenda-time"><strong>{{ formatTime(item.startsAt) }}</strong><span>{{ durationMinutes(item) }} 分钟</span></div>
-                <div class="interview-agenda-detail"><strong>{{ item.candidateName }} · {{ candidateRole(item) }}</strong><div class="interview-agenda-meta">{{ item.projectName }} · 面试官：{{ item.interviewer || '待指定' }} · {{ item.method || '方式待定' }}<template v-if="item.location"> · {{ item.location }}</template></div><div v-if="item.meetingSyncStatus && item.meetingSyncStatus !== 'synced'" class="wb-muted">腾讯会议：{{ item.meetingError || item.meetingSyncStatus }}</div><a v-if="item.meetingUrl" :href="item.meetingUrl" target="_blank" rel="noopener noreferrer">{{ item.meetingUrl }}</a></div>
-                <div class="interview-agenda-actions"><span class="wb-pill" :class="item.status === 'cancelled' ? 'danger' : item.status === 'completed' ? 'ok' : ''">{{ statusLabel(item.status) }}</span><el-button size="small" @click="edit(item)">{{ item.status === 'cancelled' ? '查看' : '改期 / 编辑' }}</el-button></div>
+                <div class="interview-agenda-detail">
+                  <strong>{{ item.candidateName }} · {{ candidateRole(item) }}</strong>
+                  <div class="interview-agenda-meta">{{ item.projectName }} · 面试官：{{ item.interviewer || '待指定' }} · {{ item.method || '方式待定' }}<template v-if="item.location"> · {{ item.location }}</template></div>
+                  <div v-if="item.meetingSyncStatus && item.meetingSyncStatus !== 'synced'" class="wb-muted">腾讯会议：{{ item.meetingError || item.meetingSyncStatus }}</div>
+                  <div v-if="item.meetingUrl" class="interview-meeting-bar">
+                    <a :href="item.meetingUrl" target="_blank" rel="noopener noreferrer" @click.prevent="openMeetingUrl(item.meetingUrl)">{{ item.meetingUrl }}</a>
+                    <span v-if="item.meetingCode" class="interview-meeting-code">#腾讯会议：{{ formatMeetingCode(item.meetingCode) }}</span>
+                    <el-button size="small" type="primary" plain @click="copyMeetingInvite(item)">一键复制链接</el-button>
+                  </div>
+                </div>
+                <div class="interview-agenda-actions">
+                  <span class="wb-pill" :class="item.status === 'cancelled' ? 'danger' : item.status === 'completed' ? 'ok' : ''">{{ statusLabel(item.status) }}</span>
+                  <div class="interview-agenda-btn-group">
+                    <el-button v-if="item.meetingUrl || item.location" size="small" type="primary" plain @click="copyMeetingInvite(item)">一键复制链接</el-button>
+                    <el-button size="small" @click="edit(item)">{{ item.status === 'cancelled' ? '查看' : '改期 / 编辑' }}</el-button>
+                  </div>
+                </div>
               </article>
             </section>
           </div>
@@ -54,14 +69,29 @@
     </main>
     <el-dialog v-model="dialogOpen" :title="form.id ? '修改面试' : '预约面试'" width="600px">
       <div class="wb-form-grid">
-        <div class="full"><label>候选人及项目</label><el-select v-model="form.projectCandidateId" filterable clearable :disabled="!!form.id" placeholder="输入姓名、简历文件名或职位搜索" style="width:100%" :filter-method="filterBookingCandidates"><el-option v-for="person in bookingCandidates" :key="person.projectCandidateId" :value="person.projectCandidateId" :label="`${person.name} · ${person.jobTitle || person.projectName} · ${person.projectName} · ${person.resumeFileName || '无文件名'}`" /></el-select></div>
+        <div class="full">
+          <label>候选人及项目</label>
+          <el-select v-model="form.projectCandidateId" filterable clearable :disabled="!!form.id" placeholder="输入姓名、简历文件名或职位搜索" style="width:100%" @change="onCandidateSelected">
+            <el-option v-for="person in bookingCandidates" :key="person.projectCandidateId" :value="person.projectCandidateId" :label="`${person.name} · ${person.jobTitle || person.projectName} · ${person.projectName} · ${person.resumeFileName || '无文件名'}`" />
+          </el-select>
+        </div>
         <div><label>开始时间</label><input v-model="form.startsAt" type="datetime-local" /></div>
         <div><label>结束时间</label><input v-model="form.endsAt" type="datetime-local" /></div>
         <div><label>面试官</label><input v-model="form.interviewer" placeholder="输入面试官" /></div>
         <div><label>面试方式</label><select v-model="form.method"><option value="">请选择</option><option value="腾讯会议自动生成">腾讯会议自动生成</option><option value="其他视频会议">其他视频会议（手填链接）</option><option value="视频面试">视频面试（历史记录）</option><option value="现场面试">现场面试</option><option value="电话面试">电话面试</option></select></div>
-        <div class="full" v-if="form.method === '腾讯会议自动生成'"><label>会议标题</label><input v-model="form.meetingSubject" placeholder="默认：姓名－岗位－初面／复面" /></div>
+        <div class="full" v-if="form.method === '腾讯会议自动生成'"><label>会议标题</label><input v-model="form.meetingSubject" :placeholder="defaultMeetingSubjectPlaceholder" /></div>
         <div class="full" v-else><label>地点或会议链接</label><input v-model="form.location" /></div>
-        <div class="full" v-if="form.meetingSyncStatus"><label>腾讯会议状态</label><p>{{ form.meetingError || (form.meetingSyncStatus === 'synced' ? '远端会议已同步' : form.meetingSyncStatus) }}</p><p v-if="form.remoteStartsAt && form.meetingSyncStatus !== 'synced'">远端仍有效时间：{{ formatDay(form.remoteStartsAt) }} {{ formatTime(form.remoteStartsAt) }}</p><p v-if="form.meetingUrl">会议链接：<a :href="form.meetingUrl" target="_blank" rel="noopener noreferrer">{{ form.meetingUrl }}</a> <el-button link @click="copyMeetingUrl">复制</el-button></p><el-button v-if="form.id && form.meetingSyncStatus !== 'synced'" size="small" @click="retryMeetingSync">重试同步／对账</el-button></div>
+        <div class="full" v-if="form.meetingSyncStatus">
+          <label>腾讯会议状态</label>
+          <p>{{ form.meetingError || (form.meetingSyncStatus === 'synced' ? '远端会议已同步' : form.meetingSyncStatus) }}</p>
+          <p v-if="form.remoteStartsAt && form.meetingSyncStatus !== 'synced'">远端仍有效时间：{{ formatDay(form.remoteStartsAt) }} {{ formatTime(form.remoteStartsAt) }}</p>
+          <p v-if="form.meetingUrl">
+            会议链接：<a :href="form.meetingUrl" target="_blank" rel="noopener noreferrer" @click.prevent="openMeetingUrl(form.meetingUrl)">{{ form.meetingUrl }}</a>
+            <template v-if="form.meetingCode"> · #腾讯会议：{{ formatMeetingCode(form.meetingCode) }}</template>
+            <el-button link type="primary" @click="copyMeetingInvite(form)">一键复制链接</el-button>
+          </p>
+          <el-button v-if="form.id && form.meetingSyncStatus !== 'synced'" size="small" @click="retryMeetingSync">重试同步／对账</el-button>
+        </div>
         <div class="full"><label>备注</label><textarea v-model="form.note" rows="3" /></div>
       </div>
       <p class="wb-muted" style="font-size:12px">时区：{{ localTimeZone }}。日程保存在本机；保存不会自动通知候选人或面试官。</p>
@@ -94,15 +124,85 @@ const dialogOpen = ref(false)
 type PendingPerson = { projectCandidateId: string; projectId: string; candidateName: string; projectName: string; stage: string }
 const pendingCandidates = ref<PendingPerson[]>([])
 const saving = ref(false)
-const form = reactive<RecruitmentInterview>({ id:'', projectCandidateId:'', candidateName:'', projectName:'', startsAt:'', endsAt:'', interviewer:'', method:'', location:'', note:'', status:'scheduled', meetingSubject:'' })
+const form = reactive<RecruitmentInterview>({ id:'', projectCandidateId:'', candidateName:'', projectName:'', startsAt:'', endsAt:'', interviewer:'', method:'', location:'', note:'', status:'scheduled', meetingSubject:'', meetingId:'', meetingCode:'', meetingUrl:'', meetingSyncStatus:'' })
+const lastAutoSubject = ref('')
 const localTimeZone = Intl.DateTimeFormat().resolvedOptions().timeZone
-const bookingQuery = ref('')
-const bookingCandidates = computed(() => recruitment.candidates.filter(person => {
-  if (projectId.value && person.projectId !== projectId.value && person.projectCandidateId !== form.projectCandidateId) return false
-  const query = bookingQuery.value.trim().toLocaleLowerCase()
-  return !query || [person.name, person.resumeFileName, person.jobTitle, person.projectName].some(value => (value || '').toLocaleLowerCase().includes(query))
-}))
-function filterBookingCandidates(value: string) { bookingQuery.value = value }
+const bookingCandidates = computed(() => {
+  const seen = new Set<string>()
+  const list: Array<{ projectCandidateId: string; projectId: string; name: string; jobTitle: string; projectName: string; resumeFileName: string; stage: string }> = []
+  for (const person of recruitment.candidates) {
+    if (projectId.value && person.projectId !== projectId.value && person.projectCandidateId !== form.projectCandidateId) continue
+    seen.add(person.projectCandidateId)
+    list.push({
+      projectCandidateId: person.projectCandidateId,
+      projectId: person.projectId,
+      name: person.name,
+      jobTitle: person.jobTitle || person.projectName,
+      projectName: person.projectName,
+      resumeFileName: person.resumeFileName || '无文件名',
+      stage: person.stage
+    })
+  }
+  for (const pending of pendingCandidates.value) {
+    if (seen.has(pending.projectCandidateId)) continue
+    if (projectId.value && pending.projectId !== projectId.value && pending.projectCandidateId !== form.projectCandidateId) continue
+    seen.add(pending.projectCandidateId)
+    list.push({
+      projectCandidateId: pending.projectCandidateId,
+      projectId: pending.projectId,
+      name: pending.candidateName,
+      jobTitle: pending.projectName,
+      projectName: pending.projectName,
+      resumeFileName: '待安排人选',
+      stage: pending.stage
+    })
+  }
+  return list
+})
+
+function computeCandidateDefaultSubject(projectCandidateId: string, fallbackName = '', fallbackProject = ''): string {
+  if (!projectCandidateId && !fallbackName) return ''
+  const person = recruitment.candidates.find(c => c.projectCandidateId === projectCandidateId)
+  const pending = pendingCandidates.value.find(c => c.projectCandidateId === projectCandidateId)
+  const name = person?.name || pending?.candidateName || fallbackName || '候选人'
+  const pid = person?.projectId || pending?.projectId || ''
+  const proj = projects.projects.find(p => p.id === pid)
+  const job = proj?.job_config?.title || person?.jobTitle || pending?.projectName || fallbackProject || person?.projectName || '面试岗位'
+  const stage = person?.stage || pending?.stage || ''
+  const round = stage === 'second_interview' ? '复面' : '初面'
+  return `${name}－${job}－${round}`
+}
+
+const defaultMeetingSubjectPlaceholder = computed(() => {
+  const auto = computeCandidateDefaultSubject(form.projectCandidateId, form.candidateName, form.projectName)
+  return auto ? `默认：${auto}` : '默认：姓名－岗位－初面／复面'
+})
+
+function onCandidateSelected(val: string) {
+  if (!val) {
+    form.candidateName = ''
+    form.projectName = ''
+    if (form.meetingSubject === lastAutoSubject.value) {
+      form.meetingSubject = ''
+      lastAutoSubject.value = ''
+    }
+    return
+  }
+  const matched = bookingCandidates.value.find(c => c.projectCandidateId === val)
+  if (matched) {
+    form.candidateName = matched.name
+    form.projectName = matched.projectName
+  }
+  if (!form.method) {
+    form.method = '腾讯会议自动生成'
+  }
+  const nextAuto = computeCandidateDefaultSubject(val, form.candidateName, form.projectName)
+  if (nextAuto && (!form.meetingSubject || form.meetingSubject === lastAutoSubject.value)) {
+    form.meetingSubject = nextAuto
+    lastAutoSubject.value = nextAuto
+  }
+}
+
 const visibleInterviews = computed(() => recruitment.interviews.filter(item => !projectId.value || recruitment.candidates.some(person => person.projectCandidateId === item.projectCandidateId && person.projectId === projectId.value)).sort((a, b) => a.startsAt.localeCompare(b.startsAt)))
 const todayKey = dateKey(new Date())
 const calendarMonthLabel = computed(() => `${calendarCursor.value.getFullYear()} 年 ${calendarCursor.value.getMonth() + 1} 月`)
@@ -159,19 +259,23 @@ function formatDay(value: string) { return new Date(value).toLocaleDateString('z
 function formatTime(value: string) { return new Date(value).toLocaleTimeString('zh-CN', { hour:'2-digit', minute:'2-digit' }) }
 function statusLabel(status: string) { return ({ scheduled:'已安排', cancelled:'已取消', completed:'已完成' } as Record<string,string>)[status] || status }
 function create() {
-  bookingQuery.value = ''
-  Object.assign(form, { id:'', projectCandidateId:'', candidateName:'', projectName:'', startsAt:'', endsAt:'', interviewer:'', method:'', location:'', note:'', status:'scheduled', meetingSubject:'', meetingSyncStatus:'', meetingUrl:'' })
-  if (selectedDate.value) {
-    form.startsAt = `${selectedDate.value}T10:00`
-    form.endsAt = `${selectedDate.value}T11:00`
-  }
+  lastAutoSubject.value = ''
+  Object.assign(form, { id:'', projectCandidateId:'', candidateName:'', projectName:'', startsAt:'', endsAt:'', interviewer:'', method:'腾讯会议自动生成', location:'', note:'', status:'scheduled', meetingSubject:'', meetingId:'', meetingCode:'', meetingSyncStatus:'', meetingUrl:'', meetingError:'', remoteStartsAt:'', remoteEndsAt:'' })
+  const baseDate = selectedDate.value || todayKey
+  form.startsAt = `${baseDate}T10:00`
+  form.endsAt = `${baseDate}T11:00`
   dialogOpen.value = true
 }
 function bookCandidate(id: string) {
   create()
   form.projectCandidateId = id
+  onCandidateSelected(id)
 }
-function edit(item: RecruitmentInterview) { bookingQuery.value = ''; Object.assign(form, item, { startsAt: localInput(item.startsAt), endsAt: localInput(item.endsAt) }); dialogOpen.value = true }
+function edit(item: RecruitmentInterview) {
+  lastAutoSubject.value = ''
+  Object.assign(form, item, { startsAt: localInput(item.startsAt), endsAt: localInput(item.endsAt) })
+  dialogOpen.value = true
+}
 async function reload() {
   await Promise.all([recruitment.loadInterviews(), recruitment.loadCandidates()])
   try {
@@ -203,7 +307,112 @@ async function cancel() {
     else ElMessage.success('面试已取消')
   } catch (err: any) { if (err !== 'cancel') ElMessage.error(err?.message || String(err)) }
 }
-async function copyMeetingUrl() { if (form.meetingUrl) { await navigator.clipboard.writeText(form.meetingUrl); ElMessage.success('会议链接已复制') } }
+
+function formatMeetingCode(code?: string): string {
+  const raw = (code || '').trim()
+  if (!raw) return ''
+  const digits = raw.replace(/\D/g, '')
+  if (digits.length === 9) {
+    return `${digits.slice(0, 3)}-${digits.slice(3, 6)}-${digits.slice(6, 9)}`
+  }
+  if (digits.length === 10) {
+    return `${digits.slice(0, 3)}-${digits.slice(3, 6)}-${digits.slice(6, 10)}`
+  }
+  if (digits.length === 11) {
+    return `${digits.slice(0, 3)}-${digits.slice(3, 7)}-${digits.slice(7, 11)}`
+  }
+  return raw
+}
+
+function pad2(n: number): string {
+  return String(n).padStart(2, '0')
+}
+
+function formatMeetingInviteTimeRange(startsAt: string, endsAt: string): string {
+  const s = new Date(startsAt)
+  const e = new Date(endsAt)
+  if (Number.isNaN(s.getTime())) return startsAt || ''
+  const sDate = `${s.getFullYear()}/${pad2(s.getMonth() + 1)}/${pad2(s.getDate())}`
+  const sTime = `${pad2(s.getHours())}:${pad2(s.getMinutes())}`
+  if (Number.isNaN(e.getTime())) {
+    return `${sDate} ${sTime} (GMT+08:00) 中国标准时间 - 北京`
+  }
+  const eDate = `${e.getFullYear()}/${pad2(e.getMonth() + 1)}/${pad2(e.getDate())}`
+  const eTime = `${pad2(e.getHours())}:${pad2(e.getMinutes())}`
+  const range = sDate === eDate ? `${sDate} ${sTime}-${eTime}` : `${sDate} ${sTime}-${eDate} ${eTime}`
+  return `${range} (GMT+08:00) 中国标准时间 - 北京`
+}
+
+function buildTencentMeetingInviteText(item: RecruitmentInterview): string {
+  const subject = (item.meetingSubject || '').trim() || computeCandidateDefaultSubject(item.projectCandidateId, item.candidateName, item.projectName)
+  const timeRange = formatMeetingInviteTimeRange(item.startsAt, item.endsAt)
+  const url = (item.meetingUrl || item.location || '').trim()
+  const code = formatMeetingCode(item.meetingCode)
+  const lines = [
+    '邀请您参加腾讯会议',
+    `会议主题：${subject}`,
+    `会议时间：${timeRange}`,
+    '',
+    '点击链接入会，或添加至会议列表：',
+    url
+  ]
+  if (code) {
+    lines.push('', `#腾讯会议：${code}`)
+  }
+  lines.push('', '复制该信息，打开手机腾讯会议即可参与')
+  return lines.join('\n')
+}
+
+async function writeClipboardText(text: string): Promise<void> {
+  try {
+    const runtime: any = await import('../../wailsjs/runtime/runtime')
+    if (typeof runtime?.ClipboardSetText === 'function') {
+      const ok = await runtime.ClipboardSetText(text)
+      if (ok) return
+    }
+  } catch { /* fallback to web clipboard */ }
+  if (navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
+    await navigator.clipboard.writeText(text)
+    return
+  }
+  const textarea = document.createElement('textarea')
+  textarea.value = text
+  textarea.style.position = 'fixed'
+  textarea.style.opacity = '0'
+  document.body.appendChild(textarea)
+  textarea.select()
+  document.execCommand('copy')
+  document.body.removeChild(textarea)
+}
+
+async function copyMeetingInvite(item: RecruitmentInterview) {
+  const url = (item.meetingUrl || item.location || '').trim()
+  if (!url) {
+    ElMessage.warning('暂无可复制的会议链接')
+    return
+  }
+  const inviteText = buildTencentMeetingInviteText(item)
+  try {
+    await writeClipboardText(inviteText)
+    ElMessage.success('已复制完整腾讯会议邀请信息')
+  } catch (err: any) {
+    ElMessage.error(err?.message || '复制失败，请重试')
+  }
+}
+
+async function openMeetingUrl(url?: string) {
+  const target = (url || '').trim()
+  if (!target) return
+  try {
+    const runtime: any = await import('../../wailsjs/runtime/runtime')
+    if (typeof runtime?.BrowserOpenURL === 'function') {
+      runtime.BrowserOpenURL(target)
+      return
+    }
+  } catch { /* fallback */ }
+  window.open(target, '_blank', 'noopener,noreferrer')
+}
+
 async function retryMeetingSync() { if (!form.id) return; try { const api: any = await import('../../wailsjs/go/main/App'); await api.RetryTencentMeetingSync(form.id); await reload(); const latest = recruitment.interviews.find(item => item.id === form.id); if (latest) edit(latest) } catch (err: any) { ElMessage.error(err?.message || String(err)) } }
 onMounted(() => { void projects.loadProjects(); void reload() })
 </script>
@@ -230,7 +439,11 @@ onMounted(() => { void projects.loadProjects(); void reload() })
 .interview-agenda-detail { min-width: 0; }
 .interview-agenda-detail > strong { display: block; margin-bottom: 7px; overflow-wrap: anywhere; }
 .interview-agenda-meta { line-height: 1.6; overflow-wrap: anywhere; }
+.interview-meeting-bar { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; margin-top: 4px; }
+.interview-meeting-bar a { color: var(--wb-brand); text-decoration: underline; word-break: break-all; font-size: 13px; }
+.interview-meeting-code { font-size: 12px; color: var(--wb-muted); background: var(--wb-surface-soft); padding: 2px 8px; border-radius: 6px; border: 1px solid var(--wb-border); }
 .interview-agenda-actions { display: flex; flex-direction: column; align-items: flex-end; gap: 9px; }
+.interview-agenda-btn-group { display: flex; align-items: center; gap: 8px; }
 .interview-calendar { position: sticky; top: 96px; }
 .interview-calendar-heading { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 14px; }
 .interview-calendar-heading strong { font-size: 16px; }
