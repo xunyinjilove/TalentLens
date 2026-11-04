@@ -669,6 +669,23 @@
               <label>预计结束时间 <span class="required">*</span></label>
               <input v-model="interviewForm.endsAt" type="datetime-local" class="invite-input" />
             </div>
+            <div v-if="inviteTimeRangeInvalid" class="full">
+              <div class="conflict-warning-banner is-error" role="alert">
+                <div class="conflict-warning-title">⛔ 面试结束时间必须晚于开始时间</div>
+              </div>
+            </div>
+            <div v-else-if="inviteConflicts.length" class="full">
+              <div class="conflict-warning-banner" role="alert">
+                <div class="conflict-warning-title">⚠️ 检测到当前时间段与 {{ inviteConflicts.length }} 场已安排面试存在时间冲突：</div>
+                <ul class="conflict-warning-list">
+                  <li v-for="conf in inviteConflicts" :key="conf.interview.id">
+                    <span class="conflict-tag" :class="`is-${conf.kind}`">{{ conf.labels.join(' / ') }}</span>
+                    <span><strong>{{ conf.interview.candidateName }}</strong> · {{ conf.interview.projectName || '未指定岗位' }}（面试官：{{ conf.interview.interviewer || '待指定' }}，{{ conf.timeRangeText }}）</span>
+                  </li>
+                </ul>
+                <div class="conflict-warning-foot">建议调整开始/结束时间，或确认面试官与腾讯会议账号不冲突后再保存。</div>
+              </div>
+            </div>
             <div>
               <label>面试形式</label>
               <select v-model="interviewForm.method" class="invite-select">
@@ -928,6 +945,7 @@ import {
   Cpu
 } from '@element-plus/icons-vue'
 import { useProjectStore, type Project } from '../composables/useProjectStore'
+import { buildConflictConfirmMessage, detectInterviewConflicts } from '../utils/interviewConflict'
 import { useRecruitmentStore, stageLabels, type TalentCandidate } from '../composables/useRecruitmentStore'
 import BossSearchDialog from '../components/BossSearchDialog.vue'
 import TopTenOutreachDialog from '../components/TopTenOutreachDialog.vue'
@@ -1284,6 +1302,29 @@ const interviewForm = reactive({
 })
 const localInterviewTimeZone = Intl.DateTimeFormat().resolvedOptions().timeZone || '本机时区'
 
+const inviteTimeRangeInvalid = computed(() => {
+  if (!interviewForm.startsAt || !interviewForm.endsAt) return false
+  const s = Date.parse(interviewForm.startsAt)
+  const e = Date.parse(interviewForm.endsAt)
+  return !Number.isNaN(s) && !Number.isNaN(e) && e <= s
+})
+
+const inviteConflicts = computed(() => {
+  if (!interviewForm.startsAt || !interviewForm.endsAt || inviteTimeRangeInvalid.value) return []
+  return detectInterviewConflicts(
+    {
+      id: '',
+      projectCandidateId: inviteCandidate.value?.projectCandidateId || '',
+      candidateName: inviteCandidate.value?.name || '',
+      interviewer: interviewForm.interviewer,
+      startsAt: new Date(interviewForm.startsAt).toISOString(),
+      endsAt: new Date(interviewForm.endsAt).toISOString(),
+      status: 'scheduled'
+    },
+    recruitment.interviews
+  )
+})
+
 function formatDateTimeInput(date: Date): string {
   const offset = date.getTimezoneOffset() * 60000
   return new Date(date.getTime() - offset).toISOString().slice(0, 16)
@@ -1294,6 +1335,9 @@ async function openInterviewInvite(candidate: TalentCandidate) {
   greetingMessage.value = ''
   generatingGreeting.value = false
   savingInterview.value = false
+
+  // 确保最新面试日程已加载以用于时间冲突检测
+  void recruitment.loadInterviews()
 
   // 默认面试时间：明天上午 10:00 - 11:00
   const tomorrow = new Date()
@@ -1355,6 +1399,21 @@ async function submitInterviewInvite() {
   if (new Date(interviewForm.endsAt) <= new Date(interviewForm.startsAt)) {
     ElMessage.warning('面试结束时间需晚于开始时间')
     return
+  }
+  if (inviteConflicts.value.length > 0) {
+    try {
+      await ElMessageBox.confirm(
+        buildConflictConfirmMessage(inviteConflicts.value),
+        '面试时间冲突提醒',
+        {
+          confirmButtonText: '仍要保存',
+          cancelButtonText: '返回修改时间',
+          type: 'warning'
+        }
+      )
+    } catch {
+      return
+    }
   }
   savingInterview.value = true
   let scheduleSaved = false
@@ -2983,6 +3042,71 @@ onUnmounted(() => {
   .required {
     color: #f56c6c;
     margin-left: 2px;
+  }
+
+  .conflict-warning-banner {
+    padding: 10px 12px;
+    border-radius: 8px;
+    background: #fff7ed;
+    border: 1px solid #fdba74;
+    color: #9a3412;
+    font-size: 12.5px;
+    line-height: 1.55;
+  }
+  .conflict-warning-banner.is-error {
+    background: #fef2f2;
+    border-color: #fca5a5;
+    color: #b91c1c;
+  }
+  .conflict-warning-title {
+    font-weight: 700;
+    margin-bottom: 5px;
+  }
+  .conflict-warning-banner.is-error .conflict-warning-title {
+    margin-bottom: 0;
+  }
+  .conflict-warning-list {
+    margin: 0;
+    padding-left: 0;
+    list-style: none;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+  .conflict-warning-list li {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+  .conflict-tag {
+    display: inline-flex;
+    align-items: center;
+    padding: 1px 7px;
+    border-radius: 999px;
+    font-size: 11px;
+    font-weight: 700;
+    white-space: nowrap;
+  }
+  .conflict-tag.is-candidate {
+    background: #fee2e2;
+    color: #b91c1c;
+    border: 1px solid #fca5a5;
+  }
+  .conflict-tag.is-interviewer {
+    background: #ffedd5;
+    color: #c2410c;
+    border: 1px solid #fdba74;
+  }
+  .conflict-tag.is-time {
+    background: #fef3c7;
+    color: #b45309;
+    border: 1px solid #fcd34d;
+  }
+  .conflict-warning-foot {
+    margin-top: 6px;
+    font-size: 11.5px;
+    color: #c2410c;
   }
 }
 

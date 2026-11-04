@@ -33,11 +33,20 @@
           <div v-if="agendaGroups.length" class="interview-day-groups">
             <section v-for="group in agendaGroups" :key="group.date" class="interview-day-group">
               <div class="interview-day-heading"><span class="interview-day-number">{{ group.day }}</span><div><h3>{{ group.label }}</h3><span class="wb-muted">共 {{ group.items.length }} 场面试</span></div></div>
-              <article v-for="item in group.items" :key="item.id" class="interview-agenda-card">
+              <article v-for="item in group.items" :key="item.id" class="interview-agenda-card" :class="{ 'has-conflict': getItemConflicts(item).length > 0 }">
                 <div class="interview-agenda-time"><strong>{{ formatTime(item.startsAt) }}</strong><span>{{ durationMinutes(item) }} 分钟</span></div>
                 <div class="interview-agenda-detail">
                   <strong>{{ item.candidateName }} · {{ candidateRole(item) }}</strong>
                   <div class="interview-agenda-meta">{{ item.projectName }} · 面试官：{{ item.interviewer || '待指定' }} · {{ item.method || '方式待定' }}<template v-if="item.location"> · {{ item.location }}</template></div>
+                  <div v-if="getItemConflicts(item).length" class="interview-conflict-inline" role="status">
+                    <span class="conflict-inline-icon">⚠️</span>
+                    <div class="conflict-inline-body">
+                      <div v-for="conf in getItemConflicts(item)" :key="conf.interview.id" class="conflict-inline-row">
+                        <span class="conflict-tag" :class="`is-${conf.kind}`">{{ conf.labels.join(' / ') }}</span>
+                        <span>与 <strong>{{ conf.interview.candidateName }}</strong>（{{ conf.interview.projectName || '未指定岗位' }} · 面试官：{{ conf.interview.interviewer || '待指定' }} · {{ conf.timeRangeText }}）时段重叠</span>
+                      </div>
+                    </div>
+                  </div>
                   <div v-if="item.meetingSyncStatus && item.meetingSyncStatus !== 'synced'" class="wb-muted">腾讯会议：{{ item.meetingError || item.meetingSyncStatus }}</div>
                   <div v-if="item.meetingUrl" class="interview-meeting-bar">
                     <a :href="item.meetingUrl" target="_blank" rel="noopener noreferrer" @click.prevent="openMeetingUrl(item.meetingUrl)">{{ item.meetingUrl }}</a>
@@ -46,7 +55,10 @@
                   </div>
                 </div>
                 <div class="interview-agenda-actions">
-                  <span class="wb-pill" :class="item.status === 'cancelled' ? 'danger' : item.status === 'completed' ? 'ok' : ''">{{ statusLabel(item.status) }}</span>
+                  <div class="interview-agenda-pills">
+                    <span v-if="getItemConflicts(item).length" class="wb-pill conflict-pill">⚠️ 时间冲突 ({{ getItemConflicts(item).length }})</span>
+                    <span class="wb-pill" :class="item.status === 'cancelled' ? 'danger' : item.status === 'completed' ? 'ok' : ''">{{ statusLabel(item.status) }}</span>
+                  </div>
                   <el-button size="small" @click="edit(item)">{{ item.status === 'cancelled' ? '查看' : '改期 / 编辑' }}</el-button>
                 </div>
               </article>
@@ -74,6 +86,23 @@
         </div>
         <div><label>开始时间</label><input v-model="form.startsAt" type="datetime-local" /></div>
         <div><label>结束时间</label><input v-model="form.endsAt" type="datetime-local" /></div>
+        <div v-if="formTimeRangeInvalid" class="full">
+          <div class="conflict-warning-banner is-error" role="alert">
+            <div class="conflict-warning-title">⛔ 结束时间必须晚于开始时间</div>
+          </div>
+        </div>
+        <div v-else-if="formConflicts.length" class="full">
+          <div class="conflict-warning-banner" role="alert">
+            <div class="conflict-warning-title">⚠️ 检测到当前时间段与 {{ formConflicts.length }} 场已安排面试存在时间冲突：</div>
+            <ul class="conflict-warning-list">
+              <li v-for="conf in formConflicts" :key="conf.interview.id">
+                <span class="conflict-tag" :class="`is-${conf.kind}`">{{ conf.labels.join(' / ') }}</span>
+                <span><strong>{{ conf.interview.candidateName }}</strong> · {{ conf.interview.projectName || '未指定岗位' }}（面试官：{{ conf.interview.interviewer || '待指定' }}，{{ conf.timeRangeText }}）</span>
+              </li>
+            </ul>
+            <div class="conflict-warning-foot">建议调整开始/结束时间，或确认面试官与腾讯会议账号不冲突后再保存。</div>
+          </div>
+        </div>
         <div><label>面试官</label><input v-model="form.interviewer" placeholder="输入面试官" /></div>
         <div><label>面试方式</label><select v-model="form.method"><option value="">请选择</option><option value="腾讯会议自动生成">腾讯会议自动生成</option><option value="其他视频会议">其他视频会议（手填链接）</option><option value="视频面试">视频面试（历史记录）</option><option value="现场面试">现场面试</option><option value="电话面试">电话面试</option></select></div>
         <div class="full" v-if="form.method === '腾讯会议自动生成'"><label>会议标题</label><input v-model="form.meetingSubject" :placeholder="defaultMeetingSubjectPlaceholder" /></div>
@@ -107,6 +136,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { useRoute } from 'vue-router'
 import { useProjectStore } from '../composables/useProjectStore'
 import { useRecruitmentStore, type RecruitmentInterview } from '../composables/useRecruitmentStore'
+import { buildConflictConfirmMessage, detectInterviewConflicts, type InterviewConflictItem } from '../utils/interviewConflict'
 
 const route = useRoute()
 const projects = useProjectStore()
@@ -201,6 +231,46 @@ function onCandidateSelected(val: string) {
 }
 
 const visibleInterviews = computed(() => recruitment.interviews.filter(item => !projectId.value || recruitment.candidates.some(person => person.projectCandidateId === item.projectCandidateId && person.projectId === projectId.value)).sort((a, b) => a.startsAt.localeCompare(b.startsAt)))
+
+const itemConflictMap = computed(() => {
+  const map = new Map<string, InterviewConflictItem[]>()
+  for (const item of recruitment.interviews) {
+    if (!item.id || item.status === 'cancelled' || item.status === 'completed') continue
+    const list = detectInterviewConflicts(item, recruitment.interviews)
+    if (list.length > 0) {
+      map.set(item.id, list)
+    }
+  }
+  return map
+})
+
+function getItemConflicts(item: RecruitmentInterview): InterviewConflictItem[] {
+  if (!item.id) return []
+  return itemConflictMap.value.get(item.id) || []
+}
+
+const formTimeRangeInvalid = computed(() => {
+  if (!form.startsAt || !form.endsAt) return false
+  const s = Date.parse(form.startsAt)
+  const e = Date.parse(form.endsAt)
+  return !Number.isNaN(s) && !Number.isNaN(e) && e <= s
+})
+
+const formConflicts = computed(() => {
+  if (!form.startsAt || !form.endsAt || formTimeRangeInvalid.value) return []
+  return detectInterviewConflicts(
+    {
+      id: form.id,
+      projectCandidateId: form.projectCandidateId,
+      candidateName: form.candidateName,
+      interviewer: form.interviewer,
+      startsAt: toISO(form.startsAt),
+      endsAt: toISO(form.endsAt),
+      status: form.status || 'scheduled'
+    },
+    recruitment.interviews
+  )
+})
 const todayKey = dateKey(new Date())
 const calendarMonthLabel = computed(() => `${calendarCursor.value.getFullYear()} 年 ${calendarCursor.value.getMonth() + 1} 月`)
 const calendarDays = computed(() => {
@@ -282,6 +352,25 @@ async function reload() {
 }
 async function save() {
   if (!form.projectCandidateId || !form.startsAt || !form.endsAt) { ElMessage.warning('请选择候选人并填写时间'); return }
+  if (Date.parse(form.endsAt) <= Date.parse(form.startsAt)) {
+    ElMessage.warning('结束时间必须晚于开始时间')
+    return
+  }
+  if (formConflicts.value.length > 0) {
+    try {
+      await ElMessageBox.confirm(
+        buildConflictConfirmMessage(formConflicts.value),
+        '面试时间冲突提醒',
+        {
+          confirmButtonText: '仍要保存',
+          cancelButtonText: '返回修改时间',
+          type: 'warning'
+        }
+      )
+    } catch {
+      return
+    }
+  }
   saving.value = true
   try {
     await recruitment.saveInterview({ ...form, startsAt: toISO(form.startsAt), endsAt: toISO(form.endsAt) })
@@ -430,6 +519,24 @@ onMounted(() => { void projects.loadProjects(); void reload() })
 .interview-day-heading h3 { margin: 0 0 3px; font-size: 17px; }
 .interview-day-heading .wb-muted { font-size: 12px; }
 .interview-agenda-card { display: grid; grid-template-columns: 78px minmax(0, 1fr) auto; gap: 14px; align-items: center; min-height: 112px; padding: 16px; border: 1px solid var(--wb-border); border-left: 3px solid var(--wb-brand); border-radius: 14px; background: var(--wb-surface); box-shadow: 0 2px 10px rgba(15, 23, 42, .04); }
+.interview-agenda-card.has-conflict { border-color: #fdba74; border-left: 4px solid #ea580c; background: #fffaf5; }
+.interview-agenda-pills { display: flex; align-items: center; flex-wrap: wrap; justify-content: flex-end; gap: 6px; }
+.conflict-pill { background: #ffedd5; color: #c2410c; border: 1px solid #fdba74; font-weight: 700; }
+.interview-conflict-inline { display: flex; align-items: flex-start; gap: 8px; margin-top: 6px; padding: 7px 10px; border-radius: 8px; background: #fff7ed; border: 1px solid #fed7aa; color: #9a3412; font-size: 12px; line-height: 1.5; }
+.conflict-inline-icon { flex: none; font-size: 13px; line-height: 1.4; }
+.conflict-inline-body { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.conflict-inline-row { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; }
+.conflict-tag { display: inline-flex; align-items: center; padding: 1px 7px; border-radius: 999px; font-size: 11px; font-weight: 700; white-space: nowrap; }
+.conflict-tag.is-candidate { background: #fee2e2; color: #b91c1c; border: 1px solid #fca5a5; }
+.conflict-tag.is-interviewer { background: #ffedd5; color: #c2410c; border: 1px solid #fdba74; }
+.conflict-tag.is-time { background: #fef3c7; color: #b45309; border: 1px solid #fcd34d; }
+.conflict-warning-banner { padding: 11px 13px; border-radius: 10px; background: #fff7ed; border: 1px solid #fdba74; color: #9a3412; font-size: 12.5px; line-height: 1.55; }
+.conflict-warning-banner.is-error { background: #fef2f2; border-color: #fca5a5; color: #b91c1c; }
+.conflict-warning-title { font-weight: 700; margin-bottom: 6px; }
+.conflict-warning-banner.is-error .conflict-warning-title { margin-bottom: 0; }
+.conflict-warning-list { margin: 0; padding-left: 0; list-style: none; display: flex; flex-direction: column; gap: 5px; }
+.conflict-warning-list li { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; }
+.conflict-warning-foot { margin-top: 7px; font-size: 11.5px; color: #c2410c; }
 .interview-agenda-time { display: flex; flex-direction: column; gap: 3px; }
 .interview-agenda-time strong { font-size: 17px; }
 .interview-agenda-time span, .interview-agenda-meta { color: var(--wb-muted); font-size: 12px; }
