@@ -103,7 +103,7 @@ func parseTMeetMeetings(out []byte) []tmeetMeeting {
 	for _, m := range tmeetMaps(raw) {
 		id := tmeetString(m, "meeting_id", "meetingId")
 		if id != "" {
-			result = append(result, tmeetMeeting{ID: id, Code: tmeetString(m, "meeting_code", "meetingCode"), URL: tmeetString(m, "join_url", "joinUrl", "meeting_url", "meetingUrl"), Subject: tmeetString(m, "subject")})
+			result = append(result, tmeetMeeting{ID: id, Code: tmeetString(m, "meeting_code", "meetingCode", "meeting_number", "meetingNumber", "code"), URL: tmeetString(m, "join_url", "joinUrl", "meeting_url", "meetingUrl"), Subject: tmeetString(m, "subject")})
 		}
 	}
 	return result
