@@ -672,7 +672,8 @@
             <div>
               <label>面试形式</label>
               <select v-model="interviewForm.method" class="invite-select">
-                <option value="视频面试">视频面试 (腾讯会议/飞书)</option>
+                <option value="腾讯会议自动生成">腾讯会议自动生成</option>
+                <option value="其他视频会议">其他视频会议（手填链接）</option>
                 <option value="现场面试">现场面试 (公司职场)</option>
                 <option value="电话面试">电话初试</option>
               </select>
@@ -683,7 +684,8 @@
             </div>
             <div class="full">
               <label>面试地点 / 会议链接</label>
-              <input v-model="interviewForm.location" placeholder="填写会议号/链接或职场具体会议室" class="invite-input" />
+              <input v-if="interviewForm.method !== '腾讯会议自动生成'" v-model="interviewForm.location" placeholder="填写会议号/链接或职场具体会议室" class="invite-input" />
+              <span v-else>保存后自动生成；若未登录，可到系统设置连接并重试。</span>
             </div>
             <div class="full">
               <label>邀约备注 (考察重点)</label>
@@ -1270,7 +1272,7 @@ const savingInterview = ref(false)
 const interviewForm = reactive({
   startsAt: '',
   endsAt: '',
-  method: '视频面试',
+  method: '腾讯会议自动生成',
   interviewer: '',
   location: '',
   note: ''
@@ -1297,7 +1299,7 @@ async function openInterviewInvite(candidate: TalentCandidate) {
   Object.assign(interviewForm, {
     startsAt: formatDateTimeInput(tomorrow),
     endsAt: formatDateTimeInput(tomorrowEnd),
-    method: '视频面试',
+    method: '腾讯会议自动生成',
     interviewer: candidate.owner || 'HRBP',
     location: '',
     note: ''

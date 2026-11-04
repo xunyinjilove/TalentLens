@@ -111,6 +111,23 @@
         </el-form>
 
         <p class="catalog-status">已保存项目条件：{{ savedCriteria?.criteriaVersion || '读取中' }} · 活跃度{{ savedCriteria?.activityDays ? `近 ${savedCriteria.activityDays} 天` : '不限' }} · 最低学历{{ savedCriteria?.minEducation || '不限' }}</p>
+        <div v-if="projectId" class="screening-preview-card" style="padding:14px;margin:12px 0;border:1px solid #e2e8f0;border-radius:8px">
+          <strong>望远镜技能与其他要求</strong>
+          <p class="catalog-status">岗位必备技能已预填；每项可设为必须或参考。资料未写明时标为证据不足，不据此拒绝。筛选只生成预览，绝不自动入库。</p>
+          <el-alert v-if="telescopeConditionConfig?.jobSkillsChanged" type="warning" :closable="false" title="岗位技能已变化。自定义条件已保留，可手动同步新的岗位技能。" style="margin-bottom:10px" />
+          <div v-for="(condition, index) in telescopeConditions" :key="index" style="display:flex;gap:8px;margin:8px 0;align-items:center">
+            <el-select v-model="condition.kind" style="width:110px"><el-option label="技能" value="skill" /><el-option label="其他要求" value="other" /></el-select>
+            <el-input v-model="condition.text" placeholder="一行一项，例如：有医院渠道开发经历" style="flex:1" />
+            <el-select v-model="condition.required" style="width:110px"><el-option label="必须满足" :value="true" /><el-option label="加分参考" :value="false" /></el-select>
+            <el-button @click="telescopeConditions.splice(index, 1)">删除</el-button>
+          </div>
+          <div style="display:flex;gap:8px;margin-top:10px">
+            <el-button @click="telescopeConditions.push({ text:'', kind:'skill', required:true, source:'custom' })">添加技能</el-button>
+            <el-button @click="telescopeConditions.push({ text:'', kind:'other', required:true, source:'custom' })">添加其他要求</el-button>
+            <el-button v-if="telescopeConditionConfig?.jobSkillsChanged" @click="syncTelescopeJobSkills">同步岗位技能</el-button>
+            <el-button type="primary" plain @click="saveTelescopeConditions">保存望远镜条件</el-button>
+          </div>
+        </div>
         <p class="catalog-status">计划时间：{{ savedCriteria?.scheduleEnabled ? savedCriteria.scheduleTime : '未启用' }}。软件运行期间按项目时间自动筛选；关闭期间不补跑。</p>
         <div style="display: flex; gap: 10px; align-items: center; margin: 16px 0; flex-wrap: wrap">
           <el-button type="warning" plain @click="openTelescope">打开 51job 人才望远镜</el-button>
@@ -130,8 +147,9 @@
           <el-radio-group v-model="telescopeSubTab" size="small" style="margin-bottom: 12px">
             <el-radio-button value="qualified">合格 {{ telescopePreview.qualifiedCount }}</el-radio-button>
             <el-radio-button value="unfit">不合格 {{ telescopePreview.unfitCount }}</el-radio-button>
+            <el-radio-button value="pending">技能／资料证据不足 {{ telescopePreview.pendingCount }}</el-radio-button>
           </el-radio-group>
-          <el-table :data="telescopeSubTab === 'qualified' ? telescopePreview.qualifiedList : telescopePreview.unfitList"
+          <el-table :data="telescopeSubTab === 'qualified' ? telescopePreview.qualifiedList : telescopeSubTab === 'unfit' ? telescopePreview.unfitList : telescopePreview.pendingList"
             size="small" max-height="300" empty-text="本类暂无人选">
             <el-table-column prop="candidateName" label="候选人" width="110" />
             <el-table-column label="逐项核验" min-width="300">
@@ -139,6 +157,10 @@
                 <div v-for="item in row.ruleEvidence" :key="item.rule" style="font-size: 12px; line-height: 1.6">
                   <el-tag :type="item.status === 'pass' ? 'success' : item.status === 'fail' ? 'danger' : 'info'" size="small">{{ item.status === 'pass' ? '通过' : item.status === 'fail' ? '不符' : item.status === 'skipped' ? '不作依据' : '资料不足' }}</el-tag>
                   {{ item.label }}：{{ item.evidence }}
+                  <template v-if="item.rule?.startsWith('TELESCOPE_') && item.rule !== 'TELESCOPE_DETAIL'">
+                    <el-button link size="small" type="success" @click="confirmTelescopeCondition(row.candidateId, item.rule, 'pass')">确认符合</el-button>
+                    <el-button link size="small" type="danger" @click="confirmTelescopeCondition(row.candidateId, item.rule, 'fail')">确认不符</el-button>
+                  </template>
                 </div>
               </template>
             </el-table-column>
@@ -407,7 +429,29 @@ const executingAction = ref(false)
 const rescreening = ref(false)
 const telescopePreview = ref<any>(null)
 const telescopeScanning = ref(false)
-const telescopeSubTab = ref<'qualified' | 'unfit'>('qualified')
+const telescopeSubTab = ref<'qualified' | 'unfit' | 'pending'>('qualified')
+type TelescopeCondition = { text: string; kind: 'skill' | 'other'; required: boolean; source: string }
+const telescopeConditions = ref<TelescopeCondition[]>([])
+const telescopeConditionConfig = ref<any>(null)
+async function loadTelescopeConditions() {
+  if (!projectId.value) { telescopeConditions.value = []; telescopeConditionConfig.value = null; return }
+  try { const api: any = await import('../../wailsjs/go/main/App'); const config = await api.GetTelescopeConditionConfig(projectId.value); telescopeConditionConfig.value = config; telescopeConditions.value = (config.conditions || []).map((item: TelescopeCondition) => ({ ...item })) }
+  catch (error: any) { ElMessage.error(error?.message || String(error)) }
+}
+async function saveTelescopeConditions() {
+  if (!projectId.value) return
+  const api: any = await import('../../wailsjs/go/main/App')
+  const config = await api.SaveTelescopeConditionConfig({ projectId: projectId.value, conditions: telescopeConditions.value, version: '', jobSkillsChanged: false, jobSkills: [] })
+  telescopeConditionConfig.value = config
+  telescopeConditions.value = (config.conditions || []).map((item: TelescopeCondition) => ({ ...item }))
+  ElMessage.success('望远镜条件已保存')
+}
+async function syncTelescopeJobSkills() { const api: any = await import('../../wailsjs/go/main/App'); const config = await api.SyncTelescopeJobSkills(projectId.value); telescopeConditionConfig.value = config; telescopeConditions.value = (config.conditions || []).map((item: TelescopeCondition) => ({ ...item })); ElMessage.success('岗位技能已同步，自定义条件已保留') }
+async function confirmTelescopeCondition(candidateId: string, rule: string, status: string) {
+  if (!telescopePreview.value?.batchId) return
+  try { const api: any = await import('../../wailsjs/go/main/App'); telescopePreview.value = await api.ConfirmTelescopeCondition(telescopePreview.value.batchId, candidateId, rule, status); ElMessage.success('人工结论已保存；明确不符者已按平台回执处理') }
+  catch (error: any) { ElMessage.error(error?.message || String(error)) }
+}
 const telescopeProgress = ref('')
 const telescopeActionBusy = ref(false)
 const telescopePointsLimit = ref(1000)
@@ -797,6 +841,9 @@ onMounted(() => {
     runtime.EventsOn('talent_management_import_progress', (event: any) => {
       if (running.value && event?.statusText) progress.value = event.statusText
     })
+	 runtime.EventsOn('telescope_scan_progress', (event: any) => {
+	   if (telescopeScanning.value) telescopeProgress.value = `正在读取望远镜详情：${event.current}/${event.total} · ${event.name || '候选人'}`
+	 })
 	 runtime.EventsOn('attachment_sync_progress', (task: any) => {
 	   if (task?.projectId === projectId.value) attachmentTask.value = task
 	 })
@@ -837,6 +884,7 @@ async function scanTelescopePreview() {
   telescopeActionItems.value = []
   telescopeProgress.value = '正在读取人才望远镜当前职位并使用项目条件筛选…'
   try {
+    await saveTelescopeConditions()
     const api: any = await import('../../wailsjs/go/main/App')
     const preview = await api.Scan51JobTelescopeBatch(telescopeAccountScope.value, telescopeJobId.value, projectId.value)
     telescopePreview.value = preview
@@ -983,6 +1031,7 @@ watch(projectId, () => {
   telescopePreview.value = null
   savedCriteria.value = null
   void loadCriteria()
+  void loadTelescopeConditions()
   void loadPendingReviews()
   void loadAttachmentTask()
 })

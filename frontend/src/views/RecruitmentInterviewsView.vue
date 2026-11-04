@@ -35,7 +35,7 @@
               <div class="interview-day-heading"><span class="interview-day-number">{{ group.day }}</span><div><h3>{{ group.label }}</h3><span class="wb-muted">共 {{ group.items.length }} 场面试</span></div></div>
               <article v-for="item in group.items" :key="item.id" class="interview-agenda-card">
                 <div class="interview-agenda-time"><strong>{{ formatTime(item.startsAt) }}</strong><span>{{ durationMinutes(item) }} 分钟</span></div>
-                <div class="interview-agenda-detail"><strong>{{ item.candidateName }} · {{ candidateRole(item) }}</strong><div class="interview-agenda-meta">{{ item.projectName }} · 面试官：{{ item.interviewer || '待指定' }} · {{ item.method || '方式待定' }}<template v-if="item.location"> · {{ item.location }}</template></div></div>
+                <div class="interview-agenda-detail"><strong>{{ item.candidateName }} · {{ candidateRole(item) }}</strong><div class="interview-agenda-meta">{{ item.projectName }} · 面试官：{{ item.interviewer || '待指定' }} · {{ item.method || '方式待定' }}<template v-if="item.location"> · {{ item.location }}</template></div><div v-if="item.meetingSyncStatus && item.meetingSyncStatus !== 'synced'" class="wb-muted">腾讯会议：{{ item.meetingError || item.meetingSyncStatus }}</div><a v-if="item.meetingUrl" :href="item.meetingUrl" target="_blank" rel="noopener noreferrer">{{ item.meetingUrl }}</a></div>
                 <div class="interview-agenda-actions"><span class="wb-pill" :class="item.status === 'cancelled' ? 'danger' : item.status === 'completed' ? 'ok' : ''">{{ statusLabel(item.status) }}</span><el-button size="small" @click="edit(item)">{{ item.status === 'cancelled' ? '查看' : '改期 / 编辑' }}</el-button></div>
               </article>
             </section>
@@ -58,11 +58,13 @@
         <div><label>开始时间</label><input v-model="form.startsAt" type="datetime-local" /></div>
         <div><label>结束时间</label><input v-model="form.endsAt" type="datetime-local" /></div>
         <div><label>面试官</label><input v-model="form.interviewer" placeholder="输入面试官" /></div>
-        <div><label>面试方式</label><select v-model="form.method"><option value="">请选择</option><option value="视频面试">视频面试</option><option value="现场面试">现场面试</option><option value="电话面试">电话面试</option></select></div>
-        <div class="full"><label>地点或会议链接</label><input v-model="form.location" /></div>
+        <div><label>面试方式</label><select v-model="form.method"><option value="">请选择</option><option value="腾讯会议自动生成">腾讯会议自动生成</option><option value="其他视频会议">其他视频会议（手填链接）</option><option value="视频面试">视频面试（历史记录）</option><option value="现场面试">现场面试</option><option value="电话面试">电话面试</option></select></div>
+        <div class="full" v-if="form.method === '腾讯会议自动生成'"><label>会议标题</label><input v-model="form.meetingSubject" placeholder="默认：姓名－岗位－初面／复面" /></div>
+        <div class="full" v-else><label>地点或会议链接</label><input v-model="form.location" /></div>
+        <div class="full" v-if="form.meetingSyncStatus"><label>腾讯会议状态</label><p>{{ form.meetingError || (form.meetingSyncStatus === 'synced' ? '远端会议已同步' : form.meetingSyncStatus) }}</p><p v-if="form.remoteStartsAt && form.meetingSyncStatus !== 'synced'">远端仍有效时间：{{ formatDay(form.remoteStartsAt) }} {{ formatTime(form.remoteStartsAt) }}</p><p v-if="form.meetingUrl">会议链接：<a :href="form.meetingUrl" target="_blank" rel="noopener noreferrer">{{ form.meetingUrl }}</a> <el-button link @click="copyMeetingUrl">复制</el-button></p><el-button v-if="form.id && form.meetingSyncStatus !== 'synced'" size="small" @click="retryMeetingSync">重试同步／对账</el-button></div>
         <div class="full"><label>备注</label><textarea v-model="form.note" rows="3" /></div>
       </div>
-      <p class="wb-muted" style="font-size:12px">日程保存在本机；保存不会自动通知候选人或面试官。</p>
+      <p class="wb-muted" style="font-size:12px">时区：{{ localTimeZone }}。日程保存在本机；保存不会自动通知候选人或面试官。</p>
       <template #footer>
         <el-button v-if="form.id && form.status !== 'cancelled'" type="danger" plain @click="cancel">取消面试</el-button>
         <el-button @click="dialogOpen = false">关闭</el-button>
@@ -92,7 +94,8 @@ const dialogOpen = ref(false)
 type PendingPerson = { projectCandidateId: string; projectId: string; candidateName: string; projectName: string; stage: string }
 const pendingCandidates = ref<PendingPerson[]>([])
 const saving = ref(false)
-const form = reactive<RecruitmentInterview>({ id:'', projectCandidateId:'', candidateName:'', projectName:'', startsAt:'', endsAt:'', interviewer:'', method:'', location:'', note:'', status:'scheduled' })
+const form = reactive<RecruitmentInterview>({ id:'', projectCandidateId:'', candidateName:'', projectName:'', startsAt:'', endsAt:'', interviewer:'', method:'', location:'', note:'', status:'scheduled', meetingSubject:'' })
+const localTimeZone = Intl.DateTimeFormat().resolvedOptions().timeZone
 const bookingQuery = ref('')
 const bookingCandidates = computed(() => recruitment.candidates.filter(person => {
   if (projectId.value && person.projectId !== projectId.value && person.projectCandidateId !== form.projectCandidateId) return false
@@ -115,7 +118,7 @@ const agendaGroups = computed(() => {
   const todayStart = new Date(new Date().getFullYear(), new Date().getMonth(), new Date().getDate()).getTime()
   const rows = visibleInterviews.value.filter(item => selectedDate.value
     ? dateKey(item.startsAt) === selectedDate.value
-    : item.status !== 'cancelled' && Date.parse(item.startsAt) >= todayStart)
+    : (item.status !== 'cancelled' || item.meetingSyncStatus === 'pending_cancel') && Date.parse(item.startsAt) >= todayStart)
   const grouped = new Map<string, RecruitmentInterview[]>()
   for (const item of rows) {
     const key = dateKey(item.startsAt)
@@ -133,7 +136,7 @@ function dateKey(value: string | Date) {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
 }
 function formatSelectedDate(value: string) { return new Date(`${value}T12:00:00`).toLocaleDateString('zh-CN', { month: 'long', day: 'numeric', weekday: 'long' }) }
-function interviewCountOn(key: string) { return visibleInterviews.value.filter(item => item.status !== 'cancelled' && dateKey(item.startsAt) === key).length }
+function interviewCountOn(key: string) { return visibleInterviews.value.filter(item => (item.status !== 'cancelled' || item.meetingSyncStatus === 'pending_cancel') && dateKey(item.startsAt) === key).length }
 function selectDate(key: string) {
   selectedDate.value = key
   const date = new Date(`${key}T12:00:00`)
@@ -157,7 +160,7 @@ function formatTime(value: string) { return new Date(value).toLocaleTimeString('
 function statusLabel(status: string) { return ({ scheduled:'已安排', cancelled:'已取消', completed:'已完成' } as Record<string,string>)[status] || status }
 function create() {
   bookingQuery.value = ''
-  Object.assign(form, { id:'', projectCandidateId:'', candidateName:'', projectName:'', startsAt:'', endsAt:'', interviewer:'', method:'', location:'', note:'', status:'scheduled' })
+  Object.assign(form, { id:'', projectCandidateId:'', candidateName:'', projectName:'', startsAt:'', endsAt:'', interviewer:'', method:'', location:'', note:'', status:'scheduled', meetingSubject:'', meetingSyncStatus:'', meetingUrl:'' })
   if (selectedDate.value) {
     form.startsAt = `${selectedDate.value}T10:00`
     form.endsAt = `${selectedDate.value}T11:00`
@@ -184,7 +187,7 @@ async function save() {
     await reload()
     dialogOpen.value = false
     selectDate(dateKey(form.startsAt))
-    ElMessage.success('面试日程已保存至本机')
+    ElMessage.success('面试日程已保存；腾讯会议状态显示在日程卡片中')
   } catch (err: any) { ElMessage.error(err?.message || String(err)) }
   finally { saving.value = false }
 }
@@ -194,10 +197,14 @@ async function cancel() {
     await ElMessageBox.confirm('确定取消这场面试吗？', '取消面试', { type:'warning' })
     await recruitment.cancelInterview(form.id)
     await reload()
+    const latest = recruitment.interviews.find(item => item.id === form.id)
     dialogOpen.value = false
-    ElMessage.success('面试已取消')
+    if (latest?.meetingSyncStatus === 'pending_cancel') ElMessage.warning('本地安排已取消，腾讯会议仍待取消；请查看原链接并重试')
+    else ElMessage.success('面试已取消')
   } catch (err: any) { if (err !== 'cancel') ElMessage.error(err?.message || String(err)) }
 }
+async function copyMeetingUrl() { if (form.meetingUrl) { await navigator.clipboard.writeText(form.meetingUrl); ElMessage.success('会议链接已复制') } }
+async function retryMeetingSync() { if (!form.id) return; try { const api: any = await import('../../wailsjs/go/main/App'); await api.RetryTencentMeetingSync(form.id); await reload(); const latest = recruitment.interviews.find(item => item.id === form.id); if (latest) edit(latest) } catch (err: any) { ElMessage.error(err?.message || String(err)) } }
 onMounted(() => { void projects.loadProjects(); void reload() })
 </script>
 

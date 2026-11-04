@@ -2,6 +2,7 @@
 build/bin/
 build/go-cache/
 bin/
+tencentcloud-tmeet-*.tgz
 *.exe
 !.gitkeep
 

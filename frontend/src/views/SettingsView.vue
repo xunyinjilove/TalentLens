@@ -109,6 +109,20 @@
           </div>
         </section>
 
+        <section v-show="activeTab === 'tencent'" class="content-section">
+          <div class="section-head"><h2>腾讯会议</h2><p>使用本机授权账号创建和管理面试会议；授权凭证由腾讯会议官方 CLI 保管。</p></div>
+          <div class="form-card">
+            <p>状态：{{ meetingConnection.message || '正在读取' }}</p>
+            <p v-if="meetingConnection.account">当前主持账号：{{ meetingConnection.account }}</p>
+            <div class="form-item actions">
+              <el-button :loading="meetingBusy" @click="refreshMeetingConnection">刷新状态</el-button>
+              <el-button type="primary" :loading="meetingBusy" :disabled="!meetingConnection.installed" @click="loginMeeting">连接腾讯会议</el-button>
+              <el-button :loading="meetingBusy" :disabled="!meetingConnection.loggedIn" @click="logoutMeeting">断开连接</el-button>
+            </div>
+            <p v-if="!meetingConnection.installed">共享安装包需包含官方 tmeet.exe；连接前请确认程序已安装。</p>
+          </div>
+        </section>
+
         <!-- 岗位需求 -->
         <section v-show="activeTab === 'job'" class="content-section">
           <div class="section-head">
@@ -324,6 +338,11 @@ const router = useRouter()
 const { t } = useI18n()
 
 const activeTab = ref('ai')
+const meetingBusy = ref(false)
+const meetingConnection = ref<{ installed: boolean; loggedIn: boolean; account: string; message: string }>({ installed: false, loggedIn: false, account: '', message: '' })
+async function refreshMeetingConnection() { try { const api: any = await import('../../wailsjs/go/main/App'); meetingConnection.value = await api.GetTencentMeetingConnection() } catch (e: any) { meetingConnection.value.message = e?.message || String(e) } }
+async function loginMeeting() { meetingBusy.value = true; try { const api: any = await import('../../wailsjs/go/main/App'); meetingConnection.value = await api.LoginTencentMeeting(); ElMessage.success('腾讯会议已连接') } catch (e: any) { ElMessage.error(e?.message || String(e)); await refreshMeetingConnection() } finally { meetingBusy.value = false } }
+async function logoutMeeting() { meetingBusy.value = true; try { const api: any = await import('../../wailsjs/go/main/App'); meetingConnection.value = await api.LogoutTencentMeeting(); ElMessage.success('已断开腾讯会议') } catch (e: any) { ElMessage.error(e?.message || String(e)) } finally { meetingBusy.value = false } }
 const testing = ref(false)
 const selectedPresetId = ref<string>('')
 const dataDir = ref('')
@@ -331,6 +350,7 @@ const presetPickerRef = ref<InstanceType<typeof JobPresetPicker> | null>(null)
 
 const tabs = [
   { id: 'ai', label: 'settings.aiConfig', icon: markRaw(Connection) },
+  { id: 'tencent', label: '腾讯会议', icon: markRaw(Connection) },
   { id: 'job', label: 'settings.jobRequirements', icon: markRaw(Briefcase) },
   { id: 'analysis', label: 'settings.analysisSettings', icon: markRaw(Setting) },
   { id: 'about', label: 'about.title', icon: markRaw(InfoFilled) }
@@ -610,6 +630,7 @@ async function openLink(url: string) {
 }
 
 onMounted(async () => {
+  void refreshMeetingConnection()
   // 加载数据目录路径和版本号
   try {
     const WailsApp = await import('../../wailsjs/go/main/App')
