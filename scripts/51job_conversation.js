@@ -89,6 +89,17 @@ async function fetchTrustedAttachment(page, href, redirects = 0) {
   });
 }
 
+async function openExactCandidateTab(browser, source, expected) {
+  const session = await source.target().createCDPSession();
+  try {
+    const { targetId } = await session.send('Target.createTarget', { url: expected.url, background: true });
+    const target = await browser.waitForTarget(item => item._targetId === targetId, { timeout: 10000 });
+    const page = await target.page();
+    if (!page) throw new Error('候选人详情页未就绪');
+    return page;
+  } finally { await session.detach().catch(() => {}); }
+}
+
 async function candidatePage(browser, expected, name) {
   let pages = (await browser.pages()).filter(page => sameCandidatePage(page.url(), expected));
   if (!pages.length) {
@@ -98,19 +109,32 @@ async function candidatePage(browser, expected, name) {
       error.code = '51JOB_BROWSER_UNAVAILABLE';
       throw error;
     }
-    const session = await source.target().createCDPSession();
-    try {
-      const { targetId } = await session.send('Target.createTarget', { url: expected.url, background: true });
-      const target = await browser.waitForTarget(item => item._targetId === targetId, { timeout: 10000 });
-      const page = await target.page();
-      if (!page) throw new Error('候选人详情页未就绪');
-      pages = [page];
-    } finally { await session.detach().catch(() => {}); }
+    pages = [await openExactCandidateTab(browser, source, expected)];
   }
   let page = pages[0];
   if (name && pages.length > 1) {
+    let best = -1;
     for (const candidate of pages) {
-      if ((await candidate.title()).trim() === name) { page = candidate; break; }
+      if (!sameDisplayedName((await candidate.title()).trim(), name)) continue;
+      const chat = await candidate.evaluate(() => {
+        const root = document.querySelector('#chatAreaEmbed');
+        return { visible: !!root?.getClientRects().length,
+          name: (root?.querySelector('.username-text')?.textContent || '').trim() };
+      }).catch(() => ({ visible: false, name: '' }));
+      // Several tabs can show the same resume while a shared chat still shows
+      // another person. Prefer the verified chat, then a clean candidate tab.
+      const score = chat.visible ? (sameDisplayedName(chat.name, name) ? 3 : 0) : 2;
+      if (score >= best) { best = score; page = candidate; }
+    }
+    if (best === 0) page = await openExactCandidateTab(browser, page, expected);
+  } else if (name && pages.length === 1) {
+    const chat = await page.evaluate(() => {
+      const root = document.querySelector('#chatAreaEmbed');
+      return { visible: !!root?.getClientRects().length,
+        name: (root?.querySelector('.username-text')?.textContent || '').trim() };
+    }).catch(() => ({ visible: false, name: '' }));
+    if (chat.visible && !sameDisplayedName(chat.name, name)) {
+      page = await openExactCandidateTab(browser, page, expected);
     }
   }
   // Ads and long-lived requests can keep readyState below complete. Wait for
@@ -648,7 +672,14 @@ async function openCandidateChat(page, name, jobTitle = '', autoSelect = true) {
       : { status: 'needs_job_selection', message: '51job 沟通职位选择窗口已打开；本次未发送消息' };
   }
   try {
-    await page.waitForSelector('#chatAreaEmbed .input-textarea_self[contenteditable="true"]', { visible: true, timeout: 15000 });
+    await page.waitForFunction(expectedName => {
+      const root = document.querySelector('#chatAreaEmbed');
+      const current = (root?.querySelector('.username-text')?.textContent || '').trim().replace(/小姐$/, '女士');
+      return !!root?.getClientRects().length &&
+        root.closest('[data-type="embed"]')?.id === 'im-sdk-container' &&
+        !!root.querySelector('.input-textarea_self[contenteditable="true"]')?.getClientRects().length &&
+        current === String(expectedName || '').trim().replace(/小姐$/, '女士');
+    }, { polling: 200, timeout: 15000 }, name);
   } catch {
     if (await page.evaluate(platformChatGateVisible).catch(() => false)) {
       return autoSelect ? selectCommunicationJob(page, jobTitle)
@@ -742,6 +773,12 @@ async function sendCandidateMessage(page, message, includeBaseline = false) {
 }
 
 async function inspectReply(page, outputDir, recordID, known = [], download = true) {
+  // The chat identity can appear before its message history is hydrated.
+  if (typeof page.waitForFunction === 'function') {
+    await page.waitForFunction(() =>
+      !!document.querySelector('#chatAreaEmbed .message-list .message-item'),
+    { polling: 150, timeout: 2500 }).catch(() => {});
+  }
   await loadConversationHistory(page);
   const messages = await conversationMessages(page);
   const replies = messages.filter(item => !item.mine && item.text).slice(-10).map(item => item.text);
@@ -961,6 +998,9 @@ async function main(argv = process.argv.slice(2), writeResult = result => proces
       return;
     }
     const page = await candidatePage(browser, expected, args.name);
+    if (args.action === 'check_resume' && typeof page.bringToFront === 'function') {
+      await page.bringToFront();
+    }
     if (args.action === 'verify_candidate') {
       writeResult({ status: 'verified', targetId: expected.resumeId, message: '51job 详情页与候选人姓名已核对' });
       return;

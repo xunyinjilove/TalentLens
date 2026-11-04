@@ -2329,9 +2329,12 @@ const is51JobCandidate = computed(() => {
   } catch { return false }
 })
 const is51JobSource = computed(() => is51JobCandidate.value || resumeStore.selectedResume?.source_platform === '51job' || /【前程无忧】/.test(resumeStore.selectedResume?.fileName || ''))
-const contactStatusText = computed(() => ({
-  greeted: '已打招呼', resume_requested: '历史记录曾索要简历；现在只同步已收到的附件', resume_received: '已收到完整简历'
-}[resumeStore.selectedResume?.contact_status || ''] || '尚未联系'))
+const contactStatusText = computed(() => {
+  if (resumeStore.selectedResume?.attachment_pending_reason) return '平台显示有附件，文件待核验'
+  return ({
+    greeted: '已打招呼', resume_requested: '历史记录曾索要简历；现在只同步已收到的附件', resume_received: '已收到完整简历'
+  }[resumeStore.selectedResume?.contact_status || ''] || '尚未联系')
+})
 
 const jobTitle = ref('高级Go开发工程师')
 const showConfigGuide = ref(false)
