@@ -31,5 +31,5 @@
 流程规范：
 1. **版本自增与配置同步**：检查并递增小版本号（如 v1.8.x），同步 `wails.json`、打包脚本 `scripts/package-amd64.ps1` 及 `.github/release-notes/` 对应版本的发行说明。
 2. **打包与校验**：执行前端构建 `npm run build`，执行 `wails build` 生成可执行文件并打包绿色 zip。
-3. **提交与推送发布**：执行 `git add`、`git commit` 规范提交修改，创建对应版本的 Git Tag（如 `v1.8.x`），推送到远程仓库（`git push origin main` 与 `git push origin <tag>`）自动触发 GitHub Actions 发行正式 Release。
+3. **提交与推送发布（Commit 必须使用中文）**：执行 `git add`、`git commit` 使用**中文**规范提交修改（如 `feat(模块): 中文说明 (v1.8.x)`），创建对应版本的 Git Tag（如 `v1.8.x`），推送到远程仓库（`git push origin main` 与 `git push origin <tag>`）自动触发 GitHub Actions 发行正式 Release。
 
