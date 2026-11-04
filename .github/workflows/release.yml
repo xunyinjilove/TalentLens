@@ -70,6 +70,17 @@ jobs:
           Copy-Item "build/bin/${{ env.APP_NAME }}.exe" "$stage/${{ env.APP_NAME }}.exe"
           Copy-Item "build/bin/scripts" "$stage/scripts" -Recurse
           Copy-Item "node_modules" "$stage/node_modules" -Recurse
+          if (Test-Path "WINDOWS_PACKAGE_README.md") { Copy-Item "WINDOWS_PACKAGE_README.md" "$stage/README.md" -Force }
+          if (Test-Path "LICENSE") { Copy-Item "LICENSE" "$stage/LICENSE" -Force }
+          $tmeetVersion = "1.1.0"
+          $tmeetArchive = "tencentcloud-tmeet-$tmeetVersion.tgz"
+          npm pack "@tencentcloud/tmeet@$tmeetVersion" --ignore-scripts
+          $extractDir = "build/bin/tmeet-extract-$tmeetVersion"
+          New-Item -ItemType Directory -Force "$extractDir" | Out-Null
+          tar -xzf $tmeetArchive -C $extractDir package/dist/tmeet-Windows-x86_64.exe package/LICENSE
+          New-Item -ItemType Directory -Force "$stage/bin" | Out-Null
+          Copy-Item "$extractDir/package/dist/tmeet-Windows-x86_64.exe" "$stage/bin/tmeet.exe" -Force
+          Copy-Item "$extractDir/package/LICENSE" "$stage/bin/TMEET-LICENSE.txt" -Force
           if (!(Test-Path "$stage/scripts/51job_application_import.js")) { throw "51job 投递导入脚本未打包" }
           if (!(Test-Path "$stage/node_modules/puppeteer-core")) { throw "浏览器驱动依赖未打包" }
           Compress-Archive -Path "$stage/*" -DestinationPath "build/bin/$artifact"
