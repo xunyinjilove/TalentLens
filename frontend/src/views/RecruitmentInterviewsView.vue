@@ -59,7 +59,10 @@
                     <span v-if="getItemConflicts(item).length" class="wb-pill conflict-pill">⚠️ 时间冲突 ({{ getItemConflicts(item).length }})</span>
                     <span class="wb-pill" :class="item.status === 'cancelled' ? 'danger' : item.status === 'completed' ? 'ok' : ''">{{ statusLabel(item.status) }}</span>
                   </div>
-                  <el-button size="small" @click="edit(item)">{{ item.status === 'cancelled' ? '查看' : '改期 / 编辑' }}</el-button>
+                  <div class="interview-agenda-btn-group">
+                    <el-button size="small" @click="edit(item)">{{ item.status === 'cancelled' ? '查看' : '改期 / 编辑' }}</el-button>
+                    <el-button size="small" type="danger" plain @click="removeInterview(item)">删除</el-button>
+                  </div>
                 </div>
               </article>
             </section>
@@ -122,6 +125,7 @@
       </div>
       <p class="wb-muted" style="font-size:12px">时区：{{ localTimeZone }}。日程保存在本机；保存不会自动通知候选人或面试官。</p>
       <template #footer>
+        <el-button v-if="form.id" type="danger" @click="removeInterview(form)">删除日程</el-button>
         <el-button v-if="form.id && form.status !== 'cancelled'" type="danger" plain @click="cancel">取消面试</el-button>
         <el-button @click="dialogOpen = false">关闭</el-button>
         <el-button v-if="form.status !== 'cancelled'" type="primary" :loading="saving" @click="save">保存日程</el-button>
@@ -207,6 +211,7 @@ const defaultMeetingSubjectPlaceholder = computed(() => {
 
 function onCandidateSelected(val: string) {
   if (!val) {
+    form.id = ''
     form.candidateName = ''
     form.projectName = ''
     if (form.meetingSubject === lastAutoSubject.value) {
@@ -219,6 +224,21 @@ function onCandidateSelected(val: string) {
   if (matched) {
     form.candidateName = matched.name
     form.projectName = matched.projectName
+  }
+  const existing = recruitment.interviews.find(i => i.projectCandidateId === val && i.status === 'scheduled')
+  if (existing) {
+    form.id = existing.id
+    if (!form.interviewer && existing.interviewer) form.interviewer = existing.interviewer
+    if (existing.method) form.method = existing.method
+    if (!form.location && existing.location) form.location = existing.location
+    if (!form.note && existing.note) form.note = existing.note
+    if (existing.meetingSubject) form.meetingSubject = existing.meetingSubject
+    form.meetingId = existing.meetingId || ''
+    form.meetingCode = existing.meetingCode || ''
+    form.meetingUrl = existing.meetingUrl || ''
+    form.meetingSyncStatus = existing.meetingSyncStatus || ''
+  } else {
+    form.id = ''
   }
   if (!form.method) {
     form.method = '腾讯会议自动生成'
@@ -340,7 +360,11 @@ function bookCandidate(id: string) {
 }
 function edit(item: RecruitmentInterview) {
   lastAutoSubject.value = ''
-  Object.assign(form, item, { startsAt: localInput(item.startsAt), endsAt: localInput(item.endsAt) })
+  Object.assign(form, item, {
+    method: item.method || '腾讯会议自动生成',
+    startsAt: localInput(item.startsAt),
+    endsAt: localInput(item.endsAt)
+  })
   dialogOpen.value = true
 }
 async function reload() {
@@ -392,6 +416,31 @@ async function cancel() {
     if (latest?.meetingSyncStatus === 'pending_cancel') ElMessage.warning('本地安排已取消，腾讯会议仍待取消；请查看原链接并重试')
     else ElMessage.success('面试已取消')
   } catch (err: any) { if (err !== 'cancel') ElMessage.error(err?.message || String(err)) }
+}
+
+async function removeInterview(item: RecruitmentInterview) {
+  if (!item?.id) return
+  try {
+    await ElMessageBox.confirm(
+      `确定彻底删除「${item.candidateName || '该候选人'}」的这场面试安排吗？删除后不可恢复。`,
+      '删除面试安排',
+      {
+        confirmButtonText: '确认删除',
+        cancelButtonText: '取消',
+        type: 'warning'
+      }
+    )
+    await recruitment.deleteInterview(item.id)
+    await reload()
+    if (dialogOpen.value && form.id === item.id) {
+      dialogOpen.value = false
+    }
+    ElMessage.success('面试安排已删除')
+  } catch (err: any) {
+    if (err !== 'cancel') {
+      ElMessage.error(err?.message || String(err))
+    }
+  }
 }
 
 function formatMeetingCode(code?: string): string {

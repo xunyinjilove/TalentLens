@@ -271,6 +271,12 @@ export const useRecruitmentStore = defineStore('recruitment', () => {
     await Promise.all([loadInterviews(), loadDashboard(), loadRecentActivities()])
   }
 
+  async function deleteInterview(id: string) {
+    const api: any = await recruitmentAPI()
+    await api.DeleteRecruitmentInterview(id)
+    await Promise.all([loadInterviews(), loadDashboard(), loadRecentActivities()])
+  }
+
   async function moveCandidate(projectCandidateId: string, targetProjectId: string) {
     const api: any = await recruitmentAPI()
     await api.MoveCandidateToProject(projectCandidateId, targetProjectId)
@@ -319,5 +325,5 @@ export const useRecruitmentStore = defineStore('recruitment', () => {
     loadDashboard, loadTodayTodos, loadRecentActivities, addTodayTodo, setTodayTodoCompleted, deleteTodayTodo,
     loadInterviews, loadSourcingTasks, resumeSourcingTask, stopSourcingTask,
     deleteSourcingTask, clearFinishedSourcingTasks,
-    updateFollowUp, batchUpdateStage, saveInterview, cancelInterview, moveCandidate, archiveCandidates, initEvents }
+    updateFollowUp, batchUpdateStage, saveInterview, cancelInterview, deleteInterview, moveCandidate, archiveCandidates, initEvents }
 })
