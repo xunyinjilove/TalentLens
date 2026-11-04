@@ -152,7 +152,128 @@ func (a *App) bindExclusive51JobProject(account, jobID, projectID string) error 
 		VALUES('51job',?,?,?) ON CONFLICT(platform,platform_account,platform_job_id) DO UPDATE SET project_id=excluded.project_id`, account, jobID, projectID); err != nil {
 		return err
 	}
-	return tx.Commit()
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	_, err = repairMisfiled51JobProjectCandidates(db, account, jobID, projectID)
+	return err
+}
+
+// Older imports may have moved an application row to another project while
+// leaving its project_candidate association in this library. Compare the
+// immutable resume ID derived from the platform application with the exact
+// account/job mapping; never infer a match from a similar job title.
+func repairMisfiled51JobProjectCandidates(db *sql.DB, account, jobID, projectID string) (int, error) {
+	if account == "" || jobID == "" || projectID == "" {
+		return 0, nil
+	}
+	tx, err := db.Begin()
+	if err != nil {
+		return 0, err
+	}
+	defer tx.Rollback()
+	rows, err := tx.Query(`SELECT platform_account,platform_application_id,platform_job_id FROM applications WHERE platform='51job'`)
+	if err != nil {
+		return 0, err
+	}
+	correct, foreign := map[string]bool{}, map[string]bool{}
+	for rows.Next() {
+		var sourceAccount, applicationID, sourceJob string
+		if err := rows.Scan(&sourceAccount, &applicationID, &sourceJob); err != nil {
+			rows.Close()
+			return 0, err
+		}
+		id := applicationResumeID(ApplicationRecord{Platform: "51job", PlatformAccount: sourceAccount, ApplicationID: applicationID})
+		if sourceAccount == account && sourceJob == jobID {
+			correct[id] = true
+		} else {
+			foreign[id] = true
+		}
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return 0, err
+	}
+	rows.Close()
+	rows, err = tx.Query(`SELECT pc.id,rv.legacy_resume_id FROM project_candidates pc
+		JOIN project_candidate_resumes pcr ON pcr.project_candidate_id=pc.id
+		JOIN resume_versions rv ON rv.id=pcr.resume_version_id
+		WHERE pc.project_id=? AND pc.archived_at='' AND rv.legacy_resume_id<>''`, projectID)
+	if err != nil {
+		return 0, err
+	}
+	type membership struct{ correct, foreign bool }
+	members := map[string]membership{}
+	for rows.Next() {
+		var id, resumeID string
+		if err := rows.Scan(&id, &resumeID); err != nil {
+			rows.Close()
+			return 0, err
+		}
+		m := members[id]
+		m.correct = m.correct || correct[resumeID]
+		m.foreign = m.foreign || foreign[resumeID]
+		members[id] = m
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return 0, err
+	}
+	rows.Close()
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	archived := 0
+	for id, m := range members {
+		if !m.foreign || m.correct {
+			continue
+		}
+		result, err := tx.Exec(`UPDATE project_candidates SET archived_at=?,updated_at=? WHERE id=? AND project_id=? AND archived_at=''`, now, now, id, projectID)
+		if err != nil {
+			return archived, err
+		}
+		if count, _ := result.RowsAffected(); count > 0 {
+			archived++
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return archived, err
+	}
+	return archived, nil
+}
+
+func (a *App) repairAllMisfiled51JobProjectCandidates() error {
+	db, err := a.getRecruitmentDB()
+	if err != nil {
+		return err
+	}
+	rows, err := db.Query(`SELECT project_id,platform_account,platform_job_id FROM platform_job_mappings WHERE platform='51job'`)
+	if err != nil {
+		return err
+	}
+	type binding struct{ projectID, account, jobID string }
+	byProject := map[string][]binding{}
+	for rows.Next() {
+		var b binding
+		if err := rows.Scan(&b.projectID, &b.account, &b.jobID); err != nil {
+			rows.Close()
+			return err
+		}
+		byProject[b.projectID] = append(byProject[b.projectID], b)
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return err
+	}
+	rows.Close()
+	for _, bindings := range byProject {
+		if len(bindings) != 1 {
+			continue
+		} // Ambiguous legacy bindings need an explicit choice.
+		b := bindings[0]
+		if _, err := repairMisfiled51JobProjectCandidates(db, b.account, b.jobID, b.projectID); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (a *App) ListImportedApplications(status string) ([]ImportedApplication, error) {

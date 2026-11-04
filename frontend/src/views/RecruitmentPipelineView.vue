@@ -40,13 +40,13 @@
         <h3 style="font-size:14px;margin-top:22px">跟进记录</h3>
         <div v-if="events.length" class="event-list">
           <div v-for="event in events" :key="event.id" class="event-item">
-            <div><strong>{{ event.type.startsWith('communication:') ? '沟通记录' : event.type === 'note' ? '备注' : stageLabels[event.toStage] || event.toStage }}</strong><span class="wb-muted"> · {{ event.actor || 'HR' }} · {{ formatDate(event.createdAt) }}</span></div>
+            <div><strong>{{ event.type.startsWith('communication:') ? '沟通记录' : event.type === 'note' ? '备注' : historyStageLabel(event.toStage) }}</strong><span class="wb-muted"> · {{ event.actor || 'HR' }} · {{ formatDate(event.createdAt) }}</span></div>
             <div v-if="event.note">{{ event.note }}</div>
           </div>
         </div>
         <div v-else class="wb-muted">暂无跟进记录</div>
       </template>
-      <template #footer><el-button @click="dialogOpen = false">取消</el-button><el-button type="primary" :loading="saving" @click="save">保存跟进</el-button></template>
+      <template #footer><el-button v-if="editing?.stage === 'offer'" @click="router.push({ path:'/offers',query:{ project:editing.projectId,candidate:editing.projectCandidateId } }); dialogOpen=false">打开 Offer 管理</el-button><el-button @click="dialogOpen = false">取消</el-button><el-button type="primary" :loading="saving" @click="save">保存跟进</el-button></template>
     </el-dialog>
   </div>
 </template>
@@ -59,7 +59,7 @@ import { useProjectStore } from '../composables/useProjectStore'
 import { useRecruitmentStore, stageLabels, type TalentCandidate } from '../composables/useRecruitmentStore'
 import { getCandidateSurname } from '../utils/candidate'
 
-const stages = ['new', 'pending_contact', 'communicating', 'first_interview', 'second_interview', 'offer', 'hired', 'on_hold', 'rejected']
+const stages = ['new', 'pending_contact', 'first_interview', 'second_interview', 'offer', 'hired']
 const route = useRoute()
 const router = useRouter()
 const projects = useProjectStore()
@@ -89,6 +89,7 @@ function inStage(stage: string) {
   })
 }
 function formatDate(value: string) { return value ? new Date(value).toLocaleString('zh-CN') : '' }
+function historyStageLabel(value: string) { return stageLabels[value] || ({ communicating:'沟通中（历史）', on_hold:'暂缓（历史）', rejected:'淘汰（历史）' } as Record<string,string>)[value] || value }
 async function openLinkedCandidate() {
   const id = String(route.query.candidate || '')
   if (!id || id === openedCandidateId) return
@@ -110,7 +111,7 @@ async function edit(item: TalentCandidate) {
   form.stage = item.stage
   form.owner = item.owner
   form.nextActionAt = item.nextActionAt ? localDateTime(item.nextActionAt) : ''
-  form.note = ''
+  form.note = item.lastFollowUpNote || ''
   events.value = []
   dialogOpen.value = true
   try {

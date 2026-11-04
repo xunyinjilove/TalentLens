@@ -203,6 +203,17 @@ func TestEndToEndRecruitmentFlow(t *testing.T) {
 	if err != nil {
 		t.Fatalf("UpdateCandidateFollowUp failed: %v", err)
 	}
+	afterNote, err := app.ListTalentCandidates(proj.ID)
+	if err != nil || len(afterNote) != 1 || afterNote[0].LastFollowUpNote != "AI初筛通过，预约技术总监初面" {
+		t.Fatalf("最近跟进备注未返回给弹窗: %+v err=%v", afterNote, err)
+	}
+	if err := app.UpdateCandidateFollowUp(cand.ProjectCandidateID, "first_interview", "林HR", "2026-10-20T14:00:00Z", "", "HR"); err != nil {
+		t.Fatal(err)
+	}
+	afterClear, err := app.ListTalentCandidates(proj.ID)
+	if err != nil || len(afterClear) != 1 || afterClear[0].LastFollowUpNote != "" {
+		t.Fatalf("清空备注后仍显示旧文字: %+v err=%v", afterClear, err)
+	}
 
 	// 7. 安排面试记录
 	interview := RecruitmentInterview{
@@ -247,4 +258,3 @@ func TestEndToEndRecruitmentFlow(t *testing.T) {
 		t.Fatalf("deleted project candidate relations still exist in SQLite: count=%d, err=%v", count, err)
 	}
 }
-

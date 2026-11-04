@@ -796,7 +796,7 @@ function getStats(projectId: string): JobStats {
   const suitable = candidates.filter(c => {
     if (c.stage === 'rejected') return false
     if (c.abilityScore >= 60) return true
-    return ['first_interview', 'second_interview', 'offer', 'hired', 'communicating'].includes(c.stage)
+    return ['first_interview', 'second_interview', 'offer', 'hired'].includes(c.stage)
   }).length
   return { totalApplications: total, suitableCount: suitable }
 }

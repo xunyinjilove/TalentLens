@@ -10,6 +10,17 @@
         </el-select>
       </div>
       <el-alert v-if="recruitment.error" :title="recruitment.error" type="warning" :closable="false" style="margin-bottom:16px" />
+      <section class="wb-card pending-interviews" aria-labelledby="pending-interviews-title">
+        <h2 id="pending-interviews-title" class="wb-section-title">待面试安排（{{ pendingCandidates.length }}）</h2>
+        <p class="wb-muted">招聘阶段为初面或复面，且没有未来已安排的面试时自动列入。可在候选人卡片调整阶段。</p>
+        <div v-if="pendingCandidates.length" class="pending-interview-list">
+          <div v-for="person in pendingCandidates" :key="person.projectCandidateId" class="pending-interview-row">
+            <span><strong>{{ person.candidateName }}</strong> · {{ person.projectName }} · {{ person.stage === 'second_interview' ? '复面' : '初面' }}</span>
+            <el-button size="small" type="primary" @click="bookCandidate(person.projectCandidateId)">预约面试</el-button>
+          </div>
+        </div>
+        <p v-else class="wb-muted">当前没有待安排的人选。</p>
+      </section>
       <div class="interview-layout">
         <section class="interview-agenda" aria-labelledby="interview-agenda-title">
           <div class="interview-agenda-heading">
@@ -78,6 +89,8 @@ const initialCalendarDate = initialDate ? new Date(`${initialDate}T12:00:00`) : 
 const calendarCursor = ref(new Date(initialCalendarDate.getFullYear(), initialCalendarDate.getMonth(), 1))
 const weekdays = ['一', '二', '三', '四', '五', '六', '日']
 const dialogOpen = ref(false)
+type PendingPerson = { projectCandidateId: string; projectId: string; candidateName: string; projectName: string; stage: string }
+const pendingCandidates = ref<PendingPerson[]>([])
 const saving = ref(false)
 const form = reactive<RecruitmentInterview>({ id:'', projectCandidateId:'', candidateName:'', projectName:'', startsAt:'', endsAt:'', interviewer:'', method:'', location:'', note:'', status:'scheduled' })
 const bookingQuery = ref('')
@@ -151,13 +164,24 @@ function create() {
   }
   dialogOpen.value = true
 }
+function bookCandidate(id: string) {
+  create()
+  form.projectCandidateId = id
+}
 function edit(item: RecruitmentInterview) { bookingQuery.value = ''; Object.assign(form, item, { startsAt: localInput(item.startsAt), endsAt: localInput(item.endsAt) }); dialogOpen.value = true }
-async function reload() { await Promise.all([recruitment.loadInterviews(), recruitment.loadCandidates()]) }
+async function reload() {
+  await Promise.all([recruitment.loadInterviews(), recruitment.loadCandidates()])
+  try {
+    const api: any = await import('../../wailsjs/go/main/App')
+    pendingCandidates.value = await api.ListPendingInterviewCandidates(projectId.value) || []
+  } catch (err: any) { recruitment.error = err?.message || String(err) }
+}
 async function save() {
   if (!form.projectCandidateId || !form.startsAt || !form.endsAt) { ElMessage.warning('请选择候选人并填写时间'); return }
   saving.value = true
   try {
     await recruitment.saveInterview({ ...form, startsAt: toISO(form.startsAt), endsAt: toISO(form.endsAt) })
+    await reload()
     dialogOpen.value = false
     selectDate(dateKey(form.startsAt))
     ElMessage.success('面试日程已保存至本机')
@@ -169,6 +193,7 @@ async function cancel() {
   try {
     await ElMessageBox.confirm('确定取消这场面试吗？', '取消面试', { type:'warning' })
     await recruitment.cancelInterview(form.id)
+    await reload()
     dialogOpen.value = false
     ElMessage.success('面试已取消')
   } catch (err: any) { if (err !== 'cancel') ElMessage.error(err?.message || String(err)) }
@@ -178,6 +203,9 @@ onMounted(() => { void projects.loadProjects(); void reload() })
 
 <style scoped>
 .interview-layout { display: grid; grid-template-columns: minmax(0, 1.65fr) minmax(290px, .9fr); gap: 18px; align-items: start; }
+.pending-interviews { margin-bottom: 18px; }
+.pending-interview-list { display: flex; flex-direction: column; gap: 8px; }
+.pending-interview-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 8px 0; border-bottom: 1px solid var(--wb-border); }
 .interview-agenda-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 14px; margin-bottom: 17px; }
 .interview-agenda-toolbar { display: flex; align-items: center; gap: 8px; }
 .interview-agenda-heading .wb-section-title { margin-bottom: 4px; }

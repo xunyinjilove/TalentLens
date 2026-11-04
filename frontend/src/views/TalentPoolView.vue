@@ -263,7 +263,8 @@
               <el-option v-for="source in sources" :key="source" :label="source" :value="source" />
             </el-select>
 
-            <el-select v-model="stageFilter" placeholder="招聘阶段" clearable style="width: 130px">
+            <el-select v-model="stageFilter" placeholder="招聘阶段" style="width: 130px">
+              <el-option label="全部" value="" />
               <el-option
                 v-for="(label, key) in stageLabels"
                 :key="key"
@@ -272,15 +273,6 @@
               />
             </el-select>
 
-            <el-button
-              v-if="hasActiveFilters"
-              link
-              type="primary"
-              class="reset-filters-btn"
-              @click="resetFilters"
-            >
-              重置筛选
-            </el-button>
           </div>
 
           <div class="toolbar-right-controls">
@@ -1015,7 +1007,7 @@ function handleCandidateAction(command: string, item: TalentCandidate) {
 const stageDialogOpen = ref(false)
 const stageCandidate = ref<TalentCandidate | null>(null)
 const isBatchStageMode = ref(false)
-const targetStage = ref('communicating')
+const targetStage = ref('pending_contact')
 const stageNote = ref('')
 const updatingStage = ref(false)
 
@@ -1023,7 +1015,7 @@ function openSingleStageDialog(candidate: TalentCandidate) {
   stageCandidate.value = candidate
   isBatchStageMode.value = false
   targetStage.value = candidate.stage || 'new'
-  stageNote.value = ''
+  stageNote.value = candidate.lastFollowUpNote || ''
   stageDialogOpen.value = true
 }
 
@@ -1034,7 +1026,7 @@ function openBatchStageDialog() {
   }
   stageCandidate.value = null
   isBatchStageMode.value = true
-  targetStage.value = 'communicating'
+  targetStage.value = 'pending_contact'
   stageNote.value = ''
   stageDialogOpen.value = true
 }
@@ -1058,7 +1050,7 @@ async function confirmUpdateStage() {
         targetStage.value,
         stageCandidate.value.owner || 'HR',
         stageCandidate.value.nextActionAt || '',
-        stageNote.value || `阶段调整为：${stageName}`
+        stageNote.value
       )
       ElMessage.success(`已将【${stageCandidate.value.name}】流转至【${stageName}】阶段`)
     }
@@ -1075,13 +1067,6 @@ async function confirmUpdateStage() {
 const hasActiveFilters = computed(() => {
   return !!(keyword.value || statusFilter.value || sourceFilter.value || stageFilter.value)
 })
-
-function resetFilters() {
-  keyword.value = ''
-  statusFilter.value = ''
-  sourceFilter.value = ''
-  stageFilter.value = ''
-}
 
 const showSearch = ref(false)
 const showTalentImportDialog = ref(false)
@@ -1387,7 +1372,7 @@ async function submitInterviewInvite() {
       candidate,
       'first_interview',
       interviewForm.interviewer.trim() || candidate.owner || 'HR',
-      interviewForm.startsAt,
+      new Date(interviewForm.startsAt).toISOString(),
       `已保存面试安排：${interviewForm.method}，时间：${interviewForm.startsAt}；请与候选人确认。`
     )
 
@@ -2322,11 +2307,6 @@ onUnmounted(() => {
 
 .search-filter-input {
   width: 240px;
-}
-
-.reset-filters-btn {
-  font-size: 12px;
-  margin-left: 2px;
 }
 
 .toolbar-right-controls {

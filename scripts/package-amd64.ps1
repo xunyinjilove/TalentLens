@@ -1,5 +1,5 @@
 $ErrorActionPreference = "Stop"
-$version = "1.8.93"
+$version = "1.8.97"
 Write-Host "Syncing runtime assets..."
 node scripts/sync-runtime-assets.js
 
@@ -19,12 +19,17 @@ New-Item -ItemType Directory -Path $stage -Force | Out-Null
 Copy-Item "build/bin/TalentLens.exe" (Join-Path $stage "TalentLens.exe") -Force
 Copy-Item "build/bin/scripts" (Join-Path $stage "scripts") -Recurse -Force
 Copy-Item "node_modules" (Join-Path $stage "node_modules") -Recurse -Force
+Copy-Item "WINDOWS_PACKAGE_README.md" (Join-Path $stage "使用说明.md") -Force
+Copy-Item "LICENSE" (Join-Path $stage "LICENSE") -Force
 
 if (!(Test-Path -LiteralPath (Join-Path $stage "scripts/51job_application_import.js"))) {
     throw "51job import script missing"
 }
 if (!(Test-Path -LiteralPath (Join-Path $stage "node_modules/puppeteer-core"))) {
     throw "puppeteer-core missing"
+}
+if (!(Test-Path -LiteralPath (Join-Path $stage "scripts/51job_conversation.js"))) {
+    throw "51job conversation script missing"
 }
 
 Write-Host "Compressing AMD64 archive..."

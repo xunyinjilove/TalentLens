@@ -143,6 +143,10 @@ func reconcileUnfitManagementCandidates(db *sql.DB, projectID, accountScope, job
 		if err := archiveRejectedManagementCandidate(db, projectID, candidate.CandidateID); err != nil {
 			return err
 		}
+		_, _ = db.Exec(`UPDATE platform_action_ledger SET status='success',receipt='平台不合适列表已核对',error_message=''
+			WHERE project_id=? AND platform_account=? AND platform_job_id=? AND candidate_id=? AND record_id=? AND action_type='reject'
+			AND status IN ('executing','uncertain','pending_retry','failed')`,
+			projectID, accountScope, jobID, candidate.CandidateID, candidate.RecordID)
 		if _, err := db.Exec(`DELETE FROM talent_management_pending_reviews WHERE project_id=? AND platform_account=? AND platform_job_id=? AND candidate_id=?`,
 			projectID, accountScope, jobID, candidate.CandidateID); err != nil {
 			return err
@@ -208,19 +212,18 @@ func saveTalentManagementPendingReview(db *sql.DB, projectID, accountScope, jobI
 	return err
 }
 
-func (a *App) rejectUnfitManagementCandidate(ctx context.Context, db *sql.DB, projectID, accountScope, jobID string, pageIndex int, candidate talentManagementCandidate, checks []RuleCheckItem) (string, error) {
-	var priorStatus, priorError string
-	err := db.QueryRow(`SELECT status,error_message FROM platform_action_ledger WHERE project_id=? AND candidate_id=? AND record_id=? AND action_type='reject'`,
-		projectID, candidate.CandidateID, candidate.RecordID).Scan(&priorStatus, &priorError)
+func (a *App) rejectUnfitManagementCandidate(ctx context.Context, db *sql.DB, projectID, accountScope, jobID string, statusIndex, pageIndex int, candidate talentManagementCandidate, checks []RuleCheckItem) (string, error) {
+	var priorStatus string
+	err := db.QueryRow(`SELECT status FROM platform_action_ledger WHERE project_id=? AND candidate_id=? AND record_id=? AND action_type='reject'`,
+		projectID, candidate.CandidateID, candidate.RecordID).Scan(&priorStatus)
 	if err != nil && err != sql.ErrNoRows {
 		return "", err
 	}
 	if priorStatus == "success" {
 		return "success", nil
 	}
-	if priorStatus == "pending_retry" && !strings.Contains(priorError, "无法找到候选人的「不合适」操作按钮") &&
-		!strings.Contains(priorError, "无法在待处理列表中定位该候选人") {
-		return "pending_retry", nil // 回执未明时只查询，不再次点击。
+	if priorStatus == "executing" || priorStatus == "uncertain" {
+		return priorStatus, nil // 先核对未知回执，绝不重复点击。
 	}
 	reason := "其他原因"
 	evidence := ""
@@ -242,8 +245,16 @@ func (a *App) rejectUnfitManagementCandidate(ctx context.Context, db *sql.DB, pr
 	if evidence == "" {
 		return "", fmt.Errorf("缺少明确不符合的核验证据")
 	}
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	_, err = db.Exec(`INSERT INTO platform_action_ledger(id,project_id,platform,platform_account,platform_job_id,candidate_id,record_id,candidate_name,action_type,confirmed_by,requested_at,receipt,status,error_message,retry_count)
+		VALUES(?,?,?,?,?,?,?,?,?,'自动筛选',?,'','executing','',0)
+		ON CONFLICT(project_id,candidate_id,record_id,action_type) DO UPDATE SET requested_at=excluded.requested_at,status='executing',error_message='',receipt='',retry_count=platform_action_ledger.retry_count+1`,
+		recruitmentID("pal"), projectID, "51job", accountScope, jobID, candidate.CandidateID, candidate.RecordID, candidate.Name, "reject", now)
+	if err != nil {
+		return "", err
+	}
 	out, actionErr := runTalentManagementAdapterContext(ctx, 30*time.Second, "--mode", "reject", "--job-id", jobID,
-		"--candidate-id", candidate.CandidateID, "--record-id", candidate.RecordID, "--page-index", fmt.Sprint(pageIndex), "--reason-label", reason)
+		"--candidate-id", candidate.CandidateID, "--record-id", candidate.RecordID, "--status-index", fmt.Sprint(statusIndex), "--page-index", fmt.Sprint(pageIndex), "--reason-label", reason)
 	if ctx.Err() != nil {
 		return "", ctx.Err()
 	}
@@ -276,12 +287,9 @@ func (a *App) rejectUnfitManagementCandidate(ctx context.Context, db *sql.DB, pr
 		}
 		receipt = response.Receipt
 	}
-	now := time.Now().UTC().Format(time.RFC3339Nano)
-	_, err = db.Exec(`INSERT INTO platform_action_ledger(id,project_id,platform,platform_account,platform_job_id,candidate_id,record_id,candidate_name,action_type,confirmed_by,requested_at,receipt,status,error_message,retry_count)
-		VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,0)
-		ON CONFLICT(project_id,candidate_id,record_id,action_type) DO UPDATE SET requested_at=excluded.requested_at,receipt=excluded.receipt,status=excluded.status,error_message=excluded.error_message,retry_count=platform_action_ledger.retry_count+1`,
-		recruitmentID("pal"), projectID, "51job", accountScope, jobID, candidate.CandidateID, candidate.RecordID, candidate.Name,
-		"reject", "项目四类同步", now, receipt, status, errorText)
+	_, err = db.Exec(`UPDATE platform_action_ledger SET receipt=?,status=?,error_message=?
+		WHERE project_id=? AND candidate_id=? AND record_id=? AND action_type='reject'`,
+		receipt, status, errorText, projectID, candidate.CandidateID, candidate.RecordID)
 	if err != nil {
 		return status, err
 	}
@@ -503,6 +511,19 @@ func (a *App) Get51JobTalentManagementCatalog() (TalentManagementCatalog, error)
 // Bind51JobTalentManagementJob verifies the live account and job ID before
 // writing the durable platform-to-local-project mapping.
 func (a *App) Bind51JobTalentManagementJob(accountScope, jobID, projectID string) error {
+	if a.GetProject(projectID) == nil {
+		return fmt.Errorf("招聘项目不存在")
+	}
+	db, dbErr := a.getRecruitmentDB()
+	if dbErr != nil {
+		return dbErr
+	}
+	var owner string
+	if err := db.QueryRow(`SELECT project_id FROM platform_job_mappings WHERE platform='51job' AND platform_account=? AND platform_job_id=?`, accountScope, jobID).Scan(&owner); err == nil && owner != projectID {
+		return fmt.Errorf("这个 51job 职位已绑定其他专属库，请先核对原绑定；未更改任何分库")
+	} else if err != nil && err != sql.ErrNoRows {
+		return err
+	}
 	catalog, err := a.Get51JobTalentManagementCatalog()
 	if err != nil {
 		return err
@@ -524,6 +545,54 @@ func (a *App) Bind51JobTalentManagementJob(accountScope, jobID, projectID string
 		}
 	}
 	return fmt.Errorf("所选职位不属于当前 51job 账号")
+}
+
+// Get51JobProjectJob returns the one saved position only after checking the
+// currently logged-in 51job account and its live position catalog.
+func (a *App) Get51JobProjectJob(projectID string) (TalentManagementJob, error) {
+	var result TalentManagementJob
+	if a.GetProject(projectID) == nil {
+		return result, fmt.Errorf("招聘项目不存在")
+	}
+	db, err := a.getRecruitmentDB()
+	if err != nil {
+		return result, err
+	}
+	rows, err := db.Query(`SELECT platform_account,platform_job_id FROM platform_job_mappings WHERE platform='51job' AND project_id=?`, projectID)
+	if err != nil {
+		return result, err
+	}
+	type binding struct{ account, jobID string }
+	var bindings []binding
+	for rows.Next() {
+		var b binding
+		if err := rows.Scan(&b.account, &b.jobID); err != nil {
+			rows.Close()
+			return result, err
+		}
+		bindings = append(bindings, b)
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return result, err
+	}
+	rows.Close()
+	if len(bindings) != 1 {
+		return result, fmt.Errorf("本分库尚未唯一绑定 51job 职位，请先在职位接入中绑定一次")
+	}
+	catalog, err := a.Get51JobTalentManagementCatalog()
+	if err != nil {
+		return result, err
+	}
+	if catalog.AccountScope != bindings[0].account {
+		return result, fmt.Errorf("当前 51job 登录账号与本分库绑定账号不同，请切回原账号或重绑")
+	}
+	for _, job := range catalog.Jobs {
+		if job.JobID == bindings[0].jobID {
+			return job, nil
+		}
+	}
+	return result, fmt.Errorf("本分库绑定的 51job 职位已失效，请在职位接入中重新绑定")
 }
 
 // Correct older direct imports using their stored platform resume. A clear
@@ -669,6 +738,10 @@ func (a *App) Import51JobTalentManagementPage(accountScope, jobID string, status
 	if err := db.QueryRow(`SELECT project_id FROM platform_job_mappings WHERE platform='51job' AND platform_account=? AND platform_job_id=?`, accountScope, jobID).Scan(&projectID); err != nil || a.GetProject(projectID) == nil {
 		return result, fmt.Errorf("请先按 51job 职位 ID 绑定有效的本地专属库")
 	}
+	var bindingCount int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM platform_job_mappings WHERE platform='51job' AND project_id=?`, projectID).Scan(&bindingCount); err != nil || bindingCount != 1 {
+		return result, fmt.Errorf("此分库有多个 51job 职位绑定，请先固定唯一职位 ID，已停止同步")
+	}
 	if importCtx.Err() != nil {
 		result.Interrupted = true
 		return result, nil
@@ -763,40 +836,14 @@ func (a *App) Import51JobTalentManagementPage(accountScope, jobID string, status
 			}
 			continue
 		}
-		verdict, checks := EvaluateCandidateTriState(resumeText, *criteria)
-		if statusIndex != 1 && verdict == "unfit" {
-			result.InterceptedCount++
-			if err := archiveRejectedManagementCandidate(db, projectID, candidate.CandidateID); err != nil {
-				return result, err
-			}
-			// Keep the evidence for HR to select the person on 51job and mark
-			// 不合适. Other platform states cannot use the 待处理-only button.
-			if err := saveTalentManagementPendingReview(db, projectID, accountScope, jobID, candidate, platformStatus, verdict, checks); err != nil {
-				return result, err
-			}
-			continue
+		verdict, checks := "qualified", []RuleCheckItem{}
+		if statusIndex == 1 || statusIndex == 4 {
+			verdict, checks = EvaluateCandidateTriState(resumeText, *criteria)
 		}
-		if statusIndex == 1 && verdict == "unfit" {
+		if verdict == "unfit" {
 			result.InterceptedCount++
 			if err := saveTalentManagementPendingReview(db, projectID, accountScope, jobID, candidate, platformStatus, verdict, checks); err != nil {
 				return result, err
-			}
-			actionStatus, actionErr := a.rejectUnfitManagementCandidate(importCtx, db, projectID, accountScope, jobID, pageIndex, candidate, checks)
-			if actionStatus == "success" {
-				result.PlatformRejectedCount++
-				if err := archiveRejectedManagementCandidate(db, projectID, candidate.CandidateID); err != nil {
-					return result, fmt.Errorf("平台已拒绝，但本地旧简历归档失败: %w", err)
-				}
-				if _, err := db.Exec(`DELETE FROM talent_management_pending_reviews WHERE project_id=? AND platform_account=? AND platform_job_id=? AND candidate_id=?`,
-					projectID, accountScope, jobID, candidate.CandidateID); err != nil {
-					return result, err
-				}
-			} else {
-				result.PlatformRejectPendingCount++
-				if actionErr != nil {
-					checks = append(checks, RuleCheckItem{Rule: "platform_reject", Label: "平台不合适操作", Status: "unknown", Evidence: actionErr.Error()})
-					_ = saveTalentManagementPendingReview(db, projectID, accountScope, jobID, candidate, platformStatus, verdict, checks)
-				}
 			}
 			if result.InterceptReason == "" {
 				for _, check := range checks {
@@ -1024,6 +1071,17 @@ func (a *App) RunTalentManagementNextBatch(accountScope, jobID string) (TalentMa
 		WHERE platform='51job' AND platform_account=? AND platform_job_id=?`,
 		nextStatusIndex, nextPageIndex, importResult.Total, importResult.AddedCount, nextState, now, now,
 		accountScope, jobID)
+	if nextState == "completed" {
+		rejection, rejectErr := a.ProcessTalentManagementUnfitBacklog(accountScope, jobID)
+		importResult.PlatformRejectedCount += rejection.Rejected
+		importResult.PlatformRejectPendingCount += rejection.Uncertain
+		if rejectErr != nil {
+			_, _ = db.Exec(`UPDATE talent_management_sync_tasks SET state='error',last_error=? WHERE platform='51job' AND platform_account=? AND platform_job_id=?`, rejectErr.Error(), accountScope, jobID)
+			return importResult, rejectErr
+		}
+		// Chat attachments are checked after the list scan, without blocking it.
+		_, _ = a.Start51JobAttachmentSync(task.ProjectID)
+	}
 
 	return importResult, nil
 }

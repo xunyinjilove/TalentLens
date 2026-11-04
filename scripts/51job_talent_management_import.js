@@ -398,16 +398,17 @@ async function readCandidateDetail(browser, accountScope, options) {
 
 async function rejectCandidate(browser, accountScope, options) {
   const { jobId, candidateId, recordId, reasonLabel, pageIndex } = options;
-  if (!jobId || !candidateId || !recordId) {
+  const statusIndex = Number(options.statusIndex || 1);
+  if (!jobId || !candidateId || !recordId || ![1, 4].includes(statusIndex)) {
     throw new Error('标记不合适所需的平台标识不完整');
   }
-  const page = await connectManagementPage().then(r => r.page);
+  const page = await openBackgroundManagementPage(browser);
   try {
     const catalog = normalizeCatalog(await readState(page));
     if (catalog.accountScope !== accountScope || !catalog.jobs.some(job => job.jobId === jobId)) {
       throw new Error('51job 账号或职位已变化');
     }
-    const outcome = await page.evaluate(async ({ jobId, candidateId, recordId, reasonLabel, pageIndex }) => {
+    const outcome = await page.evaluate(async ({ jobId, candidateId, recordId, reasonLabel, pageIndex, statusIndex }) => {
       const components = Array.from(document.querySelectorAll('*')).map(el => el.__vue__).filter(Boolean);
       const management = components.find(vm => vm.$options?.name === 'TalentManagement');
       const menu = components.find(vm => vm.$options?.name === 'EhMenuPositions');
@@ -417,7 +418,7 @@ async function rejectCandidate(browser, accountScope, options) {
       const job = (menu.$props.positionListsAll || []).find(item => String(item.jobid) === jobId);
       if (!job) throw new Error('平台职位不存在');
       management.getJobParams({ ...job, activeIndex: menu.$props.positionListsAll.indexOf(job) });
-      status.changeStatus(1);
+      status.changeStatus(statusIndex);
       await new Promise(resolve => management.$nextTick(resolve));
       management.$data.pagination.page_index = Number(pageIndex) || 1;
       management.updateList();
@@ -427,9 +428,11 @@ async function rejectCandidate(browser, accountScope, options) {
         await new Promise(resolve => setTimeout(resolve, 150));
       }
 
-      const card = Array.from(document.querySelectorAll('*')).map(el => el.__vue__)
-        .find(vm => vm?.$options?.name === 'EhResumeCard' &&
-          String(vm.$props?.source?.userid) === candidateId && String(vm.$props?.source?.cvlogid) === recordId);
+      const visibleCards = [...new Set(Array.from(document.querySelectorAll('*')).map(el => el.__vue__))]
+        .filter(vm => vm?.$options?.name === 'EhResumeCard' && vm.$el?.getClientRects().length > 0);
+      const matches = visibleCards.filter(vm =>
+        String(vm.$props?.source?.userid) === candidateId && String(vm.$props?.source?.cvlogid) === recordId);
+      const card = matches.length === 1 ? matches[0] : null;
       if (!card) {
         // 先只读复查是否已在「不合适」(第五个处理状态)
         try {
@@ -438,7 +441,7 @@ async function rejectCandidate(browser, accountScope, options) {
           const unfitCard = Array.from(document.querySelectorAll('*')).map(el => el.__vue__)
             .find(vm => vm?.$options?.name === 'EhResumeCard' &&
               String(vm.$props?.source?.userid) === candidateId && String(vm.$props?.source?.cvlogid) === recordId);
-          status.changeStatus(1);
+          status.changeStatus(statusIndex);
           if (unfitCard) {
             return {
               alreadyUnfit: true,
@@ -448,13 +451,30 @@ async function rejectCandidate(browser, accountScope, options) {
             };
           }
         } catch (_) {}
-        throw new Error('无法在待处理列表中定位该候选人（可能已被处理或转移）');
+        throw new Error('无法在原平台状态中定位该候选人（可能已被处理或转移）');
       }
 
-      const btn = document.getElementById(`unfit_reason_btn${recordId}`) ||
-        Array.from(card.$el?.querySelectorAll('button, [role="button"], [id]') || [])
-          .find(el => (el.innerText || el.textContent || '').trim() === '不合适' &&
-            el.getClientRects().length > 0);
+      let btn;
+      if (statusIndex === 4) {
+        // 待定页没有逐卡「不合适」按钮。每次仅勾选一个精确匹配的卡片，
+        // 再点击底部批量按钮，避免把其他人一并操作。
+        const checkedOther = visibleCards.some(vm => vm !== card && vm.$el?.querySelector('input[type="checkbox"]')?.checked);
+        if (checkedOther) throw new Error('待定列表已有其他候选人勾选，已停止自动拒绝');
+        const checkbox = card.$el?.querySelector('input[type="checkbox"]');
+        const label = checkbox?.closest('label, .el-checkbox') || card.$el?.querySelector('.el-checkbox');
+        if (!checkbox || !label) throw new Error('无法找到待定候选人的选择框');
+        if (!checkbox.checked) label.click();
+        await new Promise(resolve => setTimeout(resolve, 150));
+        if (!checkbox.checked) throw new Error('待定候选人勾选未生效');
+        btn = Array.from(document.querySelectorAll('button'))
+          .filter(el => !card.$el?.contains(el) && el.getClientRects().length > 0 && !el.disabled)
+          .find(el => (el.innerText || '').trim() === '不合适');
+      } else {
+        btn = document.getElementById(`unfit_reason_btn${recordId}`) ||
+          Array.from(card.$el?.querySelectorAll('button, [role="button"], [id]') || [])
+            .find(el => (el.innerText || el.textContent || '').trim() === '不合适' &&
+              el.getClientRects().length > 0);
+      }
       if (!btn) throw new Error('无法找到候选人的「不合适」操作按钮');
 
       btn.click();
@@ -494,7 +514,7 @@ async function rejectCandidate(browser, accountScope, options) {
         await new Promise(resolve => setTimeout(resolve, 1000));
       }
 
-      // 逐人真实回执复核：等待列表刷新，验证卡片是否从待处理中移出
+      // 逐人真实回执复核：等待列表刷新，验证卡片是否从原状态移出。
       if (typeof management.updateList === 'function') {
         try {
           const p = management.updateList();
@@ -513,7 +533,7 @@ async function rejectCandidate(browser, accountScope, options) {
         userid: candidateId,
         verified: !remainingCard
       };
-    }, { jobId, candidateId, recordId, reasonLabel, pageIndex });
+    }, { jobId, candidateId, recordId, reasonLabel, pageIndex, statusIndex });
 
     if (outcome.alreadyUnfit) {
       return {
@@ -548,14 +568,21 @@ async function rejectCandidate(browser, accountScope, options) {
       recordId
     };
   } finally {
-    // Keep management page intact
+    if (!page.isClosed()) await page.close().catch(() => {});
   }
 }
 
 async function run(mode, options = {}) {
   const { browser, page, isTempPage } = await connectManagementPage();
   try {
-    const state = await readState(page);
+    let state = await readState(page);
+    if (!state) {
+      // A reused SPA tab may show a management URL while still rendering the
+      // previous menu's Vue tree. A fresh background tab gives us a real page.
+      const probe = await openBackgroundManagementPage(browser);
+      try { state = await readState(probe); }
+      finally { if (!probe.isClosed()) await probe.close().catch(() => {}); }
+    }
     if (!state) throw new Error('51job 人才管理页面尚未加载完成');
     const catalog = normalizeCatalog(state);
     if (mode === 'catalog') return { status: 'ok', ...catalog };

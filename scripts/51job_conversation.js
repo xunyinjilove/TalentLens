@@ -2,6 +2,7 @@
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
+const https = require('https');
 const puppeteer = require('puppeteer-core');
 
 function parseCandidateUrl(raw) {
@@ -23,6 +24,11 @@ function attachmentFingerprint(link) {
   return crypto.createHash('sha256').update(parsed.origin + parsed.pathname).digest('hex');
 }
 
+function trusted51JobFileHost(hostname) {
+  return hostname === '51job.com' || hostname.endsWith('.51job.com') ||
+    hostname === '51jobcdn.com' || hostname.endsWith('.51jobcdn.com');
+}
+
 function selectInboundAttachment(messages, known = []) {
   const excluded = new Set(known);
   for (let i = messages.length - 1; i >= 0; i--) {
@@ -31,7 +37,7 @@ function selectInboundAttachment(messages, known = []) {
     for (const link of message.links || []) {
       let parsed;
       try { parsed = new URL(link.href); } catch { continue; }
-      if (parsed.protocol !== 'https:' || !(parsed.hostname === '51job.com' || parsed.hostname.endsWith('.51job.com'))) continue;
+      if (parsed.protocol !== 'https:' || !trusted51JobFileHost(parsed.hostname)) continue;
       const hintedName = String(link.download || link.text || path.basename(parsed.pathname)).trim();
       const match = hintedName.match(/[^\\/\s<>:"|?*]+\.(pdf|docx|doc|txt)\b/i) ||
         decodeURIComponent(parsed.pathname).match(/[^\\/\s<>:"|?*]+\.(pdf|docx|doc|txt)\b/i);
@@ -50,6 +56,37 @@ function validResumeBytes(buffer, extension) {
   if (extension === 'doc') return buffer.subarray(0, 8).equals(Buffer.from('d0cf11e0a1b11ae1', 'hex'));
   if (extension === 'txt') return !buffer.includes(0) && !/^\s*</.test(buffer.toString('utf8', 0, 80));
   return false;
+}
+
+async function fetchTrustedAttachment(page, href, redirects = 0) {
+  const parsed = new URL(href);
+  if (parsed.protocol !== 'https:' || !trusted51JobFileHost(parsed.hostname) || redirects > 3) throw new Error('附件下载地址不属于可核验的 51job 域名');
+  const cookies = await page.cookies(href);
+  const userAgent = await page.browser().userAgent();
+  return new Promise((resolve, reject) => {
+    const req = https.get(href, { headers: {
+      Cookie: cookies.map(cookie => `${cookie.name}=${cookie.value}`).join('; '),
+      Referer: page.url(), 'User-Agent': userAgent
+    }, timeout: 10000 }, response => {
+      if (response.statusCode >= 300 && response.statusCode < 400 && response.headers.location) {
+        response.resume();
+        fetchTrustedAttachment(page, new URL(response.headers.location, href).href, redirects + 1).then(resolve, reject);
+        return;
+      }
+      if (response.statusCode !== 200) { response.resume(); reject(new Error(`附件读取失败：HTTP ${response.statusCode}`)); return; }
+      const chunks = [];
+      let size = 0;
+      response.on('data', chunk => {
+        size += chunk.length;
+        if (size > 15 * 1024 * 1024) { req.destroy(new Error('附件超过 15MB')); return; }
+        chunks.push(chunk);
+      });
+      response.on('end', () => resolve(Buffer.concat(chunks)));
+      response.on('error', reject);
+    });
+    req.on('timeout', () => req.destroy(new Error('附件下载超时')));
+    req.on('error', reject);
+  });
 }
 
 async function candidatePage(browser, expected, name) {
@@ -99,7 +136,7 @@ async function waitCandidateReady(page, expected, name) {
           .some(dialog => dialog.getClientRects().length > 0);
         if (gate) return true;
         return Array.from(document.querySelectorAll('button.store_resume_button, .btn_item_chat .chat_btn'))
-          .some(el => ['立即Hi聊', '继续沟通', 'Hi聊'].includes((el.innerText || '').trim().replace(/\s+/g, '')) && el.getClientRects().length > 0);
+          .some(el => ['立即Hi聊', '继续沟通', '继续聊', 'Hi聊'].includes((el.innerText || '').trim().replace(/\s+/g, '')) && el.getClientRects().length > 0);
       }, { polling: 250, timeout: 12000 }, expected.resumeId, name || '');
       return;
     } catch {
@@ -119,7 +156,7 @@ function sameDisplayedName(left, right) {
 
 function findCandidateChatEntry(doc) {
   return Array.from(doc.querySelectorAll('button.store_resume_button, .btn_item_chat .chat_btn'))
-    .find(el => ['立即Hi聊', '继续沟通', 'Hi聊'].includes((el.innerText || '').trim().replace(/\s+/g, '')) &&
+    .find(el => ['立即Hi聊', '继续沟通', '继续聊', 'Hi聊'].includes((el.innerText || '').trim().replace(/\s+/g, '')) &&
       el.getClientRects().length > 0) || null;
 }
 
@@ -599,7 +636,7 @@ async function openCandidateChat(page, name, jobTitle = '', autoSelect = true) {
   }
   const opened = await page.evaluate(() => {
     const entry = Array.from(document.querySelectorAll('button.store_resume_button, .btn_item_chat .chat_btn'))
-      .find(el => ['立即Hi聊', '继续沟通', 'Hi聊'].includes((el.innerText || '').trim().replace(/\s+/g, '')) &&
+      .find(el => ['立即Hi聊', '继续沟通', '继续聊', 'Hi聊'].includes((el.innerText || '').trim().replace(/\s+/g, '')) &&
         el.getClientRects().length > 0);
     if (!entry) return false;
     entry.click();
@@ -611,7 +648,7 @@ async function openCandidateChat(page, name, jobTitle = '', autoSelect = true) {
       : { status: 'needs_job_selection', message: '51job 沟通职位选择窗口已打开；本次未发送消息' };
   }
   try {
-    await page.waitForSelector('#chatAreaEmbed .input-textarea_self[contenteditable="true"]', { visible: true, timeout: 8000 });
+    await page.waitForSelector('#chatAreaEmbed .input-textarea_self[contenteditable="true"]', { visible: true, timeout: 15000 });
   } catch {
     if (await page.evaluate(platformChatGateVisible).catch(() => false)) {
       return autoSelect ? selectCommunicationJob(page, jobTitle)
@@ -635,10 +672,40 @@ async function conversationMessages(page) {
   ).map(item => ({
     mine: item.classList.contains('mine'),
     text: (item.querySelector('.text-content')?.textContent || '').trim().slice(0, 2000),
+    attachmentCard: !item.classList.contains('mine') && /附件简历/.test(item.textContent || ''),
     links: Array.from(item.querySelectorAll('a[href]')).map(link => ({
       href: link.href, text: (link.textContent || '').trim(), download: link.getAttribute('download') || ''
     }))
   })));
+}
+
+// 51job loads older chat messages while the message pane scrolls upward.
+// Keep this bounded and restore the reader to the latest message afterwards.
+async function loadConversationHistory(page) {
+  if (typeof page.$ !== 'function') return;
+  let previous = -1;
+  for (let attempt = 0; attempt < 8; attempt++) {
+    const state = await page.evaluate(() => {
+      const list = document.querySelector('#chatAreaEmbed .message-list');
+      let pane = list;
+      while (pane && pane.scrollHeight <= pane.clientHeight + 8) pane = pane.parentElement;
+      if (!pane || !document.querySelector('#chatAreaEmbed')?.contains(pane)) return null;
+      const before = pane.scrollHeight;
+      pane.scrollTop = 0;
+      return { height: before, count: list?.querySelectorAll('.message-item').length || 0 };
+    }).catch(() => null);
+    if (!state) break;
+    await new Promise(resolve => setTimeout(resolve, 350));
+    const count = await page.evaluate(() => document.querySelectorAll('#chatAreaEmbed .message-list .message-item').length).catch(() => state.count);
+    if (count === previous || (attempt > 0 && count === state.count)) break;
+    previous = count;
+  }
+  await page.evaluate(() => {
+    const list = document.querySelector('#chatAreaEmbed .message-list');
+    let pane = list;
+    while (pane && pane.scrollHeight <= pane.clientHeight + 8) pane = pane.parentElement;
+    if (pane && document.querySelector('#chatAreaEmbed')?.contains(pane)) pane.scrollTop = pane.scrollHeight;
+  }).catch(() => {});
 }
 
 async function sendCandidateMessage(page, message, includeBaseline = false) {
@@ -675,14 +742,27 @@ async function sendCandidateMessage(page, message, includeBaseline = false) {
 }
 
 async function inspectReply(page, outputDir, recordID, known = [], download = true) {
+  await loadConversationHistory(page);
   const messages = await conversationMessages(page);
   const replies = messages.filter(item => !item.mine && item.text).slice(-10).map(item => item.text);
   const attachmentNames = messages.filter(item => !item.mine)
     .map(item => selectInboundAttachment([item])).filter(Boolean).slice(-10).map(item => item.fileName);
   const summary = { replies, attachmentNames };
   const attachment = selectInboundAttachment(messages, known);
-  if (!attachment || !download) return { ...summary, status: replies.length || attachmentNames.length ? 'reply' : 'waiting',
+  const lastCardIndex = messages.findLastIndex(item => item.attachmentCard);
+  const hasCard = lastCardIndex >= 0;
+  if (hasCard && (!attachment || lastCardIndex > attachment.messageIndex) && download) {
+    // 51job sometimes renders an attachment as a card without a direct href.
+    // Opening it is read-only. Capture the actual platform response/download;
+    // never synthesize a file URL from candidate or attachment IDs.
+    const captured = await captureAttachmentCard(page, outputDir, recordID);
+    if (captured) return saveInboundAttachment(captured.bytes, captured.fileName, outputDir, recordID, summary);
+    return { ...summary, status: 'attachment_pending', message: '平台会话显示已收到附件简历，但尚未取得可验证的文件；已保留在线简历，稍后重试，不再索要' };
+  }
+  if (!attachment || !download) return { ...summary, status: replies.length || attachmentNames.length || hasCard ? 'reply' : 'waiting',
     message: replies.length || attachmentNames.length ? '已读取当前已加载会话中的候选人回复与附件；可在平台查看更早记录' : '当前已加载会话中尚未看到候选人的文字回复或可下载简历附件' };
+  let file;
+  try {
   const encoded = await page.evaluate(async href => {
     const response = await fetch(href, { credentials: 'include' });
     if (!response.ok) throw new Error(`附件读取失败：HTTP ${response.status}`);
@@ -693,15 +773,128 @@ async function inspectReply(page, outputDir, recordID, known = [], download = tr
     for (let i = 0; i < bytes.length; i += 8192) binary += String.fromCharCode(...bytes.subarray(i, i + 8192));
     return btoa(binary);
   }, attachment.href);
-  const file = Buffer.from(encoded, 'base64');
-  const extension = attachment.fileName.split('.').at(-1).toLowerCase();
+  file = Buffer.from(encoded, 'base64');
+  } catch {
+    file = await fetchTrustedAttachment(page, attachment.href);
+  }
+  return saveInboundAttachment(file, attachment.fileName, outputDir, recordID, summary);
+}
+
+function saveInboundAttachment(file, fileName, outputDir, recordID, summary) {
+  const extension = String(fileName || '').split('.').at(-1).toLowerCase();
   if (!validResumeBytes(file, extension)) throw new Error('收到的附件格式或内容不符合简历文件要求，未导入');
   const directory = path.join(outputDir, '51job_received', recordID);
   fs.mkdirSync(directory, { recursive: true });
   const digest = crypto.createHash('sha256').update(file).digest('hex').slice(0, 20);
   const filePath = path.join(directory, `${digest}.${extension}`);
   fs.writeFileSync(filePath, file, { mode: 0o600 });
-  return { ...summary, status: 'downloaded', filePath, fileName: attachment.fileName, message: '已从该候选人的回复中取得并校验简历附件' };
+  return { ...summary, status: 'downloaded', filePath, fileName, message: '已从该候选人的回复中取得并校验简历附件' };
+}
+
+function attachmentNameFromBytes(bytes, suggested = '') {
+  const ext = ['pdf', 'docx', 'doc', 'txt'].find(item => validResumeBytes(bytes, item));
+  if (!ext) return '';
+  const name = String(suggested || '').split(/[\\/]/).at(-1);
+  return new RegExp(`\\.${ext}$`, 'i').test(name) ? name : `51job附件.${ext}`;
+}
+
+async function captureAttachmentCard(page, outputDir, recordID) {
+  let responseBytes = null;
+  let responseName = '';
+  const pending = [];
+  const onResponse = response => {
+    const url = response.url();
+    let parsed;
+    try { parsed = new URL(url); } catch { return; }
+    if (!trusted51JobFileHost(parsed.hostname)) return;
+    const headers = response.headers();
+    if (Number(headers['content-length'] || 0) > 15 * 1024 * 1024) return;
+    const disposition = headers['content-disposition'] || '';
+    const contentType = headers['content-type'] || '';
+    if (!/attachment|filename=/i.test(disposition) && !/application\/(pdf|msword|octet-stream|vnd\.openxmlformats-officedocument)/i.test(contentType)) return;
+    pending.push(response.buffer().then(bytes => {
+      const suggested = disposition.match(/filename\*?=(?:UTF-8''|\")?([^;\"]+)/i)?.[1] || decodeURIComponent(parsed.pathname.split('/').at(-1) || '');
+      const name = attachmentNameFromBytes(bytes, suggested);
+      if (name && !responseBytes) { responseBytes = bytes; responseName = name; }
+    }).catch(() => {}));
+  };
+  const session = await page.createCDPSession();
+  let downloadURL = '', suggestedName = '', downloadGUID = '', downloadDone = false;
+  const downloadDir = path.join(outputDir, '51job_received', recordID, '_browser_download');
+  fs.mkdirSync(downloadDir, { recursive: true });
+  session.on('Browser.downloadWillBegin', event => {
+    downloadURL = event.url || '';
+    suggestedName = event.suggestedFilename || '';
+    downloadGUID = event.guid || '';
+  });
+  session.on('Browser.downloadProgress', event => {
+    if (event.guid === downloadGUID && event.state === 'completed') downloadDone = true;
+  });
+  page.on('response', onResponse);
+  const browser = page.browser();
+  const openedPages = [];
+  let changedDownloadBehavior = false;
+  const onTarget = async target => {
+    try { const opened = await target.page(); if (opened) { opened.on('response', onResponse); openedPages.push(opened); } } catch {}
+  };
+  browser.on('targetcreated', onTarget);
+  try {
+    changedDownloadBehavior = await session.send('Browser.setDownloadBehavior',
+      { behavior: 'allowAndName', downloadPath: downloadDir, eventsEnabled: true }).then(() => true, () => false);
+    const clicked = await page.evaluate(() => {
+      const items = Array.from(document.querySelectorAll('#chatAreaEmbed .message-list .message-item'));
+      const card = items.reverse().find(item => !item.classList.contains('mine') && /附件简历/.test(item.textContent || ''));
+      if (!card) return false;
+      const exactLabel = Array.from(card.querySelectorAll('*')).reverse()
+        .find(node => (node.textContent || '').trim() === '附件简历' && node.getClientRects().length);
+      const nodes = Array.from(card.querySelectorAll('button, a, [role="button"], [class*="file"], [class*="attach"]'));
+      const target = exactLabel || nodes.find(node => /附件简历|下载|查看/.test(node.textContent || '') && node.getClientRects().length);
+      if (!target) return false;
+      target.click();
+      return true;
+    });
+    if (!clicked) return null;
+    // Wait for the actual file response or download event, not a fixed short delay.
+    for (let i = 0; i < 32 && !responseBytes && !downloadGUID; i++) {
+      await new Promise(resolve => setTimeout(resolve, 250));
+    }
+    await Promise.allSettled(pending);
+    if (responseBytes) return { bytes: responseBytes, fileName: responseName };
+    if (downloadGUID) {
+      for (let i = 0; i < 32 && !downloadDone; i++) await new Promise(resolve => setTimeout(resolve, 250));
+      const downloadedPath = path.join(downloadDir, downloadGUID);
+      if (downloadDone && fs.existsSync(downloadedPath)) {
+        const bytes = fs.readFileSync(downloadedPath);
+        fs.unlinkSync(downloadedPath);
+        const fileName = attachmentNameFromBytes(bytes, suggestedName);
+        if (fileName) return { bytes, fileName };
+      }
+    }
+    if (downloadURL) {
+      const parsed = new URL(downloadURL);
+      if (parsed.protocol === 'https:' && trusted51JobFileHost(parsed.hostname)) {
+        const encoded = await page.evaluate(async href => {
+          const response = await fetch(href, { credentials: 'include' });
+          if (!response.ok) return '';
+          const data = new Uint8Array(await response.arrayBuffer());
+          if (data.length > 15 * 1024 * 1024) return '';
+          let binary = '';
+          for (let i = 0; i < data.length; i += 8192) binary += String.fromCharCode(...data.subarray(i, i + 8192));
+          return btoa(binary);
+        }, downloadURL);
+        const bytes = Buffer.from(encoded || '', 'base64');
+        const fileName = attachmentNameFromBytes(bytes, suggestedName);
+        if (fileName) return { bytes, fileName };
+      }
+    }
+    return null;
+  } finally {
+    page.off('response', onResponse);
+    for (const opened of openedPages) opened.off('response', onResponse);
+    browser.off('targetcreated', onTarget);
+    if (changedDownloadBehavior) await session.send('Browser.setDownloadBehavior', { behavior: 'default' }).catch(() => {});
+    await session.detach().catch(() => {});
+  }
 }
 
 function readArgs(argv) {
@@ -728,7 +921,7 @@ async function main(argv = process.argv.slice(2), writeResult = result => proces
   try {
     const accountCatalog = args.action === 'list_account_jobs';
     const expected = accountCatalog ? null : parseCandidateUrl(args.url);
-    if (!['list_account_jobs', 'verify_candidate', 'list_jobs', 'preview_hi', 'confirm_hi', 'ask_resume', 'send_outreach', 'check_resume', 'check_replies'].includes(args.action)) throw new Error('不支持的 51job 沟通操作');
+    if (!['list_account_jobs', 'verify_candidate', 'list_jobs', 'preview_hi', 'confirm_hi', 'send_outreach', 'check_resume', 'check_replies'].includes(args.action)) throw new Error('不支持的 51job 沟通操作');
     if (!accountCatalog && !/^[A-Za-z0-9_-]+$/.test(args.recordID)) throw new Error('候选人档案编号无效');
     if (args.action === 'confirm_hi' && (!args.name || !args.jobTitle || !args.expectedJobID || !args.targetID ||
         !Number.isSafeInteger(Number(args.expectedPoints)) || Number(args.expectedPoints) <= 0)) {
@@ -810,7 +1003,7 @@ async function main(argv = process.argv.slice(2), writeResult = result => proces
     }
     const result = readingReply
       ? await inspectReply(page, args.outputDir, args.recordID, JSON.parse(args.known || '[]'), args.action === 'check_resume')
-      : await sendCandidateMessage(page, args.message, args.action === 'ask_resume');
+      : await sendCandidateMessage(page, args.message);
     writeResult(result);
   } catch (error) {
     const status = args.action === 'confirm_hi' ? 'uncertain' : error.code === '51JOB_BROWSER_UNAVAILABLE' ? 'needs_login' : 'error';

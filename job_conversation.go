@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -156,6 +157,13 @@ func (a *App) conversationJobTitle(resume *Resume) string {
 }
 
 func (a *App) run51JobConversation(resume *Resume, action, message string, quote *pending51JobHiQuote) JobConversationResult {
+	return a.run51JobConversationContext(context.Background(), resume, action, message, quote)
+}
+
+func (a *App) run51JobConversationContext(parent context.Context, resume *Resume, action, message string, quote *pending51JobHiQuote) JobConversationResult {
+	if err := parent.Err(); err != nil {
+		return JobConversationResult{Status: "interrupted", Message: "附件同步已中止"}
+	}
 	scriptCandidates := []string{
 		filepath.Join("scripts", "51job_conversation.js"),
 		filepath.Join(filepath.Dir(os.Args[0]), "scripts", "51job_conversation.js"),
@@ -178,7 +186,10 @@ func (a *App) run51JobConversation(resume *Resume, action, message string, quote
 	if action == "preview_hi" || action == "list_jobs" || action == "list_account_jobs" || action == "check_resume" || action == "check_replies" {
 		timeout = 75 * time.Second // 包括候选人入口就绪重试与职位、点数读取。
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	if action == "check_resume" || action == "check_replies" {
+		timeout = 45 * time.Second
+	}
+	ctx, cancel := context.WithTimeout(parent, timeout)
 	defer cancel()
 	dataDir := filepath.Join(a.getDataDir(), "candidates_multi")
 	args := []string{script, "--action", action, "--data-dir", dataDir}
@@ -206,10 +217,8 @@ func (a *App) run51JobConversation(resume *Resume, action, message string, quote
 			args = append(args, "--target-id", quote.TargetID)
 		}
 	}
-	if action == "check_resume" || action == "check_replies" {
-		baseline, _ := json.Marshal(resume.ContactAttachmentBaseline)
-		args = append(args, "--known-links", string(baseline))
-	}
+	// Read every inbound attachment, including one sent before the request.
+	// File hashes below prevent duplicate imports.
 	cmd := exec.CommandContext(ctx, "node", args...)
 	hideConsoleWindow(cmd)
 	output, err := cmd.Output()
@@ -387,44 +396,10 @@ func (a *App) Confirm51JobHiChat(resumeID, quoteID string) JobConversationResult
 	return result
 }
 
-// Start51JobConversation 发送 HR 确认过的索要简历文字；首次 Hi聊走点数预览和二次确认。
+// Start51JobConversation is kept only for old desktop bindings. Resume requests
+// are retired; attachment synchronization is a read-only operation.
 func (a *App) Start51JobConversation(resumeID, action, message string) JobConversationResult {
-	if action == "greet" {
-		return JobConversationResult{Status: "error", Message: "请使用一键打招呼，先核对本次Hi聊点数"}
-	}
-	if action != "ask_resume" {
-		return JobConversationResult{Status: "error", Message: "不支持的沟通步骤"}
-	}
-	if len([]rune(strings.TrimSpace(message))) == 0 || len([]rune(message)) > 500 {
-		return JobConversationResult{Status: "error", Message: "沟通内容需为 1–500 字"}
-	}
-	a.contactMutex.Lock()
-	defer a.contactMutex.Unlock()
-	resume, err := a.load51JobContactResume(resumeID)
-	if err != nil {
-		return JobConversationResult{Status: "error", Message: err.Error()}
-	}
-	if resume.ContactStatus == "resume_requested" || resume.ContactStatus == "resume_received" {
-		return JobConversationResult{Status: "error", Message: "已向此候选人索要过简历，请检查回复，避免重复发送"}
-	}
-	if resume.ContactStatus != "greeted" {
-		return JobConversationResult{Status: "error", Message: "请先完成并核实 51job 打招呼，再索要完整简历"}
-	}
-	result := a.run51JobConversation(resume, action, message, nil)
-	if result.Status != "sent" {
-		return result
-	}
-	resume, err = a.load51JobContactResume(resumeID)
-	if err != nil {
-		return JobConversationResult{Status: "uncertain", Message: "消息已发送，但本地档案状态无法保存；请核对聊天记录，暂勿重复发送"}
-	}
-	resume.ContactStatus = "resume_requested"
-	resume.ContactAttachmentBaseline = result.Baseline
-	resume.ContactUpdatedAt = time.Now().Format(time.RFC3339)
-	if err := a.save51JobContactResume(resume); err != nil {
-		return JobConversationResult{Status: "uncertain", Message: "消息已发送，但本地沟通状态保存失败；请核对聊天记录，暂勿重复发送"}
-	}
-	return result
+	return JobConversationResult{Status: "error", Message: "51job 索要简历已停用；请使用同步附件简历读取已收到的文件"}
 }
 
 // Send51JobOutreachMessage sends the HR-approved second message only after the
@@ -458,30 +433,71 @@ func (a *App) Send51JobOutreachMessage(resumeID, message string) JobConversation
 func (a *App) Check51JobResumeReply(resumeID string) JobConversationResult {
 	a.contactMutex.Lock()
 	defer a.contactMutex.Unlock()
+	return a.check51JobResumeReplyLocked(resumeID)
+}
+
+func (a *App) check51JobResumeReplyLocked(resumeID string) JobConversationResult {
+	return a.check51JobResumeReplyLockedContext(context.Background(), resumeID)
+}
+
+func (a *App) check51JobResumeReplyContext(ctx context.Context, resumeID string) JobConversationResult {
+	a.contactMutex.Lock()
+	defer a.contactMutex.Unlock()
+	return a.check51JobResumeReplyLockedContext(ctx, resumeID)
+}
+
+func (a *App) check51JobResumeReplyLockedContext(ctx context.Context, resumeID string) JobConversationResult {
 	resume, err := a.load51JobContactResume(resumeID)
 	if err != nil {
 		return JobConversationResult{Status: "error", Message: err.Error()}
 	}
-	action := "check_resume"
-	if resume.HasAttachment {
-		action = "check_replies"
-	}
-	result := a.run51JobConversation(resume, action, "", nil)
+	result := a.run51JobConversationContext(ctx, resume, "check_resume", "", nil)
 	if result.Status != "downloaded" {
+		if result.Status == "attachment_pending" {
+			resume.AttachmentPendingReason = result.Message
+			_ = a.save51JobContactResume(resume)
+		} else if (result.Status == "waiting" || result.Status == "reply") && resume.AttachmentPendingReason != "" {
+			resume.AttachmentPendingReason = ""
+			_ = a.save51JobContactResume(resume)
+		}
 		return result
 	}
 	resume, err = a.load51JobContactResume(resumeID)
 	if err != nil {
 		return JobConversationResult{Status: "error", Message: "附件已下载，但本地候选人档案无法读取"}
 	}
-	if resume.HasAttachment {
-		return JobConversationResult{Status: "error", Message: "候选人档案已更新，未覆盖已有完整简历；请核对后再操作"}
-	}
 	root := filepath.Join(a.getDataDir(), "candidates_multi", "51job_received", resume.ID)
 	absRoot, _ := filepath.Abs(root)
 	absFile, pathErr := filepath.Abs(result.FilePath)
 	if pathErr != nil || !strings.HasPrefix(strings.ToLower(absFile), strings.ToLower(absRoot)+string(os.PathSeparator)) {
 		return JobConversationResult{Status: "error", Message: "下载文件不在候选人专用目录，已拒绝导入"}
+	}
+	if resume.AttachmentPath != "" {
+		newBytes, newErr := os.ReadFile(absFile)
+		oldBytes, oldErr := os.ReadFile(resume.AttachmentPath)
+		if newErr == nil && oldErr == nil && sha256.Sum256(newBytes) == sha256.Sum256(oldBytes) {
+			if resume.AttachmentPendingReason != "" {
+				resume.AttachmentPendingReason = ""
+				_ = a.save51JobContactResume(resume)
+			}
+			result.Status = "already_current"
+			result.Message = "已收到并保存这份附件简历，无需再次索要"
+			return result
+		}
+	}
+	if newBytes, readErr := os.ReadFile(absFile); readErr == nil {
+		digest := fmt.Sprintf("%x", sha256.Sum256(newBytes))
+		for _, old := range resume.AttachmentHistory {
+			if old.SHA256 == digest {
+				if resume.AttachmentPendingReason != "" {
+					resume.AttachmentPendingReason = ""
+					_ = a.save51JobContactResume(resume)
+				}
+				result.Status = "already_current"
+				result.Message = "这份附件此前已导入，保留较新的当前版本，无需重复索要"
+				return result
+			}
+		}
 	}
 	previousStatus := resume.ContactStatus
 	resume.ContactStatus = "resume_received"
@@ -491,13 +507,19 @@ func (a *App) Check51JobResumeReply(resumeID string) JobConversationResult {
 	}
 	if _, err := a.AttachResumeFile(resume.ID, absFile); err != nil {
 		resume.ContactStatus = previousStatus
+		resume.AttachmentPendingReason = fmt.Sprintf("附件已下载但待解析：%v", err)
 		_ = a.save51JobContactResume(resume)
-		return JobConversationResult{Status: "error", Message: fmt.Sprintf("附件已下载但未能解析：%v", err)}
+		return JobConversationResult{Status: "attachment_pending", Message: resume.AttachmentPendingReason, FilePath: absFile, FileName: result.FileName}
 	}
 	verified, err := a.load51JobContactResume(resumeID)
 	if err != nil || !verified.HasAttachment || verified.AttachmentPath != absFile {
 		return JobConversationResult{Status: "error", Message: "附件分析流程未能确认保存成功，请检查本地档案"}
 	}
+	verified.AttachmentFileName = result.FileName
+	if n := len(verified.AttachmentHistory); n > 0 {
+		verified.AttachmentHistory[n-1].FileName = result.FileName
+	}
+	_ = a.save51JobContactResume(verified)
 	if a.config.AI.APIKey == "" {
 		result.Message = "已导入该候选人回复的完整简历；请先配置 AI，再启动结合分析"
 	} else {

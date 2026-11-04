@@ -13,7 +13,7 @@
       <el-tab-pane label="职位接入与人才管理同步" name="sync">
         <el-alert type="info" :closable="false" show-icon style="margin-bottom: 16px">
           <template #default>
-            四类平台人选均先按项目硬性条件筛选，明确不符者不入库。待处理可自动标记「不合适」；合适、面试、待定中不符者保留原因，请在对应平台列表勾选后手动标记「不合适」。
+            待处理和待定按项目硬性条件筛选，明确不符者在整轮同步后自动逐人标记「不合适」，平台成功后归档本地旧简历。合适、面试直接导入；资料不足者保留供补读，不自动拒绝。
           </template>
         </el-alert>
 
@@ -52,16 +52,27 @@
             </el-button>
             <el-button v-if="running" type="warning" plain @click="requestStopImport">中止同步</el-button>
             <span style="font-size: 12px; color: #64748b">
-              仅筛选合格的人进入本地库；每个职位专属库只绑定一个当前 51job 职位。
+              待处理、待定仅合格者入库；合适、面试直接同步。每个职位专属库只绑定一个当前 51job 职位。
             </span>
           </div>
+		  <div v-if="attachmentTask" style="padding:10px 12px;margin-bottom:14px;border:1px solid #dbeafe;border-radius:8px;background:#f8fbff;font-size:13px;line-height:1.8;color:#334155">
+		    <strong>附件简历后台同步：</strong>
+		    {{ attachmentTask.checked || 0 }}/{{ attachmentTask.queue?.length || 0 }} 人已检查 ·
+		    抓取 {{ attachmentTask.downloaded || 0 }} · 跳过 {{ attachmentTask.skipped || 0 }} · 失败 {{ attachmentTask.failed || 0 }}
+		    <span v-if="attachmentTask.currentName"> · 正在检查 {{ attachmentTask.currentName }}</span>
+		    <span v-if="attachmentTask.state === 'paused'"> · 已中止，可继续</span>
+		    <span v-if="attachmentTask.state === 'completed'"> · 已完成</span>
+		    <el-button v-if="attachmentTask.state === 'running'" size="small" type="warning" plain @click="stopAttachmentSync">中止附件同步</el-button>
+		    <el-button v-else-if="attachmentTask.state === 'paused'" size="small" type="primary" plain @click="resumeAttachmentSync">继续附件同步</el-button>
+		    <p v-if="attachmentTask.lastError" class="catalog-status">{{ attachmentTask.lastError }}</p>
+		  </div>
 
         </el-form>
 
         <p v-if="progress" style="color: #606f89; font-size: 13px">{{ progress }}</p>
         <p v-if="summary" style="color: #0f766e; font-size: 13px; font-weight: 500">{{ summary }}</p>
         <el-table v-if="manualUnfitReviews.length" :data="manualUnfitReviews" size="small" max-height="240" style="margin-top:12px">
-          <el-table-column prop="candidateName" label="需在平台手动标记不合适" width="160" />
+          <el-table-column prop="candidateName" label="自动不合适待处理" width="160" />
           <el-table-column prop="platformStatus" label="平台状态" width="100" />
           <el-table-column label="明确不符原因" min-width="260">
             <template #default="{ row }">{{ row.reasons?.filter((item: any) => item.status === 'fail').map((item: any) => item.evidence).join('；') }}</template>
@@ -71,7 +82,7 @@
 
       <el-tab-pane label="人才望远镜每日筛选" name="telescope">
         <el-alert type="info" :closable="false" show-icon style="margin-bottom: 16px"
-          title="读取 51job「AI淘金 → 人才望远镜」当前职位，使用项目已保存条件生成合格与不合格名单。资料不足者记录供补读；筛选本身不会发送消息或修改平台状态。" />
+          title="读取 51job「AI淘金 → 人才望远镜」对应职位，按项目条件筛选；整轮完成后自动对明确不符者点「不感兴趣」。资料不足者仅记录供补读，筛选不会发送消息。" />
 
         <el-alert v-if="!telescopeJobs.length && !telescopeLoading" type="warning" :closable="false" show-icon style="margin-bottom: 16px"
           title="未读取到职位。若您已在 51job 浏览器打开「AI淘金 → 人才望远镜」，请点击下方【重新读取望远镜职位】。" />
@@ -100,7 +111,7 @@
         </el-form>
 
         <p class="catalog-status">已保存项目条件：{{ savedCriteria?.criteriaVersion || '读取中' }} · 活跃度{{ savedCriteria?.activityDays ? `近 ${savedCriteria.activityDays} 天` : '不限' }} · 最低学历{{ savedCriteria?.minEducation || '不限' }}</p>
-        <p class="catalog-status">计划时间：{{ savedCriteria?.scheduleEnabled ? savedCriteria.scheduleTime : '未启用' }}。望远镜自动定时扫描尚未接入；目前可手动运行。</p>
+        <p class="catalog-status">计划时间：{{ savedCriteria?.scheduleEnabled ? savedCriteria.scheduleTime : '未启用' }}。软件运行期间按项目时间自动筛选；关闭期间不补跑。</p>
         <div style="display: flex; gap: 10px; align-items: center; margin: 16px 0; flex-wrap: wrap">
           <el-button type="warning" plain @click="openTelescope">打开 51job 人才望远镜</el-button>
           <el-button type="info" plain :loading="telescopeLoading" @click="loadTelescopeCatalog">
@@ -135,8 +146,8 @@
           <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:14px">
             <span>本批 Hi聊点数上限</span>
             <el-input-number v-model="telescopePointsLimit" :min="1" :max="100000" :step="100" size="small" />
-            <el-button type="primary" :loading="telescopeActionBusy" :disabled="!telescopePreview.qualifiedCount || telescopeActionBusy" @click="runTelescopeHi">一键 Hi聊已入库合格者</el-button>
-            <el-button type="danger" :loading="telescopeActionBusy" :disabled="!telescopePreview.unfitCount || telescopeActionBusy" @click="runTelescopeReject">一键不感兴趣</el-button>
+            <el-button type="primary" :loading="telescopeActionBusy" :disabled="!telescopePreview.qualifiedCount || telescopeActionBusy || telescopeScanning" @click="runTelescopeHi">一键 Hi聊已入库合格者</el-button>
+            <el-button type="danger" :loading="telescopeActionBusy" :disabled="!telescopePreview.unfitCount || telescopeActionBusy || telescopeScanning" @click="runTelescopeReject">检查未处理的不感兴趣</el-button>
           </div>
           <p v-if="telescopeActionSummary" class="catalog-status">{{ telescopeActionSummary }}</p>
           <el-table v-if="telescopeActionItems.length" :data="telescopeActionItems" size="small" max-height="240" style="margin-top:10px">
@@ -366,13 +377,6 @@ const jobId = ref('')
 const telescopeJobId = ref('')
 const projectId = ref('')
 const selectedJob = computed(() => jobs.value.find(j => j.jobId === jobId.value))
-function commonJobPrefix(a: string, b: string): number {
-  const left = a.replace(/[\s·—－_()（）\-]/g, '')
-  const right = b.replace(/[\s·—－_()（）\-]/g, '')
-  let length = 0
-  while (length < left.length && length < right.length && left[length] === right[length]) length++
-  return length
-}
 const statuses = ref<number[]>([1, 2, 3, 4, 5])
 const loading = ref(false)
 const telescopeLoading = ref(false)
@@ -387,9 +391,10 @@ const stopRequested = ref(false)
 const progress = ref('')
 const summary = ref('')
 const pendingReviews = ref<any[]>([])
-const manualUnfitReviews = computed(() => pendingReviews.value.filter((item: any) => item.verdict === 'unfit' && item.platformStatus !== '待处理'))
+const manualUnfitReviews = computed(() => pendingReviews.value.filter((item: any) => item.verdict === 'unfit' && ['待处理', '待定'].includes(item.platformStatus)))
 
 const syncTask = ref<any>(null)
+const attachmentTask = ref<any>(null)
 const autoSyncEnabled = ref(false)
 const savingCriteria = ref(false)
 
@@ -470,21 +475,10 @@ async function load() {
       const catalog = await api.Get51JobTalentManagementCatalog()
       const nextMappings = await api.ListPlatformJobMappings() || []
       const nextJobs = catalog.jobs || []
-      const activeProject = props.projects.find((item: any) => item.id === props.defaultProjectId)
-      const activeTitle = activeProject?.job_config?.title || activeProject?.name || ''
-      let nextJobID = nextJobs.some((job: any) => job.jobId === jobId.value &&
-        (!props.defaultProjectId || commonJobPrefix(activeTitle, job.title || '') >= 4)) ? jobId.value : ''
-      if (!nextJobID && props.defaultProjectId) {
-        const matching = nextJobs.map((job: any) => ({ job, score: commonJobPrefix(activeTitle, job.title || '') }))
-          .sort((a: any, b: any) => b.score - a.score)
-        if (matching[0]?.score >= 4 && (!matching[1] || matching[0].score > matching[1].score)) {
-          nextJobID = matching[0].job.jobId
-        }
-      }
-      if (!nextJobID && !props.defaultProjectId) nextJobID = nextJobs[0]?.jobId || ''
-      const mapping = nextMappings.find((item: any) => item.platform === '51job' &&
-        item.platformAccount === catalog.accountScope && item.platformJobId === nextJobID)
-      const nextProjectID = mapping?.projectId || props.defaultProjectId || ''
+      const nextProjectID = props.defaultProjectId || projectId.value || ''
+      const bound = nextMappings.filter((item: any) => item.platform === '51job' && item.projectId === nextProjectID)
+      const nextJobID = bound.length === 1 && bound[0].platformAccount === catalog.accountScope &&
+        nextJobs.some((job: any) => job.jobId === bound[0].platformJobId) ? bound[0].platformJobId : ''
       const [task, criteria] = await Promise.all([
         nextJobID ? api.GetTalentManagementSyncTask('51job', catalog.accountScope, nextJobID).catch(() => null) : Promise.resolve(null),
         nextProjectID ? api.GetTalentManagementStrictCriteria(nextProjectID).catch(() => null) : Promise.resolve(null)
@@ -498,10 +492,13 @@ async function load() {
     jobId.value = fresh.nextJobID
     projectId.value = fresh.nextProjectID
     syncTask.value = fresh.task
+	void loadAttachmentTask()
     autoSyncEnabled.value = Boolean(fresh.task?.autoSyncEnabled)
     if (fresh.criteria) applyCriteria(fresh.criteria, fresh.nextProjectID)
     catalogStale.value = false
-    catalogStatus.value = `已核验 ${jobs.value.length} 个在线职位 · ${new Date().toLocaleTimeString('zh-CN', { hour12: false })}`
+    catalogStatus.value = jobId.value
+      ? `已核验当前分库绑定的职位 ID ${jobId.value} · ${new Date().toLocaleTimeString('zh-CN', { hour12: false })}`
+      : `已核验 ${jobs.value.length} 个在线职位；本分库尚无有效的唯一绑定，请核对账号并选定职位一次`
     ElMessage.success(`成功读取 ${jobs.value.length} 个 51job 在线职位`)
   } catch (error: any) {
     if (generation !== loadGeneration) return
@@ -566,7 +563,21 @@ function classifyCatalogError(error: any): string {
 function syncMappedProject() {
   const mapped = mappings.value.find(item => item.platform === '51job' &&
     item.platformAccount === accountScope.value && item.platformJobId === jobId.value)
-  projectId.value = mapped?.projectId || props.defaultProjectId || ''
+  if (mapped?.projectId && mapped.projectId !== projectId.value) {
+    ElMessage.warning('此职位已绑定其他专属库，请选择本项目的职位 ID')
+  }
+}
+
+async function bindSelectedJob(api: any): Promise<void> {
+  const used = mappings.value.find(item => item.platform === '51job' &&
+    item.platformAccount === accountScope.value && item.platformJobId === jobId.value)
+  if (used?.projectId && used.projectId !== projectId.value) throw new Error('该 51job 职位已绑定其他专属库，不能串库导入')
+  const previous = mappings.value.filter(item => item.platform === '51job' && item.projectId === projectId.value)
+  if (previous.length === 1 && (previous[0].platformAccount !== accountScope.value || previous[0].platformJobId !== jobId.value)) {
+    await ElMessageBox.confirm(`此分库已绑定职位 ID ${previous[0].platformJobId}。确定改绑为 ${jobId.value} 吗？原职位简历关联将归档。`, '确认改绑职位', { type: 'warning' })
+  }
+  await api.Bind51JobTalentManagementJob(accountScope.value, jobId.value, projectId.value)
+  mappings.value = await api.ListPlatformJobMappings() || []
 }
 
 function formatJobOptionLabel(job: any) {
@@ -597,6 +608,31 @@ async function loadSyncTask() {
   } catch (e) {
     syncTask.value = null
   }
+}
+
+async function loadAttachmentTask() {
+  if (!projectId.value) { attachmentTask.value = null; return }
+  const requestedProject = projectId.value
+  try {
+    const api: any = await import('../../wailsjs/go/main/App')
+    const task = await api.Get51JobAttachmentSyncTask(requestedProject)
+    if (projectId.value === requestedProject) attachmentTask.value = task
+  } catch { if (projectId.value === requestedProject) attachmentTask.value = null }
+}
+
+async function stopAttachmentSync() {
+  if (!projectId.value) return
+  const api: any = await import('../../wailsjs/go/main/App')
+  await api.Stop51JobAttachmentSync(projectId.value)
+  ElMessage.info('正在中止附件检查，已保存的文件会保留')
+}
+
+async function resumeAttachmentSync() {
+  if (!projectId.value) return
+  try {
+    const api: any = await import('../../wailsjs/go/main/App')
+    attachmentTask.value = await api.Start51JobAttachmentSync(projectId.value)
+  } catch (error: any) { ElMessage.error(error?.message || String(error)) }
 }
 
 async function toggleAutoSync(val: boolean) {
@@ -720,7 +756,7 @@ async function scanBatchPreview() {
   progress.value = '正在扫描平台待处理人选并执行三态合规核验...'
   try {
     const api: any = await import('../../wailsjs/go/main/App')
-    await api.Bind51JobTalentManagementJob(accountScope.value, jobId.value, projectId.value)
+    await bindSelectedJob(api)
     await api.BeginProjectScreening(projectId.value)
     const preview = await api.Scan51JobTalentManagementBatch(accountScope.value, jobId.value, projectId.value, 0)
     batchPreview.value = preview
@@ -761,6 +797,9 @@ onMounted(() => {
     runtime.EventsOn('talent_management_import_progress', (event: any) => {
       if (running.value && event?.statusText) progress.value = event.statusText
     })
+	 runtime.EventsOn('attachment_sync_progress', (task: any) => {
+	   if (task?.projectId === projectId.value) attachmentTask.value = task
+	 })
   }
 })
 
@@ -801,7 +840,13 @@ async function scanTelescopePreview() {
     const api: any = await import('../../wailsjs/go/main/App')
     const preview = await api.Scan51JobTelescopeBatch(telescopeAccountScope.value, telescopeJobId.value, projectId.value)
     telescopePreview.value = preview
-    telescopeProgress.value = `只读筛选完成：合格 ${preview.qualifiedCount} 人，不合格 ${preview.unfitCount} 人；${preview.pendingCount} 人资料不足，已记录供重试`
+		telescopeProgress.value = `筛选完成：合格 ${preview.qualifiedCount} 人，不合格 ${preview.unfitCount} 人；正在自动处理明确不符者…`
+    if (preview.unfitCount > 0) {
+      const rejection = await api.Run51JobTelescopeReject(preview.batchId)
+      telescopeActionItems.value = rejection.items || []
+      telescopeActionSummary.value = `不感兴趣：已核实 ${rejection.rejected} 人，跳过 ${rejection.skipped} 人，回执待核查 ${rejection.uncertain} 人`
+    }
+    telescopeProgress.value = `筛选完成：合格 ${preview.qualifiedCount} 人，不合格 ${preview.unfitCount} 人；${telescopeActionSummary.value || '无须执行不感兴趣'}`
     ElMessage.success(telescopeProgress.value)
   } catch (error: any) {
     telescopeProgress.value = error?.message || String(error)
@@ -939,6 +984,7 @@ watch(projectId, () => {
   savedCriteria.value = null
   void loadCriteria()
   void loadPendingReviews()
+  void loadAttachmentTask()
 })
 
 async function loadPendingReviews() {
@@ -990,7 +1036,7 @@ async function runSingleBatch() {
   progress.value = '正在执行单批断点导入...'
   try {
     const api: any = await import('../../wailsjs/go/main/App')
-    await api.Bind51JobTalentManagementJob(accountScope.value, jobId.value, projectId.value)
+    await bindSelectedJob(api)
     const result = await api.RunTalentManagementNextBatch(accountScope.value, jobId.value)
     await loadSyncTask()
     if (result.interceptedCount > 0) {
@@ -1020,7 +1066,7 @@ async function start() {
   try {
     const api: any = await import('../../wailsjs/go/main/App')
     await api.Begin51JobManagementImport()
-    await api.Bind51JobTalentManagementJob(accountScope.value, jobId.value, projectId.value)
+    await bindSelectedJob(api)
     for (const status of [...statuses.value]) {
       let page = status === 1 ? await api.CountTalentManagementPendingPages(accountScope.value, jobId.value) : 1
       while (!stopRequested.value) {
@@ -1047,6 +1093,17 @@ async function start() {
       }
       if (stopRequested.value) break
     }
+    if (!stopRequested.value && [1, 2, 3, 4, 5].every(status => statuses.value.includes(status))) {
+      progress.value = '四类名单已完整同步，正在逐人核验并自动标记明确不符者…'
+      const rejection = await api.ProcessTalentManagementUnfitBacklog(accountScope.value, jobId.value)
+      totals.rejected += rejection.rejected || 0
+      totals.rejectPending += rejection.uncertain || 0
+      await loadPendingReviews()
+    }
+	if (!stopRequested.value) {
+	  try { attachmentTask.value = await api.Start51JobAttachmentSync(projectId.value) }
+	  catch (error: any) { ElMessage.warning(`名单已同步，附件后台检查未启动：${error?.message || String(error)}`) }
+	}
     await loadSyncTask()
     summary.value = `入库 ${totals.added} · 平台不合适已核实 ${totals.rejected} · 平台回执待查询 ${totals.rejectPending} · 资料不足待补读 ${totals.pending} · 已存在 ${totals.duplicate} · 失败 ${totals.failed}`
     progress.value = stopRequested.value ? '已中止；再次同步会重新核验并跳过已入库人选' : '四类状态同步及不合适对账完成'

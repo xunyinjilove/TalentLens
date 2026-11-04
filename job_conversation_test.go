@@ -23,6 +23,9 @@ func Test51JobContactUsesExactCandidateIdentityAndPreventsDuplicateGreeting(t *t
 	if result.Status != "error" {
 		t.Fatalf("duplicate greeting must fail without opening browser: %+v", result)
 	}
+	if result := a.Start51JobConversation(r.ID, "ask_resume", "请发简历"); result.Status != "error" {
+		t.Fatalf("retired resume request must not send a message: %+v", result)
+	}
 }
 
 func Test51JobContactRejectsDifferentResumeIDInStoredURL(t *testing.T) {
