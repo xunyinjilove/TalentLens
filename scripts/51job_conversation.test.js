@@ -189,7 +189,7 @@ test('opening 51job chat clicks the visible entry and verifies the chat identity
       evaluate: async callback => ++reads === 1
         ? { visible: false, embedded: false, name: '' }
         : callback(),
-      waitForSelector: async () => {}
+      waitForFunction: async () => {}
     };
     await openCandidateChat(page, '测试候选人');
     assert.equal(clicks, 1);
@@ -555,13 +555,47 @@ test('candidate readiness retries a read without waiting for complete or reopeni
   const page={url:()=>expected.url,title:async()=> 'Synthetic',waitForFunction:async predicate=>{
     assert.doesNotMatch(predicate.toString(),/readyState/);
     if(++attempts===1)throw new Error('timeout');
-  }};
+  },evaluate:async()=>({visible:false,name:''})};
   await waitCandidateReady(page,expected,'Synthetic');
   assert.equal(attempts,2);
   const browser={pages:async()=>[page]};
   assert.equal(await candidatePage(browser,expected,'Synthetic'),page);
   page.waitForFunction=async()=>{throw new Error('timeout');};
   await assert.rejects(waitCandidateReady(page,expected,'Synthetic'),/已自动重试/);
+});
+
+test('duplicate candidate tabs prefer the one without another candidate chat', async () => {
+  const expected = parseCandidateUrl('https://ehire.51job.com/Revision/talent/resume/detail?resumeId=123');
+  const page = chat => ({
+    url: () => expected.url,
+    title: async () => 'Candidate',
+    evaluate: async () => chat,
+    waitForFunction: async () => true
+  });
+  const foreignChat = page({ visible: true, name: 'Another Candidate' });
+  const cleanTab = page({ visible: false, name: '' });
+  assert.equal(await candidatePage({ pages: async () => [foreignChat, cleanTab] }, expected, 'Candidate'), cleanTab);
+});
+
+test('candidate detail with only a foreign chat opens a fresh exact tab', async () => {
+  const expected = parseCandidateUrl('https://ehire.51job.com/Revision/talent/resume/detail?resumeId=123');
+  let createdURL = '';
+  const cleanTab = { url: () => expected.url, title: async () => 'Candidate', waitForFunction: async () => true };
+  const source = {
+    url: () => expected.url,
+    title: async () => 'Candidate',
+    evaluate: async () => ({ visible: true, name: 'Another Candidate' }),
+    target: () => ({ createCDPSession: async () => ({
+      send: async (_operation, options) => { createdURL = options.url; return { targetId: 'fresh' }; },
+      detach: async () => {}
+    }) })
+  };
+  const browser = {
+    pages: async () => [source],
+    waitForTarget: async () => ({ page: async () => cleanTab })
+  };
+  assert.equal(await candidatePage(browser, expected, 'Candidate'), cleanTab);
+  assert.equal(createdURL, expected.url);
 });
 
 test('reply inspection returns inbound text and attachment names without sending or overwriting files', async () => {
@@ -572,6 +606,19 @@ test('reply inspection returns inbound text and attachment names without sending
   assert.equal(result.status,'reply');
   assert.deepEqual(result.replies,['方便下午沟通']);
   assert.deepEqual(result.attachmentNames,['resume.pdf']);
+});
+
+test('reply inspection waits for chat history after opening the candidate dialog', async () => {
+  let hydrated = false;
+  const page = {
+    waitForFunction: async () => { hydrated = true; },
+    evaluate: async () => hydrated
+      ? [{ mine: false, text: '附件简历', attachmentCard: true, links: [] }]
+      : []
+  };
+  const result = await inspectReply(page, 'unused', 'synthetic', [], false);
+  assert.equal(result.status, 'reply');
+  assert.equal(result.replies[0], '附件简历');
 });
 
 test('attachment card without a verified file stays pending and never fabricates a resume', async () => {
