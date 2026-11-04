@@ -662,7 +662,7 @@
           </div>
           <div class="wb-form-grid" style="margin-top: 10px;">
             <div>
-              <label>面试开始时间 <span class="required">*</span></label>
+              <label>面试开始时间（{{ localInterviewTimeZone }}） <span class="required">*</span></label>
               <input v-model="interviewForm.startsAt" type="datetime-local" class="invite-input" />
             </div>
             <div>
@@ -681,6 +681,10 @@
             <div>
               <label>主要面试官</label>
               <input v-model="interviewForm.interviewer" placeholder="如：技术总监 / HRBP" class="invite-input" />
+            </div>
+            <div v-if="interviewForm.method === '腾讯会议自动生成'" class="full">
+              <label>腾讯会议标题</label>
+              <input v-model="interviewForm.meetingSubject" placeholder="默认：候选人－岗位－初面／复面" class="invite-input" />
             </div>
             <div class="full">
               <label>面试地点 / 会议链接</label>
@@ -1275,8 +1279,10 @@ const interviewForm = reactive({
   method: '腾讯会议自动生成',
   interviewer: '',
   location: '',
+  meetingSubject: '',
   note: ''
 })
+const localInterviewTimeZone = Intl.DateTimeFormat().resolvedOptions().timeZone || '本机时区'
 
 function formatDateTimeInput(date: Date): string {
   const offset = date.getTimezoneOffset() * 60000
@@ -1302,6 +1308,7 @@ async function openInterviewInvite(candidate: TalentCandidate) {
     method: '腾讯会议自动生成',
     interviewer: candidate.owner || 'HRBP',
     location: '',
+    meetingSubject: '',
     note: ''
   })
 
@@ -1363,6 +1370,7 @@ async function submitInterviewInvite() {
       endsAt: new Date(interviewForm.endsAt).toISOString(),
       interviewer: interviewForm.interviewer.trim(),
       method: interviewForm.method,
+      meetingSubject: interviewForm.meetingSubject.trim(),
       location: interviewForm.location.trim(),
       note: interviewForm.note.trim() ? `${interviewForm.note.trim()}\n[招呼文案]: ${greetingMessage.value}` : greetingMessage.value,
       status: 'scheduled'
