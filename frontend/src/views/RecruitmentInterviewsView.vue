@@ -47,10 +47,7 @@
                 </div>
                 <div class="interview-agenda-actions">
                   <span class="wb-pill" :class="item.status === 'cancelled' ? 'danger' : item.status === 'completed' ? 'ok' : ''">{{ statusLabel(item.status) }}</span>
-                  <div class="interview-agenda-btn-group">
-                    <el-button v-if="item.meetingUrl || item.location" size="small" type="primary" plain @click="copyMeetingInvite(item)">一键复制链接</el-button>
-                    <el-button size="small" @click="edit(item)">{{ item.status === 'cancelled' ? '查看' : '改期 / 编辑' }}</el-button>
-                  </div>
+                  <el-button size="small" @click="edit(item)">{{ item.status === 'cancelled' ? '查看' : '改期 / 编辑' }}</el-button>
                 </div>
               </article>
             </section>
