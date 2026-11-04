@@ -253,6 +253,61 @@ async function scanTelescope(jobId, limit = 100) {
   }
 }
 
+async function readTelescopeDetail(jobId, candidateId) {
+  if (!jobId || !candidateId) throw new Error('缺少职位或人才 ID');
+  const browser = await puppeteer.connect({ browserURL: 'http://127.0.0.1:9503', defaultViewport: null, protocolTimeout: 12000 });
+  let openedTarget = null;
+  try {
+    const targets = await findTelescopeTargets(browser);
+    for (const target of targets) {
+      let state = await readTelescopePage(target).catch(() => null);
+      if (state?.jobId !== jobId && state?.jobs?.some(job => job.jobId === jobId)) state = await selectTelescopeJob(target, jobId);
+      if (!state || state.jobId !== jobId) continue;
+      const matches = state.candidates.filter(raw => String(raw.userid || '') === candidateId);
+      if (matches.length !== 1) throw new Error('望远镜候选人身份无法唯一核对');
+      const before = new Set(browser.targets());
+      const page = await target.page();
+      const opened = await page.evaluate(id => {
+        const list = [...document.querySelectorAll('*')].map(el => el.__vue__).find(vm => vm?.$options?.name === 'EhFossicksList');
+        const rows = (list?.list || []).flatMap(group => [...(group.matchList || []), ...(group.notMatchList || [])]);
+        const index = rows.findIndex(raw => String(raw.userid || '') === id);
+        if (index < 0 || !list?.resumeViewHandler) return false;
+        list.resumeViewHandler([index, id, '', rows[index]], 0);
+        return true;
+      }, candidateId);
+      if (!opened) throw new Error('平台未提供该人才的详情入口');
+      const deadline = Date.now() + 18000;
+      while (Date.now() < deadline) {
+        openedTarget = browser.targets().find(t => !before.has(t) && t.type() === 'page' &&
+          t.url().includes('/Revision/talent/resume/detail') && new URL(t.url()).searchParams.get('resumeId') === candidateId);
+        if (openedTarget) break;
+        await new Promise(resolve => setTimeout(resolve, 250));
+      }
+      if (!openedTarget) throw new Error('平台详情页未打开');
+      const detailPage = await openedTarget.page();
+      while (Date.now() < deadline) {
+        const detail = await detailPage.evaluate(() => {
+          const vm = [...document.querySelectorAll('*')].map(el => el.__vue__).find(x => x?.$options?.name === 'TalentResumeDetailUpgrades');
+          const data = vm?.$data?.resumeDetail;
+          const query = new URLSearchParams(location.search);
+          if (!data || String(data.resumeid || '') !== query.get('resumeId') || String(data.jobid || '') !== query.get('jobId')) return null;
+          return { candidateId: String(data.resumeid), jobId: String(data.jobid), name: String(data.username || ''),
+            resumeText: JSON.stringify(data), profileUrl: location.href };
+        }).catch(() => null);
+        if (detail && detail.candidateId === candidateId && detail.jobId === jobId && detail.resumeText.length > 100) {
+          return { status: 'ok', ...detail };
+        }
+        await new Promise(resolve => setTimeout(resolve, 300));
+      }
+      throw new Error('平台详情页未返回可核验的简历资料');
+    }
+    throw new Error('当前没有与所选职位一致的望远镜页面');
+  } finally {
+    if (openedTarget) { const page = await openedTarget.page().catch(() => null); if (page) await page.close().catch(() => {}); }
+    await browser.disconnect();
+  }
+}
+
 async function rejectTelescopeCandidate(jobId, candidateId, accountScope, reasonLabel) {
   if (!jobId || !candidateId || !accountScope) throw new Error('缺少可核对的职位、人才或账号 ID');
   const browser = await puppeteer.connect({ browserURL: 'http://127.0.0.1:9503', defaultViewport: null, protocolTimeout: 10000 });
@@ -339,6 +394,11 @@ if (require.main === module) {
     readTelescopeCatalog()
       .then(result => process.stdout.write(JSON.stringify(result) + '\n'))
       .catch(error => { process.stdout.write(JSON.stringify({ status: 'error', message: error.message }) + '\n'); process.exitCode = 1; });
+  } else if (mode === 'detail') {
+    const argument = name => { const i = process.argv.indexOf(name); return i >= 0 ? process.argv[i + 1] : ''; };
+    readTelescopeDetail(argument('--job-id'), argument('--candidate-id'))
+      .then(result => process.stdout.write(JSON.stringify(result) + '\n'))
+      .catch(error => { process.stdout.write(JSON.stringify({ status: 'error', message: error.message }) + '\n'); process.exitCode = 1; });
   } else if (mode === 'reject') {
     const argument = name => { const i = process.argv.indexOf(name); return i >= 0 ? process.argv[i + 1] : ''; };
     rejectTelescopeCandidate(argument('--job-id'), argument('--candidate-id'), argument('--account-scope'), argument('--reason-label'))
@@ -352,4 +412,4 @@ if (require.main === module) {
   }
 }
 
-module.exports = { normalizeTelescopeCandidate, scanTelescope, readTelescopePage, readTelescopeCatalog, rejectTelescopeCandidate };
+module.exports = { normalizeTelescopeCandidate, scanTelescope, readTelescopeDetail, readTelescopePage, readTelescopeCatalog, rejectTelescopeCandidate };

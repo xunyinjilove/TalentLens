@@ -87,12 +87,15 @@ func (a *App) runScheduledTelescopeMinute(seen map[string]bool) {
 	rows.Close()
 	for _, task := range due {
 		var account, jobID string
-		var count int
-		err := db.QueryRow(`SELECT COUNT(*),MIN(platform_account),MIN(platform_job_id)
-			FROM platform_job_mappings WHERE platform='51job' AND project_id=?`, task.projectID).Scan(&count, &account, &jobID)
-		if err != nil || count != 1 {
-			log.Printf("[TelescopeSchedule] 项目 %s 缺少唯一 51job 职位映射", task.projectID)
-			continue
+		err := db.QueryRow(`SELECT platform_account,platform_job_id FROM telescope_job_bindings WHERE project_id=?`, task.projectID).Scan(&account, &jobID)
+		if err != nil {
+			var count int
+			err = db.QueryRow(`SELECT COUNT(*),MIN(platform_account),MIN(platform_job_id)
+				FROM platform_job_mappings WHERE platform='51job' AND project_id=?`, task.projectID).Scan(&count, &account, &jobID)
+			if err != nil || count != 1 {
+				log.Printf("[TelescopeSchedule] 项目 %s 尚未绑定望远镜职位", task.projectID)
+				continue
+			}
 		}
 		if _, err := a.Get51JobTelescopeCatalog(); err != nil {
 			log.Printf("[TelescopeSchedule] 望远镜未就绪: %v", err)

@@ -78,6 +78,15 @@ export interface RecruitmentInterview {
   location: string
   note: string
   status: string
+  meetingSubject?: string
+  meetingId?: string
+  meetingCode?: string
+  meetingUrl?: string
+  meetingHost?: string
+  meetingSyncStatus?: string
+  meetingError?: string
+  remoteStartsAt?: string
+  remoteEndsAt?: string
 }
 
 export interface SourcingTask {

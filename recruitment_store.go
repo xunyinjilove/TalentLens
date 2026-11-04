@@ -188,6 +188,34 @@ CREATE TABLE IF NOT EXISTS interviews (
 );
 CREATE INDEX IF NOT EXISTS interviews_candidate_schedule
   ON interviews(project_candidate_id, status, starts_at);
+CREATE TABLE IF NOT EXISTS telescope_conditions (
+  project_id TEXT PRIMARY KEY REFERENCES projects(id),
+  conditions_json TEXT NOT NULL DEFAULT '[]', job_skills_hash TEXT NOT NULL DEFAULT '',
+  version TEXT NOT NULL DEFAULT '', updated_at TEXT NOT NULL DEFAULT ''
+);
+CREATE TABLE IF NOT EXISTS telescope_requirement_checks (
+  project_id TEXT NOT NULL, candidate_id TEXT NOT NULL,
+  profile_hash TEXT NOT NULL, criteria_version TEXT NOT NULL,
+  condition_key TEXT NOT NULL, status TEXT NOT NULL,
+  evidence TEXT NOT NULL DEFAULT '', source TEXT NOT NULL DEFAULT 'automatic',
+  updated_at TEXT NOT NULL,
+  PRIMARY KEY(project_id,candidate_id,profile_hash,criteria_version,condition_key)
+);
+CREATE TABLE IF NOT EXISTS telescope_job_bindings (
+  project_id TEXT PRIMARY KEY REFERENCES projects(id),
+  platform_account TEXT NOT NULL, platform_job_id TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  UNIQUE(platform_account,platform_job_id)
+);
+CREATE TABLE IF NOT EXISTS interview_meetings (
+  interview_id TEXT PRIMARY KEY REFERENCES interviews(id),
+  provider TEXT NOT NULL DEFAULT 'tencent',
+  meeting_id TEXT NOT NULL DEFAULT '', meeting_code TEXT NOT NULL DEFAULT '',
+  join_url TEXT NOT NULL DEFAULT '', subject TEXT NOT NULL DEFAULT '',
+  host_account TEXT NOT NULL DEFAULT '', remote_starts_at TEXT NOT NULL DEFAULT '',
+  remote_ends_at TEXT NOT NULL DEFAULT '', sync_status TEXT NOT NULL DEFAULT 'pending_create',
+  last_error TEXT NOT NULL DEFAULT '', updated_at TEXT NOT NULL DEFAULT ''
+);
 CREATE TABLE IF NOT EXISTS offer_cards (
   project_candidate_id TEXT PRIMARY KEY REFERENCES project_candidates(id),
   salary_package TEXT NOT NULL DEFAULT '', work_location TEXT NOT NULL DEFAULT '',

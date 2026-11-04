@@ -8,7 +8,10 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"time"
+
+	"github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
 type telescopeCandidate struct {
@@ -30,6 +33,39 @@ type telescopePage struct {
 	AccountScope string               `json:"accountScope"`
 	Total        int                  `json:"total"`
 	Candidates   []telescopeCandidate `json:"candidates"`
+}
+
+type telescopeDetail struct {
+	Status      string `json:"status"`
+	Message     string `json:"message"`
+	CandidateID string `json:"candidateId"`
+	JobID       string `json:"jobId"`
+	Name        string `json:"name"`
+	ResumeText  string `json:"resumeText"`
+	ProfileURL  string `json:"profileUrl"`
+}
+
+func readTelescopeDetail(jobID, candidateID string) (telescopeDetail, error) {
+	result := telescopeDetail{}
+	script := resolveTelescopeScript()
+	if script == "" {
+		return result, fmt.Errorf("缺少望远镜读取脚本")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 22*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "node", script, "--mode", "detail", "--job-id", jobID, "--candidate-id", candidateID)
+	hideConsoleWindow(cmd)
+	out, err := cmd.Output()
+	if ctx.Err() != nil {
+		return result, fmt.Errorf("读取详情超时")
+	}
+	if json.Unmarshal(out, &result) != nil || result.Status != "ok" || result.JobID != jobID || result.CandidateID != candidateID || result.ResumeText == "" {
+		if result.Message != "" {
+			return result, fmt.Errorf("%s", result.Message)
+		}
+		return result, fmt.Errorf("平台详情身份或内容无法核验: %v", err)
+	}
+	return result, nil
 }
 
 type telescopeCatalogResult struct {
@@ -179,17 +215,6 @@ func (a *App) Scan51JobTelescopeBatch(accountScope, jobID, projectID string) (*S
 		return nil, fmt.Errorf("同步本地职位项目失败: %w", err)
 	}
 
-	// 自动保全项目与职位映射
-	var mappedProject string
-	err = db.QueryRow(`SELECT project_id FROM platform_job_mappings WHERE platform='51job' AND platform_account=? AND platform_job_id=?`, accountScope, jobID).Scan(&mappedProject)
-	if err != nil || mappedProject != projectID {
-		nowStr := time.Now().Format("2006-01-02 15:04:05")
-		_, _ = db.Exec(`INSERT INTO platform_job_mappings(platform, platform_account, platform_job_id, project_id, updated_at)
-			VALUES('51job', ?, ?, ?, ?)
-			ON CONFLICT(platform, platform_account, platform_job_id) DO UPDATE SET project_id=excluded.project_id, updated_at=excluded.updated_at`,
-			accountScope, jobID, projectID, nowStr)
-	}
-
 	criteria, err := a.GetTalentManagementStrictCriteria(projectID)
 	if err != nil {
 		return nil, fmt.Errorf("读取项目筛选条件失败: %w", err)
@@ -197,16 +222,21 @@ func (a *App) Scan51JobTelescopeBatch(accountScope, jobID, projectID string) (*S
 	if criteria == nil {
 		return nil, fmt.Errorf("项目筛选条件尚未设置")
 	}
+	telescopeConfig, err := a.GetTelescopeConditionConfig(projectID)
+	if err != nil {
+		return nil, err
+	}
+	combinedVersion := telescopeHash([]string{criteria.CriteriaVersion, telescopeConfig.Version})
 
 	now := time.Now()
 	preview := &ScreeningBatchPreview{
 		BatchID: recruitmentID("scrbatch"), ProjectID: projectID, Source: "telescope",
 		Platform: "51job", PlatformAccount: accountScope, PlatformJobID: jobID,
-		BusinessDate: now.Format("2006-01-02"), CriteriaVersion: criteria.CriteriaVersion,
+		BusinessDate: now.Format("2006-01-02"), CriteriaVersion: combinedVersion,
 		Status: "preview_ready", QualifiedList: []ScreeningCandidateResult{},
 		UnfitList: []ScreeningCandidateResult{}, PendingList: []ScreeningCandidateResult{},
 	}
-	for _, cand := range page.Candidates {
+	for index, cand := range page.Candidates {
 		if cand.CandidateID == "" || cand.RecordID == "" || cand.JobID != jobID || cand.AlreadyHi {
 			continue
 		}
@@ -217,12 +247,33 @@ func (a *App) Scan51JobTelescopeBatch(accountScope, jobID, projectID string) (*S
 		if existing > 0 {
 			continue
 		}
-		verdict, checks := EvaluateCandidateTriState(cand.ResumeText, *criteria)
+		if a.ctx != nil {
+			runtime.EventsEmit(a.ctx, "telescope_scan_progress", map[string]interface{}{"current": index + 1, "total": len(page.Candidates), "name": cand.Name})
+		}
+		detail, detailErr := readTelescopeDetail(jobID, cand.CandidateID)
+		profile := cand.ResumeText
+		verdict := "pending_verification"
+		checks := []RuleCheckItem{}
+		if detailErr == nil {
+			if cand.Name == "" || detail.Name == "" || (cand.Name != detail.Name &&
+				!(len([]rune(cand.Name)) >= 2 && (strings.HasSuffix(cand.Name, "先生") || strings.HasSuffix(cand.Name, "女士")) && strings.HasPrefix(detail.Name, string([]rune(cand.Name)[0])))) {
+				detailErr = fmt.Errorf("详情姓名与列表无法核对")
+			}
+		}
+		if detailErr == nil {
+			profile = detail.ResumeText
+			verdict, checks = EvaluateCandidateTriState(profile, *criteria)
+			requirementChecks := a.evaluateTelescopeConditions(db, projectID, cand.CandidateID, profile, telescopeConfig)
+			checks = append(checks, requirementChecks...)
+			verdict = telescopeVerdict(verdict, requirementChecks)
+		} else {
+			checks = append(checks, RuleCheckItem{Rule: "TELESCOPE_DETAIL", Label: "平台详情", Status: "unknown", Evidence: detailErr.Error()})
+		}
 		item := ScreeningCandidateResult{
 			ID: recruitmentID("scr"), BatchID: preview.BatchID, ProjectID: projectID,
 			CandidateID: cand.CandidateID, RecordID: cand.RecordID, CandidateName: cand.Name,
-			Verdict: verdict, RuleEvidence: checks, RawProfile: cand.ResumeText,
-			DetailLoaded: false, ActionStatus: "pending", PlatformStatus: "人才望远镜",
+			Verdict: verdict, RuleEvidence: checks, RawProfile: profile,
+			DetailLoaded: detailErr == nil, ActionStatus: "pending", PlatformStatus: "人才望远镜",
 			CreatedAt: now.Format("2006-01-02 15:04:05"),
 		}
 		switch verdict {
@@ -234,16 +285,22 @@ func (a *App) Scan51JobTelescopeBatch(accountScope, jobID, projectID string) (*S
 			preview.PendingList = append(preview.PendingList, item)
 		}
 	}
+	telescopeSortByReference(preview.QualifiedList)
 	preview.QualifiedCount = len(preview.QualifiedList)
 	preview.UnfitCount = len(preview.UnfitList)
 	preview.PendingCount = len(preview.PendingList)
 	preview.TotalCount = preview.QualifiedCount + preview.UnfitCount + preview.PendingCount
-	criteriaJSON, err := json.Marshal(criteria)
+	criteriaJSON, err := json.Marshal(map[string]interface{}{"hard": criteria, "telescope": telescopeConfig})
 	if err != nil {
 		return nil, err
 	}
 	if err := persistScreeningBatch(db, preview, string(criteriaJSON), now.Format("2006-01-02 15:04:05")); err != nil {
 		return nil, fmt.Errorf("保存望远镜预览失败: %w", err)
+	}
+	if _, err := db.Exec(`INSERT INTO telescope_job_bindings(project_id,platform_account,platform_job_id,updated_at) VALUES(?,?,?,?)
+		ON CONFLICT(project_id) DO UPDATE SET platform_account=excluded.platform_account,platform_job_id=excluded.platform_job_id,updated_at=excluded.updated_at`,
+		projectID, accountScope, jobID, now.UTC().Format(time.RFC3339Nano)); err != nil {
+		return nil, fmt.Errorf("保存望远镜项目职位绑定失败: %w", err)
 	}
 	return preview, nil
 }
@@ -270,7 +327,8 @@ func (a *App) run51JobTelescopeReject(batchID string, historical bool) (Telescop
 	}
 	if !historical {
 		criteria, err := a.GetTalentManagementStrictCriteria(projectID)
-		if err != nil || criteria == nil || criteria.CriteriaVersion != version {
+		config, configErr := a.GetTelescopeConditionConfig(projectID)
+		if err != nil || criteria == nil || configErr != nil || config == nil || telescopeHash([]string{criteria.CriteriaVersion, config.Version}) != version {
 			return result, fmt.Errorf("项目条件已变化，请重新筛选后再执行")
 		}
 	}

@@ -65,6 +65,15 @@ type RecruitmentInterview struct {
 	Location           string `json:"location"`
 	Note               string `json:"note"`
 	Status             string `json:"status"`
+	MeetingSubject     string `json:"meetingSubject"`
+	MeetingID          string `json:"meetingId"`
+	MeetingCode        string `json:"meetingCode"`
+	MeetingURL         string `json:"meetingUrl"`
+	MeetingHost        string `json:"meetingHost"`
+	MeetingSyncStatus  string `json:"meetingSyncStatus"`
+	MeetingError       string `json:"meetingError"`
+	RemoteStartsAt     string `json:"remoteStartsAt"`
+	RemoteEndsAt       string `json:"remoteEndsAt"`
 }
 
 type RecruitmentDashboard struct {
@@ -681,9 +690,13 @@ func (a *App) ListRecruitmentInterviews(projectID string) ([]RecruitmentIntervie
 		return nil, err
 	}
 	rows, err := db.Query(`SELECT i.id,i.project_candidate_id,c.display_name,p.name,i.starts_at,
-		i.ends_at,i.interviewer,i.method,i.location,i.note,i.status
+		i.ends_at,i.interviewer,i.method,i.location,i.note,i.status,
+		COALESCE(m.subject,''),COALESCE(m.meeting_id,''),COALESCE(m.meeting_code,''),
+		COALESCE(m.join_url,''),COALESCE(m.host_account,''),COALESCE(m.sync_status,''),
+		COALESCE(m.last_error,''),COALESCE(m.remote_starts_at,''),COALESCE(m.remote_ends_at,'')
 		FROM interviews i JOIN project_candidates pc ON pc.id=i.project_candidate_id
 		JOIN candidates c ON c.id=pc.candidate_id JOIN projects p ON p.id=pc.project_id
+		LEFT JOIN interview_meetings m ON m.interview_id=i.id
 		WHERE (?='' OR p.id=?) ORDER BY i.starts_at,i.id`, projectID, projectID)
 	if err != nil {
 		return nil, err
@@ -694,7 +707,10 @@ func (a *App) ListRecruitmentInterviews(projectID string) ([]RecruitmentIntervie
 		var item RecruitmentInterview
 		if err := rows.Scan(&item.ID, &item.ProjectCandidateID, &item.CandidateName,
 			&item.ProjectName, &item.StartsAt, &item.EndsAt, &item.Interviewer,
-			&item.Method, &item.Location, &item.Note, &item.Status); err != nil {
+			&item.Method, &item.Location, &item.Note, &item.Status,
+			&item.MeetingSubject, &item.MeetingID, &item.MeetingCode, &item.MeetingURL,
+			&item.MeetingHost, &item.MeetingSyncStatus, &item.MeetingError,
+			&item.RemoteStartsAt, &item.RemoteEndsAt); err != nil {
 			return nil, err
 		}
 		result = append(result, item)
@@ -753,7 +769,13 @@ func (a *App) SaveRecruitmentInterview(item RecruitmentInterview) (string, error
 		status=excluded.status,updated_at=excluded.updated_at`,
 		item.ID, item.ProjectCandidateID, item.StartsAt, item.EndsAt, item.Interviewer,
 		item.Method, item.Location, item.Note, item.Status, now, now)
-	return item.ID, err
+	if err != nil {
+		return item.ID, err
+	}
+	if syncErr := a.syncInterviewMeeting(db, item); syncErr != nil {
+		return item.ID, syncErr
+	}
+	return item.ID, nil
 }
 
 func (a *App) CancelRecruitmentInterview(id string) error {
@@ -772,7 +794,7 @@ func (a *App) CancelRecruitmentInterview(id string) error {
 	if count == 0 {
 		return sql.ErrNoRows
 	}
-	return nil
+	return a.cancelInterviewMeeting(db, id)
 }
 
 // JobStats 职位统计数据（投递与合适候选人计数）
