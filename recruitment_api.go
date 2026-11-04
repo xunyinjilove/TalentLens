@@ -39,6 +39,7 @@ type TalentCandidate struct {
 	NextActionAt       string   `json:"nextActionAt"`
 	CreatedAt          string   `json:"createdAt"`
 	LastFollowUpAt     string   `json:"lastFollowUpAt"`
+	LastFollowUpNote   string   `json:"lastFollowUpNote"`
 	HiredAt            string   `json:"hiredAt"`
 }
 
@@ -101,8 +102,45 @@ type RecruitmentActivity struct {
 
 var recruitmentStages = map[string]bool{
 	"new": true, "pending_contact": true,
-	"communicating": true, "first_interview": true, "second_interview": true,
-	"offer": true, "hired": true, "on_hold": true, "rejected": true,
+	"first_interview": true, "second_interview": true,
+	"offer": true, "hired": true,
+}
+
+const pendingInterviewBaseQuery = `FROM project_candidates pc
+	JOIN candidates c ON c.id=pc.candidate_id JOIN projects p ON p.id=pc.project_id
+	WHERE pc.archived_at='' AND pc.stage IN ('first_interview','second_interview')
+	AND NOT EXISTS (SELECT 1 FROM interviews i WHERE i.project_candidate_id=pc.id
+		AND i.status='scheduled' AND i.starts_at>=?)`
+
+type PendingInterviewCandidate struct {
+	ProjectCandidateID string `json:"projectCandidateId"`
+	ProjectID          string `json:"projectId"`
+	CandidateName      string `json:"candidateName"`
+	ProjectName        string `json:"projectName"`
+	Stage              string `json:"stage"`
+}
+
+func (a *App) ListPendingInterviewCandidates(projectID string) ([]PendingInterviewCandidate, error) {
+	db, err := a.getRecruitmentDB()
+	if err != nil {
+		return nil, err
+	}
+	rows, err := db.Query(`SELECT pc.id,pc.project_id,c.display_name,p.name,pc.stage `+pendingInterviewBaseQuery+
+		` AND (?='' OR pc.project_id=?) ORDER BY pc.updated_at DESC,pc.id`,
+		time.Now().UTC().Format(time.RFC3339Nano), projectID, projectID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	result := make([]PendingInterviewCandidate, 0)
+	for rows.Next() {
+		var item PendingInterviewCandidate
+		if err := rows.Scan(&item.ProjectCandidateID, &item.ProjectID, &item.CandidateName, &item.ProjectName, &item.Stage); err != nil {
+			return nil, err
+		}
+		result = append(result, item)
+	}
+	return result, rows.Err()
 }
 
 func recruitmentID(prefix string) string {
@@ -126,6 +164,8 @@ func (a *App) ListTalentCandidates(projectID string) ([]TalentCandidate, error) 
 		COALESCE(ev.status,''),COALESCE(ev.ability_score,0),COALESCE(ev.analysis_json,''),
 		COALESCE(ev.redline_status,''),COALESCE(ev.confirmed_bonus_count,0),
 		pc.stage,pc.owner,pc.next_action_at,pc.created_at,
+		COALESCE((SELECT f.note FROM follow_up_events f WHERE f.project_candidate_id=pc.id
+			AND f.event_type IN ('stage_change','note') ORDER BY f.created_at DESC,f.id DESC LIMIT 1),''),
 		MAX(CASE WHEN pc.updated_at>pc.created_at THEN pc.updated_at ELSE '' END,
 			COALESCE((SELECT MAX(f.created_at) FROM follow_up_events f WHERE f.project_candidate_id=pc.id),'')),
 		COALESCE((SELECT MIN(f.created_at) FROM follow_up_events f WHERE f.project_candidate_id=pc.id AND f.event_type='stage_change' AND f.to_stage='hired'),
@@ -151,7 +191,7 @@ func (a *App) ListTalentCandidates(projectID string) ([]TalentCandidate, error) 
 			&item.ProjectName, &item.JobTitle, &item.Name, &item.ResumeID, &item.ResumeFileName, &raw,
 			&item.AnalysisStatus, &item.AbilityScore, &analysisJSON, &item.RedLineStatus,
 			&item.ConfirmedBonus, &item.Stage, &item.Owner, &item.NextActionAt,
-			&item.CreatedAt, &item.LastFollowUpAt, &item.HiredAt); err != nil {
+			&item.CreatedAt, &item.LastFollowUpNote, &item.LastFollowUpAt, &item.HiredAt); err != nil {
 			return nil, err
 		}
 		if raw != "" {
@@ -273,8 +313,7 @@ func (a *App) GetRecruitmentDashboard() (RecruitmentDashboard, error) {
 		)`, []interface{}{weekStart}, &result.CandidatesThisWeek},
 		{"SELECT COUNT(*) FROM project_candidates WHERE archived_at='' AND next_action_at<>'' AND next_action_at<=? AND stage NOT IN ('hired','rejected')", []interface{}{now}, &result.PendingFollowUps},
 		{"SELECT COUNT(*) FROM interviews WHERE starts_at>=? AND status='scheduled'", []interface{}{now}, &result.UpcomingInterviews},
-		{`SELECT COUNT(*) FROM project_candidates pc WHERE pc.archived_at='' AND pc.stage IN ('first_interview','second_interview')
-			AND NOT EXISTS (SELECT 1 FROM interviews i WHERE i.project_candidate_id=pc.id AND i.status='scheduled' AND i.starts_at>=?)`, []interface{}{now}, &result.PendingInterviewArrangements},
+		{"SELECT COUNT(*) " + pendingInterviewBaseQuery, []interface{}{now}, &result.PendingInterviewArrangements},
 		{`SELECT COUNT(*) FROM project_candidates pc LEFT JOIN
 			(SELECT project_candidate_id, MIN(created_at) AS hired_at FROM follow_up_events
 			 WHERE event_type='stage_change' AND to_stage='hired' GROUP BY project_candidate_id) first_hire
@@ -497,9 +536,14 @@ func (a *App) UpdateCandidateFollowUp(projectCandidateID, stage, owner, nextActi
 		return fmt.Errorf("未知招聘阶段: %s", stage)
 	}
 	if nextActionAt != "" {
-		if _, err := time.Parse(time.RFC3339, nextActionAt); err != nil {
-			return fmt.Errorf("下一步日期格式无效: %w", err)
+		parsed, err := time.Parse(time.RFC3339, nextActionAt)
+		if err != nil {
+			parsed, err = time.ParseInLocation("2006-01-02T15:04", nextActionAt, time.Local)
+			if err != nil {
+				return fmt.Errorf("下一步日期格式无效: %w", err)
+			}
 		}
+		nextActionAt = parsed.UTC().Format(time.RFC3339)
 	}
 	db, err := a.getRecruitmentDB()
 	if err != nil {
@@ -514,22 +558,25 @@ func (a *App) UpdateCandidateFollowUp(projectCandidateID, stage, owner, nextActi
 	if err := tx.QueryRow("SELECT stage FROM project_candidates WHERE id=?", projectCandidateID).Scan(&oldStage); err != nil {
 		return err
 	}
+	if stage == "hired" && oldStage != "hired" {
+		if err := ensureAcceptedOffer(tx, projectCandidateID); err != nil {
+			return err
+		}
+	}
 	now := time.Now().UTC().Format(time.RFC3339Nano)
 	if _, err := tx.Exec(`UPDATE project_candidates SET stage=?,owner=?,next_action_at=?,updated_at=? WHERE id=?`,
 		stage, strings.TrimSpace(owner), nextActionAt, now, projectCandidateID); err != nil {
 		return err
 	}
-	if oldStage != stage || strings.TrimSpace(note) != "" {
-		eventType := "note"
-		if oldStage != stage {
-			eventType = "stage_change"
-		}
-		if _, err := tx.Exec(`INSERT INTO follow_up_events
-			(id,project_candidate_id,event_type,from_stage,to_stage,note,actor,created_at)
-			VALUES(?,?,?,?,?,?,?,?)`, recruitmentID("followup"), projectCandidateID,
-			eventType, oldStage, stage, strings.TrimSpace(note), strings.TrimSpace(actor), now); err != nil {
-			return err
-		}
+	eventType := "note"
+	if oldStage != stage {
+		eventType = "stage_change"
+	}
+	if _, err := tx.Exec(`INSERT INTO follow_up_events
+		(id,project_candidate_id,event_type,from_stage,to_stage,note,actor,created_at)
+		VALUES(?,?,?,?,?,?,?,?)`, recruitmentID("followup"), projectCandidateID,
+		eventType, oldStage, stage, strings.TrimSpace(note), strings.TrimSpace(actor), now); err != nil {
+		return err
 	}
 	return tx.Commit()
 }
@@ -560,6 +607,11 @@ func (a *App) BatchUpdateCandidateStage(projectCandidateIDs []string, stage, not
 		}
 		var oldStage string
 		_ = tx.QueryRow("SELECT stage FROM project_candidates WHERE id=?", id).Scan(&oldStage)
+		if stage == "hired" && oldStage != "hired" {
+			if err := ensureAcceptedOffer(tx, id); err != nil {
+				return err
+			}
+		}
 
 		if _, err := tx.Exec(`UPDATE project_candidates SET stage=?,updated_at=? WHERE id=?`, stage, now, id); err != nil {
 			return err
@@ -667,7 +719,15 @@ func (a *App) SaveRecruitmentInterview(item RecruitmentInterview) (string, error
 		return "", err
 	}
 	if item.ID == "" {
-		item.ID = recruitmentID("interview")
+		// Reuse a saved schedule when an invite is retried after a later step failed.
+		err := db.QueryRow(`SELECT id FROM interviews WHERE project_candidate_id=? AND starts_at=? AND status='scheduled' ORDER BY created_at DESC LIMIT 1`,
+			item.ProjectCandidateID, item.StartsAt).Scan(&item.ID)
+		if err != nil && err != sql.ErrNoRows {
+			return "", err
+		}
+		if err == sql.ErrNoRows {
+			item.ID = recruitmentID("interview")
+		}
 	} else {
 		var ownerLink string
 		err := db.QueryRow("SELECT project_candidate_id FROM interviews WHERE id=?", item.ID).Scan(&ownerLink)

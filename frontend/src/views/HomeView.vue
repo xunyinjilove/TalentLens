@@ -296,7 +296,7 @@
                       <el-icon><Compass /></el-icon>
                       <span>主页直达</span>
                     </button>
-                    <!-- 51job 快捷打招呼/索要简历 -->
+                    <!-- 51job 快捷打招呼与只读附件同步 -->
                     <button v-if="resumeStore.selectedResume.snapshot_copy_ids?.length" class="hero-act-btn secondary" @click="showSnapshotHistory">快照历史（{{ resumeStore.selectedResume.snapshot_copy_ids.length + 1 }}）</button>
                     <template v-if="is51JobSource">
                       <button
@@ -308,22 +308,18 @@
                       </button>
                       <button
                         class="hero-act-btn platform"
-                        :disabled="contactBusy || resumeStore.selectedResume.contact_status !== 'greeted'"
-                        @click="handle51JobContact"
-                      >
-                        索要简历
-                      </button>
-                      <button
-                        class="hero-act-btn platform"
                         :disabled="contactBusy || !is51JobCandidate"
-                        @click="check51JobReply(resumeStore.selectedResume.id, true)"
+                        @click="check51JobReply(resumeStore.selectedResume.id)"
                       >
-                        检查回复
+                        同步附件简历
                       </button>
                     </template>
                   </div>
                   <div v-if="is51JobSource" class="hero-contact-tip">
-                    {{ is51JobCandidate ? contactStatusText : '旧快照缺少可核验的详情链接。请关联此人的 51job 网页后打招呼；完成后可索要完整简历。' }}
+                    {{ is51JobCandidate ? contactStatusText : '旧快照缺少可核验的详情链接。请先关联此人的 51job 网页，才能同步附件简历。' }}
+                  </div>
+                  <div v-if="is51JobSource && resumeStore.selectedResume.attachment_pending_reason" class="hero-contact-tip">
+                    附件待获取：{{ resumeStore.selectedResume.attachment_pending_reason }}
                   </div>
                 </div>
               </div>
@@ -1092,13 +1088,6 @@
       <p v-if="radarDraftNote">{{ radarDraftNote }}</p>
       <el-input v-model="radarDraftText" type="textarea" :rows="8" placeholder="每行一项岗位技能指标，1 至 8 项" />
       <template #footer><el-button @click="radarDraftOpen=false">取消</el-button><el-button type="primary" :loading="isApplyingRadar" @click="applyRadarDraft">确认并启用</el-button></template>
-    </el-dialog>
-    <el-dialog v-model="replyDialogOpen" title="51job 候选人回复" width="min(640px,92vw)">
-      <p>{{ replyResult.message }}</p>
-      <p v-if="!replyResult.replies?.length">当前已加载会话中暂无文字回复。</p>
-      <article v-for="(text,index) in replyResult.replies || []" :key="index" style="white-space:pre-wrap;overflow-wrap:anywhere;padding:16px;margin:12px 0;border:1px solid var(--wb-border);border-radius:12px">{{ text }}</article>
-      <div v-if="replyResult.attachmentNames?.length"><strong>会话中的简历附件</strong><p v-for="(name,index) in replyResult.attachmentNames" :key="index">{{ name }}</p></div>
-      <template #footer><el-button type="primary" @click="replyDialogOpen=false">关闭</el-button></template>
     </el-dialog>
     <TopTenOutreachDialog v-model="showOutreach" :project-id="projectId" @updated="resumeStore.loadProjectResumes(projectId)" />
     <el-dialog v-model="hiResultVisible" title="一键打招呼逐人结果" width="min(760px, 94vw)">
@@ -2341,7 +2330,7 @@ const is51JobCandidate = computed(() => {
 })
 const is51JobSource = computed(() => is51JobCandidate.value || resumeStore.selectedResume?.source_platform === '51job' || /【前程无忧】/.test(resumeStore.selectedResume?.fileName || ''))
 const contactStatusText = computed(() => ({
-  greeted: '已打招呼', resume_requested: '已索要简历；页面打开时后台轮询回复', resume_received: '已收到完整简历'
+  greeted: '已打招呼', resume_requested: '历史记录曾索要简历；现在只同步已收到的附件', resume_received: '已收到完整简历'
 }[resumeStore.selectedResume?.contact_status || ''] || '尚未联系'))
 
 const jobTitle = ref('高级Go开发工程师')
@@ -2492,6 +2481,22 @@ async function handle51JobGreeting() {
   if (contactBusy.value || jobPickerVisible.value || !await ensure51JobCandidateDetail()) return
   const resume = resumeStore.selectedResume
   if (!resume) return
+  const boundProjectID = resume.project_id || projectId.value
+  if (boundProjectID) {
+    try {
+      const App: any = await import('../../wailsjs/go/main/App')
+      const bound = await App.Get51JobProjectJob(boundProjectID)
+      await greet51JobWithJob(resume.id, { id: bound.jobId, title: bound.title })
+      return
+    } catch (err: any) {
+      const message = String(err?.message || err)
+      if (!/尚未唯一绑定|已失效/.test(message)) {
+        ElMessage.warning({ message: `无法核验已绑定职位：${message}。请恢复 51job 登录后重试，原绑定未更改。`, duration: 8000 })
+        return
+      }
+      ElMessage.warning({ message: `项目绑定职位暂不可用：${message}。请选择一次正确职位并保存。`, duration: 8000 })
+    }
+  }
   jobPickerResumeID.value = resume.id
   jobPickerKeyword.value = ''
   jobPickerJobs.value = []
@@ -2567,7 +2572,22 @@ async function confirm51JobSelectedJob() {
     ElMessage.warning('候选人或沟通职位已变化，请重新选择')
     return
   }
+  try {
+    const App: any = await import('../../wailsjs/go/main/App')
+    const catalog = await App.Get51JobTalentManagementCatalog()
+    await ElMessageBox.confirm(`将当前分库固定绑定到 51job 职位「${job.title}」（ID ${job.id}）？以后同步与打招呼自动使用此职位。`, '确认项目职位绑定', { type: 'warning' })
+    await App.Bind51JobTalentManagementJob(catalog.accountScope, job.id, resume.project_id || projectId.value)
+  } catch (err: any) {
+    if (err !== 'cancel' && err !== 'close') ElMessage.error(`职位绑定失败：${err?.message || err}`)
+    return
+  }
   jobPickerVisible.value = false
+  await greet51JobWithJob(resume.id, job)
+}
+
+async function greet51JobWithJob(resumeID: string, job: { id: string; title: string }) {
+  const resume = resumeStore.selectedResume
+  if (!resume || resume.id !== resumeID || contactBusy.value) return
   contactBusy.value = true
   try {
     const App = await import('../../wailsjs/go/main/App')
@@ -2594,80 +2614,23 @@ async function confirm51JobSelectedJob() {
   finally { contactBusy.value = false }
 }
 
-async function handle51JobContact() {
-  if (contactBusy.value || !await ensure51JobCandidateDetail()) return
-  const resume = resumeStore.selectedResume
-  if (!resume || !is51JobCandidate.value || contactBusy.value) return
-  const preset = '您好，方便发一份最新的完整简历（PDF 或 Word）吗？收到后我们会结合岗位要求进一步评估。'
-  let message = ''
-  try {
-    const reply = await ElMessageBox.prompt('请确认发给这位候选人的索要简历内容；发送后将在 51job 聊天记录中核验。', '51job 索要简历', {
-      inputType: 'textarea', inputValue: preset,
-      inputValidator: value => !!value?.trim() && value.trim().length <= 500 || '请输入 1–500 字'
-    })
-    message = reply.value.trim()
-  } catch { return }
-  contactBusy.value = true
-  try {
-    const App = await import('../../wailsjs/go/main/App')
-    const result = await runWith51JobBrowser(App,
-      () => App.Start51JobConversation(resume.id, 'ask_resume', message),
-      { isActive: () => resumeStore.selectedResume?.id === resume.id,
-        onWaiting: status => { ElMessage.info(status) } })
-    if (result.status === 'needs_confirmation' || result.status === 'needs_job_selection') {
-      ElMessage.warning({ message: result.message, duration: 10000, showClose: true })
-      return
-    }
-    if (result.status !== 'sent') throw new Error(result.message || '平台未确认发送成功')
-    if (projectId.value) await resumeStore.loadProjectResumes(projectId.value)
-    ElMessage.success(result.message)
-  } catch (err: any) { ElMessage.error(`51job 沟通未确认：${err.message || err}`) }
-  finally { contactBusy.value = false }
-}
-
-async function check51JobReply(resumeId: string, interactive = false) {
+async function check51JobReply(resumeId: string) {
   if (contactBusy.value) return
   contactBusy.value = true
   try {
     const App = await import('../../wailsjs/go/main/App')
-    const result = interactive
-      ? await runWith51JobBrowser(App, () => App.Check51JobResumeReply(resumeId),
-        { onWaiting: message => { ElMessage.info(message) } })
-      : await App.Check51JobResumeReply(resumeId)
-    if (interactive && ['reply','waiting','downloaded'].includes(result.status)) {
-      replyResult.value=result
-      replyDialogOpen.value=true
-    }
-    if (interactive && projectId.value) await resumeStore.loadProjectResumes(projectId.value)
-    if (result.status === 'downloaded') {
+    const result = await runWith51JobBrowser(App, () => App.Check51JobResumeReply(resumeId),
+      { onWaiting: message => { ElMessage.info(message) } })
+    if (result.status === 'downloaded' || result.status === 'already_current') {
       if (projectId.value) await resumeStore.loadProjectResumes(projectId.value)
-      ElMessage.success(result.message)
-    } else if (interactive) {
-      if (result.status === 'waiting' || result.status === 'reply') { /* 展示已核验会话的回复面板 */ }
-      else ElMessage.warning(result.message || '尚未取得完整简历')
+      ElMessage.success(result.message || '附件简历已同步')
+    } else if (result.status === 'waiting' || result.status === 'reply') {
+      ElMessage.info('当前会话未发现附件简历，已保留在线简历')
+    } else {
+      ElMessage.warning(result.message || '附件尚未取得，请稍后重试')
     }
-  } catch (err: any) { if (interactive) ElMessage.error(`检查 51job 回复失败：${err.message || err}`) }
+  } catch (err: any) { ElMessage.error(`同步 51job 附件失败：${err.message || err}`) }
   finally { contactBusy.value = false }
-}
-
-const replyDialogOpen=ref(false)
-const replyResult=ref<{message?:string; replies?:string[]; attachmentNames?:string[]}>({})
-let contactPollTimer: number | null = null
-let contactPollCursor = 0
-let contactPollRunning = false
-async function poll51JobReplies() {
-  if (contactBusy.value || contactPollRunning) return
-  const pending = resumeStore.resumes.filter(r => r.contact_status === 'resume_requested' && r.url?.startsWith('https://ehire.51job.com/'))
-  if (!pending.length) return
-  contactPollRunning = true
-  try {
-    for (let i = 0; i < Math.min(3, pending.length); i++) {
-      if (contactBusy.value) break
-      const next = pending[contactPollCursor % pending.length]
-      contactPollCursor++
-      await check51JobReply(next.id)
-    }
-  } finally { contactPollRunning = false }
 }
 
 function copyCandidateEmail() {
@@ -3154,7 +3117,6 @@ onMounted(async () => {
     await resumeStore.loadProjectResumes(projectId.value)
     selectTargetResumeFromRoute()
   }
-  contactPollTimer = window.setInterval(() => { void poll51JobReplies() }, 120000)
 })
 
 function selectTargetResumeFromRoute() {
@@ -3189,7 +3151,6 @@ watch(() => route.query.resume, (newResumeId) => {
 
 onUnmounted(() => {
   cleanupResizeListeners()
-  if (contactPollTimer !== null) window.clearInterval(contactPollTimer)
   resumeStore.cleanupWailsEvents()
 })
 </script>

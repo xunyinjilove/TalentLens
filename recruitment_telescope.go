@@ -8,7 +8,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strings"
 	"time"
 )
 
@@ -157,7 +156,7 @@ func (a *App) Scan51JobTelescopeBatch(accountScope, jobID, projectID string) (*S
 	if page.JobID != jobID {
 		return nil, fmt.Errorf("人才望远镜当前展示的职位与所选职位不一致，请在 51job 页面切换到对应职位")
 	}
-	if accountScope != "" && page.CompanyID != "" && !strings.HasPrefix(accountScope, "co:"+page.CompanyID+":") {
+	if accountScope != "" && page.AccountScope != accountScope {
 		return nil, fmt.Errorf("人才望远镜企业账号与当前选定账号不一致")
 	}
 	if accountScope == "" {
@@ -252,6 +251,12 @@ func (a *App) Scan51JobTelescopeBatch(accountScope, jobID, projectID string) (*S
 // Run51JobTelescopeReject processes clear failures only. An ambiguous platform
 // receipt remains uncertain and is never automatically clicked a second time.
 func (a *App) Run51JobTelescopeReject(batchID string) (TelescopeRejectResult, error) {
+	return a.run51JobTelescopeReject(batchID, false)
+}
+
+func (a *App) run51JobTelescopeReject(batchID string, historical bool) (TelescopeRejectResult, error) {
+	platformAutoRejectMu.Lock()
+	defer platformAutoRejectMu.Unlock()
 	result := TelescopeRejectResult{Items: []TelescopeRejectItem{}}
 	db, err := a.getRecruitmentDB()
 	if err != nil {
@@ -263,9 +268,11 @@ func (a *App) Run51JobTelescopeReject(batchID string) (TelescopeRejectResult, er
 	if err != nil || source != "telescope" || scanStatus != "complete" {
 		return result, fmt.Errorf("望远镜批次不存在或扫描未完成")
 	}
-	criteria, err := a.GetTalentManagementStrictCriteria(projectID)
-	if err != nil || criteria == nil || criteria.CriteriaVersion != version {
-		return result, fmt.Errorf("项目条件已变化，请重新筛选后再执行")
+	if !historical {
+		criteria, err := a.GetTalentManagementStrictCriteria(projectID)
+		if err != nil || criteria == nil || criteria.CriteriaVersion != version {
+			return result, fmt.Errorf("项目条件已变化，请重新筛选后再执行")
+		}
 	}
 	page, err := readTelescopeCandidates(jobID)
 	if err != nil || page.AccountScope != account || page.JobID != jobID {
@@ -275,7 +282,7 @@ func (a *App) Run51JobTelescopeReject(batchID string) (TelescopeRejectResult, er
 	for _, candidate := range page.Candidates {
 		present[candidate.CandidateID] = true
 	}
-	rows, err := db.Query(`SELECT id,candidate_id,record_id,candidate_name,rule_evidence_json FROM screening_candidate_results WHERE batch_id=? AND verdict='unfit' ORDER BY created_at,id`, batchID)
+	rows, err := db.Query(`SELECT id,candidate_id,record_id,candidate_name,rule_evidence_json FROM screening_candidate_results WHERE batch_id=? AND verdict='unfit' AND action_status='pending' ORDER BY created_at,id`, batchID)
 	if err != nil {
 		return result, err
 	}
@@ -305,7 +312,7 @@ func (a *App) Run51JobTelescopeReject(batchID string) (TelescopeRejectResult, er
 		}
 		var prior string
 		priorErr := db.QueryRow(`SELECT status FROM platform_action_ledger WHERE project_id=? AND candidate_id=? AND action_type='reject' ORDER BY requested_at DESC LIMIT 1`, projectID, t.candidateID).Scan(&prior)
-		if priorErr == nil {
+		if priorErr == nil && prior != "failed" {
 			item.Reason = "已有平台操作记录（" + prior + "），未重复点击"
 			result.Skipped++
 			result.Items = append(result.Items, item)
@@ -328,7 +335,9 @@ func (a *App) Run51JobTelescopeReject(batchID string) (TelescopeRejectResult, er
 		now := time.Now().Format("2006-01-02 15:04:05")
 		ledgerID := recruitmentID("pal")
 		_, err = db.Exec(`INSERT INTO platform_action_ledger(id,project_id,platform,platform_account,platform_job_id,candidate_id,record_id,candidate_name,action_type,confirmed_by,requested_at,receipt,status,error_message)
-			VALUES(?,?,?,?,?,?,?,?,?,'HR',?,'','executing','')`, ledgerID, projectID, "51job", account, jobID, t.candidateID, t.recordID, t.name, "reject", now)
+			VALUES(?,?,?,?,?,?,?,?,?,'自动筛选',?,'','executing','')
+			ON CONFLICT(project_id,candidate_id,record_id,action_type) DO UPDATE SET
+			requested_at=excluded.requested_at,status='executing',error_message='',receipt=''`, ledgerID, projectID, "51job", account, jobID, t.candidateID, t.recordID, t.name, "reject", now)
 		if err != nil {
 			item.Reason = "无法记录操作意图：" + err.Error()
 			result.Skipped++
@@ -341,16 +350,20 @@ func (a *App) Run51JobTelescopeReject(batchID string) (TelescopeRejectResult, er
 		out, runErr := cmd.Output()
 		cancel()
 		var receipt struct {
-			Status   string `json:"status"`
-			Verified bool   `json:"verified"`
-			Receipt  string `json:"receipt"`
-			Message  string `json:"message"`
+			Status       string `json:"status"`
+			Verified     bool   `json:"verified"`
+			Receipt      string `json:"receipt"`
+			Message      string `json:"message"`
+			AccountScope string `json:"accountScope"`
+			JobID        string `json:"jobId"`
+			CandidateID  string `json:"candidateId"`
 		}
 		parseErr := json.Unmarshal(out, &receipt)
-		if runErr == nil && parseErr == nil && receipt.Status == "ok" && receipt.Verified {
+		if runErr == nil && parseErr == nil && receipt.Status == "ok" && receipt.Verified &&
+			receipt.AccountScope == account && receipt.JobID == jobID && receipt.CandidateID == t.candidateID {
 			item.Status, item.Reason = "rejected", receipt.Receipt
 			result.Rejected++
-			_, _ = db.Exec(`UPDATE platform_action_ledger SET status='success',receipt=? WHERE id=?`, item.Reason, ledgerID)
+			_, _ = db.Exec(`UPDATE platform_action_ledger SET status='success',receipt=? WHERE project_id=? AND candidate_id=? AND record_id=? AND action_type='reject'`, item.Reason, projectID, t.candidateID, t.recordID)
 			_, _ = db.Exec(`UPDATE screening_candidate_results SET action_status='completed',action_receipt_at=?,action_error='' WHERE id=?`, now, t.id)
 		} else {
 			item.Status = "uncertain"
@@ -365,7 +378,7 @@ func (a *App) Run51JobTelescopeReject(batchID string) (TelescopeRejectResult, er
 				item.Reason = "平台回执无法核实"
 			}
 			result.Uncertain++
-			_, _ = db.Exec(`UPDATE platform_action_ledger SET status='uncertain',error_message=? WHERE id=?`, item.Reason, ledgerID)
+			_, _ = db.Exec(`UPDATE platform_action_ledger SET status='uncertain',error_message=? WHERE project_id=? AND candidate_id=? AND record_id=? AND action_type='reject'`, item.Reason, projectID, t.candidateID, t.recordID)
 			_, _ = db.Exec(`UPDATE screening_candidate_results SET action_status='receipt_pending',action_error=? WHERE id=?`, item.Reason, t.id)
 		}
 		result.Items = append(result.Items, item)

@@ -90,6 +90,53 @@ func TestDeleted51JobResumeCanBeImportedAgain(t *testing.T) {
 	}
 }
 
+func TestRepairMisfiledProjectCandidateUsesExactPlatformJobID(t *testing.T) {
+	app := NewApp()
+	app.dataDirOverride = t.TempDir()
+	defer app.closeRecruitmentDB()
+	ningbo := app.CreateProject("区域销售经理 宁波", "", 1, "", "", &JobConfig{Title: "区域销售经理", City: "宁波"})
+	chengdu := app.CreateProject("区域销售经理 成都", "", 1, "", "", &JobConfig{Title: "区域销售经理", City: "成都"})
+	if ningbo == nil || chengdu == nil {
+		t.Fatal("create projects")
+	}
+	const account = "co:1:hr:2"
+	if err := app.SetPlatformJobMapping("51job", account, "ningbo-id", ningbo.ID); err != nil {
+		t.Fatal(err)
+	}
+	foreign := ApplicationRecord{Platform: "51job", PlatformAccount: account, ApplicationID: "apply-chengdu", PlatformCandidateID: "candidate-chengdu", PlatformJobID: "chengdu-id", CandidateName: "成都候选人", ResumeText: "成都区域销售经历"}
+	correct := ApplicationRecord{Platform: "51job", PlatformAccount: account, ApplicationID: "apply-ningbo", PlatformCandidateID: "candidate-ningbo", PlatformJobID: "ningbo-id", CandidateName: "宁波候选人", ResumeText: "宁波区域销售经历"}
+	// Reproduce the legacy error: an association lives in Ningbo while its
+	// application row points to another project.
+	for _, record := range []ApplicationRecord{foreign, correct} {
+		if err := app.createApplicationResume(record, ningbo.ID); err != nil {
+			t.Fatal(err)
+		}
+	}
+	db, err := app.getRecruitmentDB()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, record := range []ApplicationRecord{foreign, correct} {
+		projectID := ningbo.ID
+		if record.PlatformJobID == "chengdu-id" {
+			projectID = chengdu.ID
+		}
+		_, err := db.Exec(`INSERT INTO applications(id,platform,platform_account,platform_application_id,platform_job_id,project_id,status,applied_at,raw_json,created_at) VALUES(?,?,?,?,?,?,?,?,?,?)`,
+			recruitmentID("application"), "51job", account, record.ApplicationID, record.PlatformJobID, projectID, "assigned", "", "{}", time.Now().UTC().Format(time.RFC3339Nano))
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	archived, err := repairMisfiled51JobProjectCandidates(db, account, "ningbo-id", ningbo.ID)
+	if err != nil || archived != 1 {
+		t.Fatalf("archived=%d err=%v", archived, err)
+	}
+	remaining := app.GetProjectResumes(ningbo.ID)
+	if len(remaining) != 1 || remaining[0].PlatformCandidateID != "candidate-ningbo" {
+		t.Fatalf("remaining=%+v", remaining)
+	}
+}
+
 func TestExclusive51JobBindingArchivesOtherJobResumes(t *testing.T) {
 	app := NewApp()
 	app.dataDirOverride = t.TempDir()

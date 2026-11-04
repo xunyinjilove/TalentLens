@@ -141,6 +141,10 @@ CREATE TABLE IF NOT EXISTS import_runs (
   duplicate_count INTEGER NOT NULL DEFAULT 0, unassigned_count INTEGER NOT NULL DEFAULT 0,
   failed_count INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL, updated_at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS attachment_sync_tasks (
+  project_id TEXT PRIMARY KEY REFERENCES projects(id),
+  task_json TEXT NOT NULL, updated_at TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS outreach_batches (
   id TEXT PRIMARY KEY, project_id TEXT NOT NULL REFERENCES projects(id),
   status TEXT NOT NULL, created_at TEXT NOT NULL, confirmed_at TEXT NOT NULL DEFAULT ''
@@ -184,6 +188,20 @@ CREATE TABLE IF NOT EXISTS interviews (
 );
 CREATE INDEX IF NOT EXISTS interviews_candidate_schedule
   ON interviews(project_candidate_id, status, starts_at);
+CREATE TABLE IF NOT EXISTS offer_cards (
+  project_candidate_id TEXT PRIMARY KEY REFERENCES project_candidates(id),
+  salary_package TEXT NOT NULL DEFAULT '', work_location TEXT NOT NULL DEFAULT '',
+  planned_start_date TEXT NOT NULL DEFAULT '', valid_until TEXT NOT NULL DEFAULT '',
+  note TEXT NOT NULL DEFAULT '', owner TEXT NOT NULL DEFAULT '',
+  status TEXT NOT NULL DEFAULT 'draft', created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS offer_history (
+  id TEXT PRIMARY KEY, project_candidate_id TEXT NOT NULL REFERENCES project_candidates(id),
+  action TEXT NOT NULL, snapshot_json TEXT NOT NULL, actor TEXT NOT NULL DEFAULT 'HR',
+  created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS offer_history_candidate_created
+  ON offer_history(project_candidate_id,created_at DESC);
 CREATE TABLE IF NOT EXISTS today_todos (
   id TEXT PRIMARY KEY, title TEXT NOT NULL,
   created_at TEXT NOT NULL, completed_at TEXT NOT NULL DEFAULT ''
@@ -363,6 +381,17 @@ func (a *App) getRecruitmentDB() (*sql.DB, error) {
 	}
 	if err == nil {
 		_, err = db.Exec(`UPDATE project_candidates SET stage='new' WHERE stage='pending_analysis'`)
+	}
+	if err == nil {
+		// Legacy display stages are migrated once; follow-up events remain untouched.
+		_, err = db.Exec(`UPDATE project_candidates SET stage='pending_contact',updated_at=? WHERE stage='communicating'`, time.Now().UTC().Format(time.RFC3339Nano))
+	}
+	if err == nil {
+		_, err = db.Exec(`UPDATE project_candidates SET stage='new',updated_at=? WHERE stage='on_hold'`, time.Now().UTC().Format(time.RFC3339Nano))
+	}
+	if err == nil {
+		// Rejected candidates are retained for audit but excluded from the formal pool.
+		_, err = db.Exec(`UPDATE project_candidates SET archived_at=updated_at WHERE stage='rejected' AND archived_at=''`)
 	}
 	if err != nil {
 		_ = db.Close()
@@ -749,11 +778,14 @@ func (a *App) deleteRecruitmentProject(projectID string) error {
 
 	queries := []string{
 		`DELETE FROM interviews WHERE project_candidate_id IN (SELECT id FROM project_candidates WHERE project_id = ?)`,
+		`DELETE FROM offer_history WHERE project_candidate_id IN (SELECT id FROM project_candidates WHERE project_id = ?)`,
+		`DELETE FROM offer_cards WHERE project_candidate_id IN (SELECT id FROM project_candidates WHERE project_id = ?)`,
 		`DELETE FROM follow_up_events WHERE project_candidate_id IN (SELECT id FROM project_candidates WHERE project_id = ?)`,
 		`DELETE FROM outreach_items WHERE project_candidate_id IN (SELECT id FROM project_candidates WHERE project_id = ?)`,
 		`DELETE FROM outreach_items WHERE batch_id IN (SELECT id FROM outreach_batches WHERE project_id = ?)`,
 		`DELETE FROM outreach_batches WHERE project_id = ?`,
 		`DELETE FROM candidate_ai_outreach_messages WHERE project_id = ?`,
+		`DELETE FROM attachment_sync_tasks WHERE project_id = ?`,
 		`DELETE FROM talent_management_filter_items WHERE project_id = ?`,
 		`DELETE FROM talent_management_filter_runs WHERE project_id = ?`,
 		`DELETE FROM analysis_jobs WHERE project_candidate_id IN (SELECT id FROM project_candidates WHERE project_id = ?)`,
@@ -788,11 +820,14 @@ func (a *App) clearRecruitmentProjectResumes(projectID string) error {
 
 	queries := []string{
 		`DELETE FROM interviews WHERE project_candidate_id IN (SELECT id FROM project_candidates WHERE project_id = ?)`,
+		`DELETE FROM offer_history WHERE project_candidate_id IN (SELECT id FROM project_candidates WHERE project_id = ?)`,
+		`DELETE FROM offer_cards WHERE project_candidate_id IN (SELECT id FROM project_candidates WHERE project_id = ?)`,
 		`DELETE FROM follow_up_events WHERE project_candidate_id IN (SELECT id FROM project_candidates WHERE project_id = ?)`,
 		`DELETE FROM outreach_items WHERE project_candidate_id IN (SELECT id FROM project_candidates WHERE project_id = ?)`,
 		`DELETE FROM outreach_items WHERE batch_id IN (SELECT id FROM outreach_batches WHERE project_id = ?)`,
 		`DELETE FROM outreach_batches WHERE project_id = ?`,
 		`DELETE FROM candidate_ai_outreach_messages WHERE project_id = ?`,
+		`DELETE FROM attachment_sync_tasks WHERE project_id = ?`,
 		`DELETE FROM talent_management_filter_items WHERE project_id = ?`,
 		`DELETE FROM talent_management_filter_runs WHERE project_id = ?`,
 		`DELETE FROM analysis_jobs WHERE project_candidate_id IN (SELECT id FROM project_candidates WHERE project_id = ?)`,

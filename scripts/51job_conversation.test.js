@@ -479,6 +479,12 @@ test('51job actions require an exact candidate detail URL and resume ID', () => 
   assert.equal(sameDisplayedName('余女士', '王小姐'), false);
 });
 
+test('existing 51job chat labeled 继续聊 is recognized for read-only attachment checks', () => {
+  const entry = { innerText: '继续聊', getClientRects: () => [1] };
+  const doc = { querySelectorAll: () => [entry] };
+  assert.equal(findCandidateChatEntry(doc), entry);
+});
+
 test('only an inbound resume attachment from 51job can be imported', () => {
   const messages = [
     { mine: false, links: [{ href: 'https://ehire.51job.com/files/old.pdf', text: 'old.pdf' }] },
@@ -566,4 +572,25 @@ test('reply inspection returns inbound text and attachment names without sending
   assert.equal(result.status,'reply');
   assert.deepEqual(result.replies,['方便下午沟通']);
   assert.deepEqual(result.attachmentNames,['resume.pdf']);
+});
+
+test('attachment card without a verified file stays pending and never fabricates a resume', async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), '51job-card-'));
+  try {
+    const { EventEmitter } = require('events');
+    const session = new EventEmitter();
+    session.send = async () => ({});
+    session.detach = async () => {};
+    const browser = new EventEmitter();
+    let calls = 0;
+    const page = new EventEmitter();
+    page.browser = () => browser;
+    page.createCDPSession = async () => session;
+    page.evaluate = async () => ++calls === 1
+      ? [{ mine: false, text: '附件简历', attachmentCard: true, links: [] }]
+      : false;
+    const result = await inspectReply(page, root, 'resume_card');
+    assert.equal(result.status, 'attachment_pending');
+    assert.equal(result.filePath, undefined);
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
 });

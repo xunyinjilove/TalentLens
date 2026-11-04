@@ -126,7 +126,7 @@ const pendingTodoCount = computed(() => recruitment.todayTodos.filter(item => !i
 const sortedProjects = computed(() => [...projects.projects].sort((a, b) => (b.created_at || '').localeCompare(a.created_at || '')))
 const activeColumns = [
   { key: 'new', label: '新简历', stages: ['new'] },
-  { key: 'screening', label: '筛选中', stages: ['pending_contact', 'communicating'] },
+  { key: 'screening', label: '筛选中', stages: ['pending_contact'] },
   { key: 'interview', label: '面试中', stages: ['first_interview', 'second_interview'] },
   { key: 'offer', label: 'Offer', stages: ['offer'] },
   { key: 'hired', label: '入职', stages: ['hired'] }
@@ -149,7 +149,7 @@ const funnel = computed(() => {
   const counts = recruitment.dashboard.stageCounts || {}
   const rows = [
     { label: '入库', count: Object.values(counts).reduce((a, b) => a + b, 0) },
-    { label: '沟通', count: (counts.communicating || 0) + (counts.first_interview || 0) + (counts.second_interview || 0) + (counts.offer || 0) + (counts.hired || 0) },
+    { label: '沟通', count: (counts.pending_contact || 0) + (counts.first_interview || 0) + (counts.second_interview || 0) + (counts.offer || 0) + (counts.hired || 0) },
     { label: '面试', count: (counts.first_interview || 0) + (counts.second_interview || 0) + (counts.offer || 0) + (counts.hired || 0) },
     { label: 'Offer', count: (counts.offer || 0) + (counts.hired || 0) },
     { label: '入职', count: counts.hired || 0 }

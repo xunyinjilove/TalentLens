@@ -99,6 +99,35 @@ async function reloadSkeletonPage(target) {
   finally { await session.detach().catch(() => {}); }
 }
 
+async function selectTelescopeJob(target, jobId) {
+  const current = await readTelescopePage(target);
+  if (current?.jobId === jobId) return current;
+  if (!current?.jobs?.some(job => job.jobId === jobId)) return current;
+  const page = await target.page();
+  const selected = await page.evaluate(id => {
+    const menu = [...document.querySelectorAll('*')].map(el => el.__vue__)
+      .find(vm => vm?.$options?.name === 'EhMenuPositionsRecommend');
+    const jobs = menu?.$props?.positionListsAll || [];
+    const index = jobs.findIndex(job => String(job.jobid) === id);
+    const cards = menu?.$el?.querySelectorAll('.menu-item');
+    if (index < 0 || !cards || cards.length !== jobs.length) return false;
+    const card = cards[index];
+    if (card.querySelector('[title]')?.title !== String(jobs[index].jobname || '')) return false;
+    const button = card.querySelector('.menu-item_content');
+    if (!button) return false;
+    button.click();
+    return true;
+  }, jobId);
+  if (!selected) throw new Error('无法从人才望远镜职位标签精确定位所选职位');
+  const deadline = Date.now() + 15000;
+  while (Date.now() < deadline) {
+    const state = await readTelescopePage(target).catch(() => null);
+    if (state?.jobId === jobId && state.listLoaded) return state;
+    await new Promise(resolve => setTimeout(resolve, 300));
+  }
+  throw new Error('已切换人才望远镜职位，但候选人列表未在 15 秒内就绪');
+}
+
 async function findTelescopeTargets(browser) {
   const matching = () => browser.targets().filter(target => target.type() === 'page' &&
     target.url().startsWith('https://ehire.51job.com/Revision/talent/search-recommend'));
@@ -191,6 +220,9 @@ async function scanTelescope(jobId, limit = 100) {
         }
         await new Promise(resolve => setTimeout(resolve, 400));
       }
+      if (state?.jobId !== jobId && state?.jobs?.some(job => job.jobId === jobId)) {
+        state = await selectTelescopeJob(target, jobId);
+      }
       if (!state?.jobId || !state.listLoaded) continue;
       visibleJobs.push(state.jobTitle ? `${state.jobTitle} (${state.jobId})` : state.jobId);
       if (state.jobId !== jobId) continue;
@@ -227,7 +259,10 @@ async function rejectTelescopeCandidate(jobId, candidateId, accountScope, reason
   try {
     const targets = await findTelescopeTargets(browser);
     for (const target of targets) {
-      const state = await readTelescopePage(target).catch(() => null);
+      let state = await readTelescopePage(target).catch(() => null);
+      if (state?.jobId !== jobId && state?.jobs?.some(job => job.jobId === jobId)) {
+        state = await selectTelescopeJob(target, jobId);
+      }
       if (!state || state.jobId !== jobId || state.accountScope !== accountScope) continue;
       if (!state.candidates.some(raw => String(raw.userid || '') === candidateId)) {
         throw new Error('目标人才已不在当前望远镜名单，未重复点击');
@@ -290,7 +325,7 @@ async function rejectTelescopeCandidate(jobId, candidateId, accountScope, reason
         if (after && after.jobId === jobId && after.accountScope === accountScope &&
             !after.candidates.some(raw => String(raw.userid || '') === candidateId)) { verified = true; break; }
       }
-      return { status: verified ? 'ok' : 'receipt_pending', verified, candidateId, jobId,
+      return { status: verified ? 'ok' : 'receipt_pending', verified, candidateId, jobId, accountScope,
         receipt: verified ? `平台已移除该人才（${outcome.selectedReason}）` : '已点击不感兴趣，但候选人仍在列表；仅核查回执，不重复点击' };
     }
     throw new Error('当前没有与所选账号及职位一致的望远镜页面');

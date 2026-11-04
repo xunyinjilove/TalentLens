@@ -37,7 +37,7 @@ import (
 )
 
 // 版本信息
-const AppVersion = "1.8.65"
+const AppVersion = "1.8.97"
 const analysisFormatRetryVersion = "model-json-repair-v1"
 const GitHubRepo = "xunyinjilove/TalentLens"
 
@@ -186,41 +186,50 @@ type WaterCheckResult struct {
 
 // Resume 简历结构
 type Resume struct {
-	ID                        string          `json:"id"`
-	ProjectID                 string          `json:"project_id"`
-	FileName                  string          `json:"file_name"`
-	FilePath                  string          `json:"file_path"`
-	FileType                  string          `json:"file_type"`
-	FileSize                  int64           `json:"file_size"`
-	Content                   string          `json:"content"`
-	RawProfileJSON            string          `json:"raw_profile_json,omitempty"`
-	URL                       string          `json:"url,omitempty"`
-	SourcePlatform            string          `json:"source_platform,omitempty"`
-	PlatformCandidateID       string          `json:"platform_candidate_id,omitempty"`
-	PlatformStatus            string          `json:"platform_status,omitempty"`
-	SnapshotCopyIDs           []string        `json:"snapshot_copy_ids,omitempty"`
-	Email                     string          `json:"email,omitempty"`
-	Status                    string          `json:"status"`
-	Score                     int             `json:"score"`
-	InitialScore              int             `json:"initial_score,omitempty"`
-	FinalScore                int             `json:"final_score,omitempty"`
-	HasAttachment             bool            `json:"has_attachment,omitempty"`
-	AttachmentPath            string          `json:"attachment_path,omitempty"`
-	AttachmentFileName        string          `json:"attachment_file_name,omitempty"`
-	AttachmentContent         string          `json:"attachment_content,omitempty"`
-	IsMergedAnalysis          bool            `json:"is_merged_analysis,omitempty"`
-	SourceKeyword             string          `json:"source_keyword,omitempty"`
-	ActivityLabel             string          `json:"activity_label,omitempty"` // 平台原始活跃标签；未披露时留空
-	ContactStatus             string          `json:"contact_status,omitempty"` // 51job: greeted | resume_requested | resume_received
-	ContactUpdatedAt          string          `json:"contact_updated_at,omitempty"`
-	ContactAttachmentBaseline []string        `json:"contact_attachment_baseline,omitempty"`
-	ErrorMessage              string          `json:"error_message,omitempty"`
-	AnalysisAutoRetryVersion  string          `json:"analysis_auto_retry_version,omitempty"`
-	Analysis                  *AnalysisResult `json:"analysis,omitempty"`
-	AnalysisCacheKey          string          `json:"analysis_cache_key,omitempty"`
-	AnalysisSuccessfulRounds  int             `json:"analysis_successful_rounds,omitempty"`
-	AnalysisRuleVersion       int             `json:"analysis_rule_version,omitempty"`
-	CreatedAt                 time.Time       `json:"created_at"`
+	ID                        string                    `json:"id"`
+	ProjectID                 string                    `json:"project_id"`
+	FileName                  string                    `json:"file_name"`
+	FilePath                  string                    `json:"file_path"`
+	FileType                  string                    `json:"file_type"`
+	FileSize                  int64                     `json:"file_size"`
+	Content                   string                    `json:"content"`
+	RawProfileJSON            string                    `json:"raw_profile_json,omitempty"`
+	URL                       string                    `json:"url,omitempty"`
+	SourcePlatform            string                    `json:"source_platform,omitempty"`
+	PlatformCandidateID       string                    `json:"platform_candidate_id,omitempty"`
+	PlatformStatus            string                    `json:"platform_status,omitempty"`
+	SnapshotCopyIDs           []string                  `json:"snapshot_copy_ids,omitempty"`
+	Email                     string                    `json:"email,omitempty"`
+	Status                    string                    `json:"status"`
+	Score                     int                       `json:"score"`
+	InitialScore              int                       `json:"initial_score,omitempty"`
+	FinalScore                int                       `json:"final_score,omitempty"`
+	HasAttachment             bool                      `json:"has_attachment,omitempty"`
+	AttachmentPath            string                    `json:"attachment_path,omitempty"`
+	AttachmentFileName        string                    `json:"attachment_file_name,omitempty"`
+	AttachmentContent         string                    `json:"attachment_content,omitempty"`
+	AttachmentPendingReason   string                    `json:"attachment_pending_reason,omitempty"`
+	AttachmentHistory         []ResumeAttachmentVersion `json:"attachment_history,omitempty"`
+	IsMergedAnalysis          bool                      `json:"is_merged_analysis,omitempty"`
+	SourceKeyword             string                    `json:"source_keyword,omitempty"`
+	ActivityLabel             string                    `json:"activity_label,omitempty"` // 平台原始活跃标签；未披露时留空
+	ContactStatus             string                    `json:"contact_status,omitempty"` // 51job: greeted | resume_requested | resume_received
+	ContactUpdatedAt          string                    `json:"contact_updated_at,omitempty"`
+	ContactAttachmentBaseline []string                  `json:"contact_attachment_baseline,omitempty"`
+	ErrorMessage              string                    `json:"error_message,omitempty"`
+	AnalysisAutoRetryVersion  string                    `json:"analysis_auto_retry_version,omitempty"`
+	Analysis                  *AnalysisResult           `json:"analysis,omitempty"`
+	AnalysisCacheKey          string                    `json:"analysis_cache_key,omitempty"`
+	AnalysisSuccessfulRounds  int                       `json:"analysis_successful_rounds,omitempty"`
+	AnalysisRuleVersion       int                       `json:"analysis_rule_version,omitempty"`
+	CreatedAt                 time.Time                 `json:"created_at"`
+}
+
+type ResumeAttachmentVersion struct {
+	Path       string `json:"path"`
+	FileName   string `json:"file_name"`
+	SHA256     string `json:"sha256"`
+	ReceivedAt string `json:"received_at"`
 }
 
 // JobSynonymItem 岗位同义词与拓扑维度词条
@@ -413,6 +422,9 @@ type App struct {
 	talentImportMu       sync.Mutex
 	talentImportCtx      context.Context
 	talentImportCancel   context.CancelFunc
+	attachmentSyncMu     sync.Mutex
+	attachmentSyncCancel map[string]context.CancelFunc
+	attachmentSyncProbe  func(context.Context, string) JobConversationResult // isolated tests; nil uses 51job
 	contactPending       map[string]pending51JobHiQuote
 	analysisMutex        sync.Mutex
 	activeAnalyses       map[string]bool
@@ -578,9 +590,13 @@ func (a *App) startup(ctx context.Context) {
 	if _, err := a.getRecruitmentDB(); err != nil {
 		log.Printf("[RecruitmentStore] SQLite 迁移未完成，保留旧数据入口: %v", err)
 	} else {
+		if err := a.repairAllMisfiled51JobProjectCandidates(); err != nil {
+			log.Printf("[RecruitmentStore] 修复错职简历关联失败: %v", err)
+		}
 		if err := a.interruptUnfinishedSourcingTasks(); err != nil {
 			log.Printf("[RecruitmentStore] 检索任务恢复状态失败: %v", err)
 		}
+		a.startProjectTelescopeScheduler()
 		// Legacy standalone pending-only screening was removed from the UI.
 		// Existing batch records remain readable, but must not restart on launch.
 	}
@@ -846,6 +862,9 @@ func (a *App) extractText(filePath string) string {
 			return ""
 		}
 		return a.truncateContent(string(data), 50000)
+	case ".doc":
+		// Legacy binary Word is not plain text. Never present binary bytes as a resume.
+		return ""
 	case ".pdf":
 		content := a.extractFromPDF(filePath)
 		if content != "" {
@@ -1278,11 +1297,43 @@ func (a *App) AttachResumeFile(resumeID string, attachmentPath string) (*Analysi
 	if err := json.Unmarshal(data, &resume); err != nil {
 		return nil, fmt.Errorf("档案解析失败")
 	}
+	attachmentBytes, err := os.ReadFile(attachmentPath)
+	if err != nil {
+		return nil, fmt.Errorf("附件文件无法读取：%w", err)
+	}
+	currentDigest := sha256.Sum256(attachmentBytes)
+	if resume.AttachmentPath != "" {
+		if oldBytes, oldErr := os.ReadFile(resume.AttachmentPath); oldErr == nil {
+			oldDigest := fmt.Sprintf("%x", sha256.Sum256(oldBytes))
+			if oldDigest == fmt.Sprintf("%x", currentDigest) {
+				return nil, nil
+			}
+			known := false
+			for _, version := range resume.AttachmentHistory {
+				if version.SHA256 == oldDigest {
+					known = true
+					break
+				}
+			}
+			if !known {
+				resume.AttachmentHistory = append(resume.AttachmentHistory, ResumeAttachmentVersion{
+					Path: resume.AttachmentPath, FileName: resume.AttachmentFileName,
+					SHA256: oldDigest, ReceivedAt: resume.CreatedAt.UTC().Format(time.RFC3339Nano),
+				})
+			}
+		}
+	}
 
 	// 提取附件文件文本
 	attachmentText := a.extractText(attachmentPath)
 	if strings.TrimSpace(attachmentText) == "" {
-		return nil, fmt.Errorf("未能从附件文件中提取到有效文本")
+		reason := "未能从附件文件中提取到有效文本，已保留原文件供重试"
+		if strings.EqualFold(filepath.Ext(attachmentPath), ".doc") {
+			reason = "旧版 .doc 附件已保存，当前无法可靠解析；请转换为 DOCX 或 PDF 后重试"
+		}
+		resume.AttachmentPendingReason = reason
+		a.saveResume(&resume)
+		return nil, fmt.Errorf("%s", reason)
 	}
 
 	// 保存初筛分数与附件状态
@@ -1293,6 +1344,16 @@ func (a *App) AttachResumeFile(resumeID string, attachmentPath string) (*Analysi
 	resume.AttachmentPath = attachmentPath
 	resume.AttachmentFileName = filepath.Base(attachmentPath)
 	resume.AttachmentContent = attachmentText
+	resume.AttachmentPendingReason = ""
+	for _, old := range resume.AttachmentHistory {
+		if old.SHA256 == fmt.Sprintf("%x", currentDigest) {
+			return nil, nil
+		}
+	}
+	resume.AttachmentHistory = append(resume.AttachmentHistory, ResumeAttachmentVersion{
+		Path: attachmentPath, FileName: filepath.Base(attachmentPath),
+		SHA256: fmt.Sprintf("%x", currentDigest), ReceivedAt: time.Now().UTC().Format(time.RFC3339Nano),
+	})
 	resume.IsMergedAnalysis = true
 	if resume.ContactStatus == "resume_requested" {
 		resume.ContactStatus = "resume_received"
@@ -1301,7 +1362,9 @@ func (a *App) AttachResumeFile(resumeID string, attachmentPath string) (*Analysi
 	resume.Status = "pending"
 	a.saveResume(&resume)
 
-	runtime.EventsEmit(a.ctx, "resume:updated", &resume)
+	if a.ctx != nil {
+		runtime.EventsEmit(a.ctx, "resume:updated", &resume)
+	}
 
 	// 获取关联项目的岗位配置
 	var jobCfg *JobConfig

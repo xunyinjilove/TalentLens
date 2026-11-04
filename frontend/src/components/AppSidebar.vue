@@ -40,6 +40,11 @@
         <span v-if="recruitmentStore.dashboard.upcomingInterviews > 0" class="nav-badge">{{ recruitmentStore.dashboard.upcomingInterviews }}</span>
       </router-link>
 
+      <router-link to="/offers" class="nav-item" :class="{ active: route.path === '/offers' }">
+        <el-icon class="nav-icon"><Document /></el-icon>
+        <span class="nav-label">Offer 管理</span>
+      </router-link>
+
       <div class="nav-group-title">智能助手</div>
 
       <div
