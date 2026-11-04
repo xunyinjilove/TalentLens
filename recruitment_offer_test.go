@@ -159,3 +159,62 @@ func TestLegacyRecruitmentStagesMigrateWithoutDroppingHistory(t *testing.T) {
 		t.Fatalf("unexpected migrated stages: %v", stages)
 	}
 }
+
+func TestInterviewRescheduleReplacesOriginalAndDeleteRemovesRecord(t *testing.T) {
+	app := NewApp()
+	app.dataDirOverride = t.TempDir()
+	defer app.closeRecruitmentDB()
+	project := app.CreateProject("测试岗位", "", 1, "", "", nil)
+	resume := &Resume{ID: "reschedule_resume", ProjectID: project.ID, FileName: "测试简历.txt", Content: "synthetic", CreatedAt: time.Now()}
+	if err := app.persistSearchCandidate(resume); err != nil {
+		t.Fatal(err)
+	}
+	people, err := app.ListTalentCandidates(project.ID)
+	if err != nil || len(people) != 1 {
+		t.Fatalf("candidates=%d err=%v", len(people), err)
+	}
+	pcID := people[0].ProjectCandidateID
+
+	day1 := time.Date(2026, 11, 4, 2, 0, 0, 0, time.UTC)
+	firstID, err := app.SaveRecruitmentInterview(RecruitmentInterview{
+		ProjectCandidateID: pcID,
+		StartsAt:           day1.Format(time.RFC3339),
+		EndsAt:             day1.Add(time.Hour).Format(time.RFC3339),
+		Interviewer:        "kk",
+		Method:             "腾讯会议自动生成",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Re-booking / rescheduling to a new day without passing ID should update in place and preserve interviewer/method.
+	day2 := time.Date(2026, 11, 8, 2, 0, 0, 0, time.UTC)
+	secondID, err := app.SaveRecruitmentInterview(RecruitmentInterview{
+		ProjectCandidateID: pcID,
+		StartsAt:           day2.Format(time.RFC3339),
+		EndsAt:             day2.Add(time.Hour).Format(time.RFC3339),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if secondID != firstID {
+		t.Fatalf("expected reschedule to reuse interview ID %s, got %s", firstID, secondID)
+	}
+
+	list, err := app.ListRecruitmentInterviews(project.ID)
+	if err != nil || len(list) != 1 {
+		t.Fatalf("expected 1 interview after reschedule, got %d (err=%v)", len(list), err)
+	}
+	if list[0].StartsAt != day2.Format(time.RFC3339) || list[0].Interviewer != "kk" || list[0].Method != "腾讯会议自动生成" {
+		t.Fatalf("rescheduled interview lost original fields: %+v", list[0])
+	}
+
+	// Deleting the interview should remove it completely.
+	if err := app.DeleteRecruitmentInterview(firstID); err != nil {
+		t.Fatalf("DeleteRecruitmentInterview failed: %v", err)
+	}
+	list, err = app.ListRecruitmentInterviews(project.ID)
+	if err != nil || len(list) != 0 {
+		t.Fatalf("expected 0 interviews after delete, got %d (err=%v)", len(list), err)
+	}
+}

@@ -684,11 +684,92 @@ func (a *App) ListFollowUpEvents(projectCandidateID string) ([]FollowUpRecord, e
 	return result, rows.Err()
 }
 
+func (a *App) reconcileDuplicateScheduledInterviews(db *sql.DB) {
+	rows, err := db.Query(`SELECT project_candidate_id FROM interviews WHERE status='scheduled' GROUP BY project_candidate_id HAVING COUNT(*)>1`)
+	if err != nil {
+		return
+	}
+	var candidateIDs []string
+	for rows.Next() {
+		var pcID string
+		if err := rows.Scan(&pcID); err == nil && pcID != "" {
+			candidateIDs = append(candidateIDs, pcID)
+		}
+	}
+	rows.Close()
+
+	for _, pcID := range candidateIDs {
+		a.consolidateCandidateScheduledInterviews(db, pcID, "")
+	}
+}
+
+func (a *App) consolidateCandidateScheduledInterviews(db *sql.DB, projectCandidateID, preferredKeepID string) {
+	type schedRow struct {
+		id, interviewer, method, location, note string
+	}
+	rows, err := db.Query(`SELECT id, interviewer, method, location, note FROM interviews
+		WHERE project_candidate_id=? AND status='scheduled'
+		ORDER BY CASE WHEN id=? THEN 0 ELSE 1 END, updated_at DESC, created_at DESC, id DESC`,
+		projectCandidateID, preferredKeepID)
+	if err != nil {
+		return
+	}
+	var list []schedRow
+	for rows.Next() {
+		var r schedRow
+		if err := rows.Scan(&r.id, &r.interviewer, &r.method, &r.location, &r.note); err == nil {
+			list = append(list, r)
+		}
+	}
+	rows.Close()
+	if len(list) <= 1 {
+		return
+	}
+
+	keep := list[0]
+	var keepMeetingID string
+	_ = db.QueryRow(`SELECT COALESCE(meeting_id,'') FROM interview_meetings WHERE interview_id=?`, keep.id).Scan(&keepMeetingID)
+
+	for _, old := range list[1:] {
+		if strings.TrimSpace(keep.interviewer) == "" && strings.TrimSpace(old.interviewer) != "" {
+			keep.interviewer = old.interviewer
+		}
+		if strings.TrimSpace(keep.method) == "" && strings.TrimSpace(old.method) != "" {
+			keep.method = old.method
+		}
+		if strings.TrimSpace(keep.location) == "" && strings.TrimSpace(old.location) != "" {
+			keep.location = old.location
+		}
+		if strings.TrimSpace(keep.note) == "" && strings.TrimSpace(old.note) != "" {
+			keep.note = old.note
+		}
+
+		var oldMeetingExists int
+		var oldMeetingID string
+		_ = db.QueryRow(`SELECT COUNT(*), COALESCE(MAX(meeting_id),'') FROM interview_meetings WHERE interview_id=?`, old.id).Scan(&oldMeetingExists, &oldMeetingID)
+		if oldMeetingExists > 0 {
+			if keepMeetingID == "" && oldMeetingID != "" {
+				_, _ = db.Exec(`DELETE FROM interview_meetings WHERE interview_id=?`, keep.id)
+				_, _ = db.Exec(`UPDATE interview_meetings SET interview_id=? WHERE interview_id=?`, keep.id, old.id)
+				keepMeetingID = oldMeetingID
+			} else {
+				_ = a.cancelInterviewMeeting(db, old.id)
+				_, _ = db.Exec(`DELETE FROM interview_meetings WHERE interview_id=?`, old.id)
+			}
+		}
+		_, _ = db.Exec(`DELETE FROM interviews WHERE id=?`, old.id)
+	}
+
+	_, _ = db.Exec(`UPDATE interviews SET interviewer=?, method=?, location=?, note=? WHERE id=?`,
+		keep.interviewer, keep.method, keep.location, keep.note, keep.id)
+}
+
 func (a *App) ListRecruitmentInterviews(projectID string) ([]RecruitmentInterview, error) {
 	db, err := a.getRecruitmentDB()
 	if err != nil {
 		return nil, err
 	}
+	a.reconcileDuplicateScheduledInterviews(db)
 	rows, err := db.Query(`SELECT i.id,i.project_candidate_id,c.display_name,p.name,i.starts_at,
 		i.ends_at,i.interviewer,i.method,i.location,i.note,i.status,
 		COALESCE(m.subject,''),COALESCE(m.meeting_id,''),COALESCE(m.meeting_code,''),
@@ -734,15 +815,37 @@ func (a *App) SaveRecruitmentInterview(item RecruitmentInterview) (string, error
 	if err != nil {
 		return "", err
 	}
+	if item.Status == "" {
+		item.Status = "scheduled"
+	}
+	if item.Status != "scheduled" && item.Status != "cancelled" && item.Status != "completed" {
+		return "", fmt.Errorf("面试状态无效")
+	}
 	if item.ID == "" {
-		// Reuse a saved schedule when an invite is retried after a later step failed.
-		err := db.QueryRow(`SELECT id FROM interviews WHERE project_candidate_id=? AND starts_at=? AND status='scheduled' ORDER BY created_at DESC LIMIT 1`,
-			item.ProjectCandidateID, item.StartsAt).Scan(&item.ID)
+		// Reuse the candidate's active scheduled interview so rescheduling/re-booking updates in place instead of leaving stale schedules.
+		var oldInterviewer, oldMethod, oldLocation, oldNote string
+		err := db.QueryRow(`SELECT id, interviewer, method, location, note FROM interviews
+			WHERE project_candidate_id=? AND status='scheduled'
+			ORDER BY updated_at DESC, created_at DESC LIMIT 1`,
+			item.ProjectCandidateID).Scan(&item.ID, &oldInterviewer, &oldMethod, &oldLocation, &oldNote)
 		if err != nil && err != sql.ErrNoRows {
 			return "", err
 		}
 		if err == sql.ErrNoRows {
 			item.ID = recruitmentID("interview")
+		} else {
+			if strings.TrimSpace(item.Interviewer) == "" {
+				item.Interviewer = oldInterviewer
+			}
+			if strings.TrimSpace(item.Method) == "" {
+				item.Method = oldMethod
+			}
+			if strings.TrimSpace(item.Location) == "" {
+				item.Location = oldLocation
+			}
+			if strings.TrimSpace(item.Note) == "" {
+				item.Note = oldNote
+			}
 		}
 	} else {
 		var ownerLink string
@@ -753,12 +856,6 @@ func (a *App) SaveRecruitmentInterview(item RecruitmentInterview) (string, error
 		if err == nil && ownerLink != item.ProjectCandidateID {
 			return "", fmt.Errorf("面试不能改挂到另一位候选人")
 		}
-	}
-	if item.Status == "" {
-		item.Status = "scheduled"
-	}
-	if item.Status != "scheduled" && item.Status != "cancelled" && item.Status != "completed" {
-		return "", fmt.Errorf("面试状态无效")
 	}
 	now := time.Now().UTC().Format(time.RFC3339Nano)
 	_, err = db.Exec(`INSERT INTO interviews
@@ -771,6 +868,11 @@ func (a *App) SaveRecruitmentInterview(item RecruitmentInterview) (string, error
 		item.Method, item.Location, item.Note, item.Status, now, now)
 	if err != nil {
 		return item.ID, err
+	}
+	if item.Status == "scheduled" {
+		a.consolidateCandidateScheduledInterviews(db, item.ProjectCandidateID, item.ID)
+		_ = db.QueryRow(`SELECT interviewer, method, location, note FROM interviews WHERE id=?`, item.ID).
+			Scan(&item.Interviewer, &item.Method, &item.Location, &item.Note)
 	}
 	if syncErr := a.syncInterviewMeeting(db, item); syncErr != nil {
 		return item.ID, syncErr
@@ -795,6 +897,32 @@ func (a *App) CancelRecruitmentInterview(id string) error {
 		return sql.ErrNoRows
 	}
 	return a.cancelInterviewMeeting(db, id)
+}
+
+func (a *App) DeleteRecruitmentInterview(id string) error {
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return fmt.Errorf("缺少面试记录 ID")
+	}
+	db, err := a.getRecruitmentDB()
+	if err != nil {
+		return err
+	}
+	// Best-effort cancel remote Tencent Meeting if present; never block local deletion.
+	_ = a.cancelInterviewMeeting(db, id)
+	_, _ = db.Exec("DELETE FROM interview_meetings WHERE interview_id=?", id)
+	result, err := db.Exec("DELETE FROM interviews WHERE id=?", id)
+	if err != nil {
+		return err
+	}
+	count, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if count == 0 {
+		return sql.ErrNoRows
+	}
+	return nil
 }
 
 // JobStats 职位统计数据（投递与合适候选人计数）

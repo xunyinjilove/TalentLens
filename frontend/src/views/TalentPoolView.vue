@@ -1309,11 +1309,17 @@ const inviteTimeRangeInvalid = computed(() => {
   return !Number.isNaN(s) && !Number.isNaN(e) && e <= s
 })
 
+const inviteExistingInterview = computed(() => {
+  const pcId = inviteCandidate.value?.projectCandidateId
+  if (!pcId) return undefined
+  return recruitment.interviews.find(i => i.projectCandidateId === pcId && i.status === 'scheduled')
+})
+
 const inviteConflicts = computed(() => {
   if (!interviewForm.startsAt || !interviewForm.endsAt || inviteTimeRangeInvalid.value) return []
   return detectInterviewConflicts(
     {
-      id: '',
+      id: inviteExistingInterview.value?.id || '',
       projectCandidateId: inviteCandidate.value?.projectCandidateId || '',
       candidateName: inviteCandidate.value?.name || '',
       interviewer: interviewForm.interviewer,
@@ -1419,9 +1425,9 @@ async function submitInterviewInvite() {
   let scheduleSaved = false
   try {
     const candidate = inviteCandidate.value
-    // 1. 保存面试日程
+    // 1. 保存面试日程（若该候选人已有已安排面试则直接原位更新改期，避免残留旧日程）
     await recruitment.saveInterview({
-      id: '',
+      id: inviteExistingInterview.value?.id || '',
       projectCandidateId: candidate.projectCandidateId,
       candidateName: candidate.name,
       projectName: candidate.jobTitle || candidate.projectName,
