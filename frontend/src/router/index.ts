@@ -33,12 +33,6 @@ const routes = [
     meta: { title: '面试安排' }
   },
   {
-    path: '/offers',
-    name: 'OfferManagement',
-    component: () => import('../views/OfferManagementView.vue'),
-    meta: { title: 'Offer 管理' }
-  },
-  {
     path: '/pipeline',
     name: 'RecruitmentPipeline',
     component: () => import('../views/RecruitmentPipelineView.vue'),
