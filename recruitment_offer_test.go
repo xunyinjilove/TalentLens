@@ -5,7 +5,7 @@ import (
 	"time"
 )
 
-func TestOfferStatusControlsHiredStage(t *testing.T) {
+func TestDirectHiredStageWithoutOfferGate(t *testing.T) {
 	app := NewApp()
 	app.dataDirOverride = t.TempDir()
 	defer app.closeRecruitmentDB()
@@ -19,28 +19,16 @@ func TestOfferStatusControlsHiredStage(t *testing.T) {
 		t.Fatalf("candidates=%d err=%v", len(people), err)
 	}
 	id := people[0].ProjectCandidateID
-	if err := app.UpdateCandidateFollowUp(id, "offer", "HR", "", "", "HR"); err != nil {
+	if err := app.UpdateCandidateFollowUp(id, "offer", "HR", "", "发放 Offer", "HR"); err != nil {
 		t.Fatal(err)
 	}
-	card := OfferCard{ProjectCandidateID: id, SalaryPackage: "月薪 20K", WorkLocation: "上海", PlannedStartDate: "2026-12-01", ValidUntil: "2026-11-20", Owner: "HR"}
-	if err := app.SaveOfferCard(card, "HR"); err != nil {
-		t.Fatal(err)
+	// After removing Offer Management gate, candidate can directly enter hired stage.
+	if err := app.UpdateCandidateFollowUp(id, "hired", "HR", "", "确认入职", "HR"); err != nil {
+		t.Fatalf("expected direct transition to hired without offer gate, got err=%v", err)
 	}
-	if err := app.UpdateCandidateFollowUp(id, "hired", "HR", "", "", "HR"); err == nil {
-		t.Fatal("draft offer allowed hiring")
-	}
-	if err := app.SetOfferStatus(id, "confirmed", "HR"); err != nil {
-		t.Fatal(err)
-	}
-	if err := app.SetOfferStatus(id, "accepted", "HR"); err != nil {
-		t.Fatal(err)
-	}
-	if err := app.UpdateCandidateFollowUp(id, "hired", "HR", "", "", "HR"); err != nil {
-		t.Fatal(err)
-	}
-	history, err := app.ListOfferHistory(id)
-	if err != nil || len(history) != 3 {
-		t.Fatalf("history=%d err=%v", len(history), err)
+	people, err = app.ListTalentCandidates(project.ID)
+	if err != nil || len(people) != 1 || people[0].Stage != "hired" || people[0].HiredAt == "" {
+		t.Fatalf("expected hired stage and hiredAt timestamp, got %+v err=%v", people, err)
 	}
 }
 

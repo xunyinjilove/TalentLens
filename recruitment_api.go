@@ -567,11 +567,6 @@ func (a *App) UpdateCandidateFollowUp(projectCandidateID, stage, owner, nextActi
 	if err := tx.QueryRow("SELECT stage FROM project_candidates WHERE id=?", projectCandidateID).Scan(&oldStage); err != nil {
 		return err
 	}
-	if stage == "hired" && oldStage != "hired" {
-		if err := ensureAcceptedOffer(tx, projectCandidateID); err != nil {
-			return err
-		}
-	}
 	now := time.Now().UTC().Format(time.RFC3339Nano)
 	if _, err := tx.Exec(`UPDATE project_candidates SET stage=?,owner=?,next_action_at=?,updated_at=? WHERE id=?`,
 		stage, strings.TrimSpace(owner), nextActionAt, now, projectCandidateID); err != nil {
@@ -616,11 +611,6 @@ func (a *App) BatchUpdateCandidateStage(projectCandidateIDs []string, stage, not
 		}
 		var oldStage string
 		_ = tx.QueryRow("SELECT stage FROM project_candidates WHERE id=?", id).Scan(&oldStage)
-		if stage == "hired" && oldStage != "hired" {
-			if err := ensureAcceptedOffer(tx, id); err != nil {
-				return err
-			}
-		}
 
 		if _, err := tx.Exec(`UPDATE project_candidates SET stage=?,updated_at=? WHERE id=?`, stage, now, id); err != nil {
 			return err
