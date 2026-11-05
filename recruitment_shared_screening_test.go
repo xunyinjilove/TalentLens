@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"testing"
+	"time"
 )
 
 func TestTelescopeActivityLabels(t *testing.T) {
@@ -201,7 +202,8 @@ func TestEvaluateCandidateTriState_OrderIndependence(t *testing.T) {
 	}
 
 	// Case 3: 全部满足
-	resume3 := `{"degree": "硕士", "workyear": "5年", "active_time": "2026-10-27 10:00:00"}`
+	resume3 := `{"degree": "硕士", "workyear": "5年", "active_time": "` +
+		time.Now().Add(-24*time.Hour).Format("2006-01-02 15:04:05") + `"}`
 	verdict3, _ := EvaluateCandidateTriState(resume3, criteria)
 	if verdict3 != "qualified" {
 		t.Fatalf("全部满足应判定为 qualified，实际为: %s", verdict3)

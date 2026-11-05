@@ -1,7 +1,7 @@
 /** Read the currently opened 51job Talent Telescope page without changing it. */
 const puppeteer = require('puppeteer-core');
 
-function normalizeTelescopeCandidate(raw, jobId) {
+function normalizeTelescopeCandidate(raw, jobId, platformBucket = '') {
   const candidateId = String(raw?.userid || '').trim();
   // Telescope has no cvlogid; userid is its stable candidate identity.
   const recordId = candidateId;
@@ -11,6 +11,7 @@ function normalizeTelescopeCandidate(raw, jobId) {
     candidateId,
     recordId,
     jobId,
+    platformBucket,
     name,
     resumeText: JSON.stringify(raw),
     activityLabel: String(raw?.active_type || '').trim(),
@@ -73,8 +74,38 @@ function telescopeSnapshot() {
     accountScope: (coid && hruid) ? `co:${coid}:hr:${hruid}` : '',
     jobs,
     listLoaded: Boolean(list),
+    matchIds: groups.flatMap(group => (group.matchList || []).map(item => String(item.userid || ''))),
+    notMatchIds: groups.flatMap(group => (group.notMatchList || []).map(item => String(item.userid || ''))),
     candidates: groups.flatMap(group => group.dataList || []).map(item => JSON.parse(JSON.stringify(item)))
   };
+}
+
+function telescopeActionSnapshot(candidateId) {
+  if (location.pathname !== '/Revision/talent/search-recommend') return null;
+  const components = [...document.querySelectorAll('*')].map(el => el.__vue__).filter(Boolean);
+  const recommend = components.find(vm => vm.$options?.name === 'TalentRecommend');
+  const list = components.find(vm => vm.$options?.name === 'EhFossicksList');
+  if (!recommend || !list) return null;
+  const job = recommend.$data?.activeJobInfo || {};
+  const groups = list.$props?.list || list.$data?.list || [];
+  const match = groups.flatMap(group => group.matchList || []).find(item => String(item.userid || '') === candidateId);
+  const notMatch = groups.flatMap(group => group.notMatchList || []).find(item => String(item.userid || '') === candidateId);
+  const coid = String(job.coid || groups[0]?.coid || list.$props?.jobParams?.coid || '').trim();
+  const hruid = String(recommend.$data?.hruId || '').trim();
+  return { jobId: String(job.jobid || '').trim(), accountScope: coid && hruid ? `co:${coid}:hr:${hruid}` : '',
+    inMatch: Boolean(match), inNotMatch: Boolean(notMatch), disliked: String((match || notMatch)?.isDislikedInFossicks || '') === '1' };
+}
+
+async function readTelescopeActionState(target, candidateId) {
+  const session = await target.createCDPSession();
+  try {
+    const response = await session.send('Runtime.evaluate', {
+      expression: `JSON.stringify((${telescopeActionSnapshot.toString()})(${JSON.stringify(candidateId)}))`,
+      returnByValue: true
+    });
+    if (response.exceptionDetails) throw new Error('人才望远镜操作状态读取失败');
+    return JSON.parse(response.result?.value || 'null');
+  } finally { await session.detach().catch(() => {}); }
 }
 
 async function readTelescopePage(target) {
@@ -228,9 +259,13 @@ async function scanTelescope(jobId, limit = 100) {
       if (state.jobId !== jobId) continue;
       if (!state.companyId) throw new Error('人才望远镜未返回可核验的企业 ID');
       const seen = new Set();
+      const matchIds = new Set(state.matchIds || []);
+      const notMatchIds = new Set(state.notMatchIds || []);
       const candidates = [];
       for (const [index, raw] of state.candidates.entries()) {
-        const candidate = normalizeTelescopeCandidate(raw, jobId);
+        const id = String(raw.userid || '');
+        const bucket = matchIds.has(id) ? 'match' : notMatchIds.has(id) ? 'not_match' : 'unknown';
+        const candidate = normalizeTelescopeCandidate(raw, jobId, bucket);
         if (!candidate) throw new Error(`人才望远镜第 ${index + 1} 条候选人缺少稳定的用户 ID，已停止扫描`);
         const key = `${candidate.candidateId}:${candidate.recordId}`;
         if (seen.has(key)) continue;
@@ -356,7 +391,8 @@ function validateTelescopeDetailURL(rawURL, baseURL, jobId, candidateId) {
 
 async function rejectTelescopeCandidate(jobId, candidateId, accountScope, reasonLabel) {
   if (!jobId || !candidateId || !accountScope) throw new Error('缺少可核对的职位、人才或账号 ID');
-  const browser = await puppeteer.connect({ browserURL: 'http://127.0.0.1:9503', defaultViewport: null, protocolTimeout: 10000 });
+  const browser = await puppeteer.connect({ browserURL: 'http://127.0.0.1:9503', defaultViewport: null, protocolTimeout: 30000 });
+  let focusSession = null;
   try {
     const targets = await findTelescopeTargets(browser);
     for (const target of targets) {
@@ -368,69 +404,100 @@ async function rejectTelescopeCandidate(jobId, candidateId, accountScope, reason
       if (!state.candidates.some(raw => String(raw.userid || '') === candidateId)) {
         throw new Error('目标人才已不在当前望远镜名单，未重复点击');
       }
+      const before = await readTelescopeActionState(target, candidateId);
+      if (!before || before.jobId !== jobId || before.accountScope !== accountScope) {
+        throw new Error('平台账号或职位状态已变化，未点击');
+      }
+      if (before.inNotMatch && !before.inMatch) {
+        return { status: 'already_excluded', verified: false, candidateId, jobId, accountScope,
+          receipt: '平台已在未匹配分组，没有可点击的不感兴趣按钮' };
+      }
+      if (!before.inMatch) throw new Error('目标人才不在平台推荐分组，未点击');
       const page = await target.page();
-      const outcome = await page.evaluate(async ({ candidateId, reasonLabel }) => {
-        const visible = el => !!el && el.getClientRects().length > 0;
-        const components = [...document.querySelectorAll('*')].map(el => el.__vue__).filter(Boolean);
-        const list = components.find(vm => vm.$options?.name === 'EhFossicksList');
-        const hiddenMismatch = (list?.$props?.list || []).some(group =>
-          (group.notMatchList || []).some(raw => String(raw.userid || '') === candidateId) && group.notMatchListCollapse);
-        if (hiddenMismatch) {
-          const toggles = [...list.$el.querySelectorAll('.not-match .collapse-btn')]
-            .filter(el => visible(el) && /展开/.test(el.innerText || ''));
-          if (toggles.length !== 1) throw new Error('无法展开平台未推荐人才列表，未点击平台');
-          toggles[0].click();
-          await new Promise(resolve => setTimeout(resolve, 250));
+      // The dedicated browser stays behind the desktop app. Focus emulation
+      // lets 51job finish its reason-popover animation and requests without
+      // bringing the browser window to the foreground.
+      focusSession = await target.createCDPSession();
+      await focusSession.send('Emulation.setFocusEmulationEnabled', { enabled: true });
+      let outcome = null;
+      let actionError = '';
+      try {
+        // Chromium throttles setTimeout inside a long-hidden tab. Keep every
+        // page evaluation synchronous and wait in Node between UI steps.
+        await page.evaluate(() => {
+          if ([...document.querySelectorAll('.no_interested_popover_resume')].some(el => el.getClientRects().length > 0)) {
+            document.body.click();
+          }
+        });
+        await new Promise(resolve => setTimeout(resolve, 150));
+        await page.evaluate(id => {
+          const visible = el => !!el && el.getClientRects().length > 0;
+          const cards = [...document.querySelectorAll('*')].map(el => el.__vue__).filter(vm => vm?.$options?.name === 'EhFossicksResumeCard' &&
+            String(vm.$props?.source?.userid || '') === id && visible(vm.$el));
+          const button = document.getElementById(`no_interested_${id}`);
+          if (cards.length !== 1 || !visible(button) || !cards[0].$el.contains(button) || !button.classList.contains('no_interested_div')) {
+            throw new Error('无法核对该人才的不感兴趣按钮，未点击平台');
+          }
+          button.click();
+        }, candidateId);
+        for (let i = 0; i < 15 && !outcome; i++) {
+          await new Promise(resolve => setTimeout(resolve, 200));
+          outcome = await page.evaluate(label => {
+            const dialog = [...document.querySelectorAll('.no_interested_popover_resume')]
+              .find(el => el.getClientRects().length > 0 && /选择不感兴趣原因/.test(el.innerText || ''));
+            if (!dialog) return null;
+            const options = [...dialog.querySelectorAll('.reason_content')].filter(el => el.getClientRects().length > 0);
+            const option = options.find(el => (el.textContent || '').trim() === label) ||
+              options.find(el => (el.textContent || '').trim() === '其他原因');
+            if (!option) throw new Error('平台未显示可选原因，未点击原因');
+            const other = (option.textContent || '').trim() === '其他原因';
+            option.click();
+            return { selectedReason: other ? '其他原因：不匹配' : label, needsSubmit: other };
+          }, reasonLabel);
         }
-        const cards = [...document.querySelectorAll('*')].map(el => el.__vue__).filter(vm => vm?.$options?.name === 'EhFossicksResumeCard' &&
-          String(vm.$props?.source?.userid || '') === candidateId && visible(vm.$el));
-        if (cards.length !== 1) {
-          throw new Error('无法唯一定位该人才的望远镜卡片，未点击平台');
+        if (!outcome) throw new Error('平台未显示不感兴趣原因，未点击原因');
+        if (outcome.needsSubmit) {
+          let ready = false;
+          for (let i = 0; i < 10 && !ready; i++) {
+            await new Promise(resolve => setTimeout(resolve, 150));
+            ready = await page.evaluate(() => {
+              const dialog = [...document.querySelectorAll('.no_interested_popover_resume')]
+                .find(el => el.getClientRects().length > 0);
+              const input = dialog?.querySelector('textarea');
+              const submit = [...(dialog?.querySelectorAll('button.input_btn') || [])]
+                .filter(el => el.getClientRects().length > 0 && /提交/.test(el.innerText || ''));
+              if (!input || submit.length !== 1) return false;
+              const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')?.set;
+              if (!setter) throw new Error('无法填写其他原因，未提交平台');
+              setter.call(input, '不匹配');
+              input.dispatchEvent(new Event('input', { bubbles: true }));
+              if (input.value !== '不匹配') throw new Error('其他原因输入未生效，未提交平台');
+              submit[0].click();
+              return true;
+            });
+          }
+          if (!ready) throw new Error('其他原因输入框或提交按钮未就绪，未提交平台');
         }
-        const button = document.getElementById(`no_interested_${candidateId}`);
-        if (!visible(button) || !cards[0].$el.contains(button) || !button.classList.contains('no_interested_div')) {
-          throw new Error('无法核对该人才的不感兴趣按钮，未点击平台');
-        }
-        button.click();
-        await new Promise(resolve => setTimeout(resolve, 500));
-        const dialogs = [...document.querySelectorAll('.el-popover,.el-dialog,[role="dialog"]')]
-          .filter(el => visible(el) && /选择不感兴趣原因|其他原因/.test(el.innerText || ''));
-        if (!dialogs.length) throw new Error('平台未显示不感兴趣原因，回执待核查');
-        const dialog = dialogs[dialogs.length - 1];
-        const options = [...dialog.querySelectorAll('button,li,[role="button"],span,div')]
-          .filter(el => visible(el) && el.children.length === 0);
-        let option = options.find(el => (el.textContent || '').trim() === reasonLabel);
-        if (!option) option = options.find(el => (el.textContent || '').trim() === '其他原因');
-        if (!option) throw new Error('平台未显示可选原因，回执待核查');
-        const other = /其他原因/.test(option.textContent || '');
-        (option.closest('button,li,[role="button"]') || option).click();
-        await new Promise(resolve => setTimeout(resolve, 350));
-        if (other) {
-          const input = [...document.querySelectorAll('textarea,input[type="text"]')].find(el => visible(el) && !el.disabled &&
-            /原因|说明|补充|其他/.test(el.placeholder || el.closest('.el-dialog,.el-popover')?.innerText || ''));
-          if (!input) throw new Error('已选其他原因，但没有说明输入框，回执待核查');
-          const setter = Object.getOwnPropertyDescriptor(input.tagName === 'TEXTAREA' ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype, 'value')?.set;
-          if (!setter) throw new Error('无法填写其他原因，回执待核查');
-          setter.call(input, '不匹配');
-          input.dispatchEvent(new Event('input', { bubbles: true }));
-        }
-        const submit = [...document.querySelectorAll('.el-dialog__footer button,.el-popover button')]
-          .filter(el => visible(el) && /确定|确认|提交/.test(el.innerText || ''));
-        if (submit.length === 1) submit[0].click();
-        return { selectedReason: other ? '其他原因：不匹配' : reasonLabel };
-      }, { candidateId, reasonLabel });
+      } catch (error) { actionError = error.message; }
       let verified = false;
-      for (let i = 0; i < 8; i++) {
+      for (let i = 0; i < 12; i++) {
         await new Promise(resolve => setTimeout(resolve, 400));
-        const after = await readTelescopePage(target).catch(() => null);
+        const after = await readTelescopeActionState(target, candidateId).catch(() => null);
         if (after && after.jobId === jobId && after.accountScope === accountScope &&
-            !after.candidates.some(raw => String(raw.userid || '') === candidateId)) { verified = true; break; }
+            after.inNotMatch && !after.inMatch) { verified = true; break; }
       }
       return { status: verified ? 'ok' : 'receipt_pending', verified, candidateId, jobId, accountScope,
-        receipt: verified ? `平台已移除该人才（${outcome.selectedReason}）` : '已点击不感兴趣，但候选人仍在列表；仅核查回执，不重复点击' };
+        receipt: verified ? `平台已将该人才转入未匹配分组（${outcome?.selectedReason || reasonLabel}）` :
+          `平台操作回执仍未核实${actionError ? `：${actionError}` : '；人才仍在推荐分组'}` };
     }
     throw new Error('当前没有与所选账号及职位一致的望远镜页面');
-  } finally { await browser.disconnect(); }
+  } finally {
+    if (focusSession) {
+      await focusSession.send('Emulation.setFocusEmulationEnabled', { enabled: false }).catch(() => {});
+      await focusSession.detach().catch(() => {});
+    }
+    await browser.disconnect();
+  }
 }
 
 if (require.main === module) {
@@ -458,4 +525,4 @@ if (require.main === module) {
   }
 }
 
-module.exports = { normalizeTelescopeCandidate, scanTelescope, readTelescopeDetail, readTelescopePage, readTelescopeCatalog, rejectTelescopeCandidate, validateTelescopeDetailURL };
+module.exports = { normalizeTelescopeCandidate, telescopeActionSnapshot, scanTelescope, readTelescopeDetail, readTelescopePage, readTelescopeCatalog, rejectTelescopeCandidate, validateTelescopeDetailURL };

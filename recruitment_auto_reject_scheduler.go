@@ -16,7 +16,7 @@ func (a *App) processHistoricalTelescopeUnfitOnce() {
 	rows, err := db.Query(`SELECT DISTINCT b.id FROM screening_batches b
 		JOIN screening_candidate_results r ON r.batch_id=b.id
 		WHERE b.source='telescope' AND b.scan_status='complete' AND r.verdict='unfit'
-		AND r.action_status='pending' ORDER BY b.started_at,b.id`)
+		AND r.action_status IN ('pending','receipt_pending','retrying','failed') ORDER BY b.started_at,b.id`)
 	if err != nil {
 		return
 	}
