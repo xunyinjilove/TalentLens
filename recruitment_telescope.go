@@ -15,13 +15,14 @@ import (
 )
 
 type telescopeCandidate struct {
-	CandidateID   string `json:"candidateId"`
-	RecordID      string `json:"recordId"`
-	JobID         string `json:"jobId"`
-	Name          string `json:"name"`
-	ResumeText    string `json:"resumeText"`
-	ActivityLabel string `json:"activityLabel"`
-	AlreadyHi     bool   `json:"alreadyHi"`
+	CandidateID    string `json:"candidateId"`
+	RecordID       string `json:"recordId"`
+	JobID          string `json:"jobId"`
+	PlatformBucket string `json:"platformBucket"`
+	Name           string `json:"name"`
+	ResumeText     string `json:"resumeText"`
+	ActivityLabel  string `json:"activityLabel"`
+	AlreadyHi      bool   `json:"alreadyHi"`
 }
 
 type telescopePage struct {
@@ -336,11 +337,11 @@ func (a *App) run51JobTelescopeReject(batchID string, historical bool) (Telescop
 	if err != nil || page.AccountScope != account || page.JobID != jobID {
 		return result, fmt.Errorf("望远镜页面账号、职位或候选人列表未就绪；本次未操作平台")
 	}
-	present := make(map[string]bool, len(page.Candidates))
+	present := make(map[string]telescopeCandidate, len(page.Candidates))
 	for _, candidate := range page.Candidates {
-		present[candidate.CandidateID] = true
+		present[candidate.CandidateID] = candidate
 	}
-	rows, err := db.Query(`SELECT id,candidate_id,record_id,candidate_name,rule_evidence_json FROM screening_candidate_results WHERE batch_id=? AND verdict='unfit' AND action_status='pending' ORDER BY created_at,id`, batchID)
+	rows, err := db.Query(`SELECT id,candidate_id,record_id,candidate_name,rule_evidence_json FROM screening_candidate_results WHERE batch_id=? AND verdict='unfit' AND action_status IN ('pending','receipt_pending','retrying','failed') ORDER BY created_at,id`, batchID)
 	if err != nil {
 		return result, err
 	}
@@ -362,22 +363,41 @@ func (a *App) run51JobTelescopeReject(batchID string, historical bool) (Telescop
 	for _, t := range targets {
 		result.Total++
 		item := TelescopeRejectItem{CandidateID: t.candidateID, Name: t.name, Status: "skipped"}
-		if !present[t.candidateID] {
+		candidate, found := present[t.candidateID]
+		if !found {
 			item.Reason = "人才不在当前职位列表，已跳过；请重新扫描"
 			result.Skipped++
 			result.Items = append(result.Items, item)
 			continue
 		}
-		var prior string
-		priorErr := db.QueryRow(`SELECT status FROM platform_action_ledger WHERE project_id=? AND candidate_id=? AND action_type='reject' ORDER BY requested_at DESC LIMIT 1`, projectID, t.candidateID).Scan(&prior)
-		if priorErr == nil && prior != "failed" {
-			item.Reason = "已有平台操作记录（" + prior + "），未重复点击"
+		var prior, priorError string
+		priorErr := db.QueryRow(`SELECT status,error_message FROM platform_action_ledger WHERE project_id=? AND candidate_id=? AND action_type='reject' ORDER BY requested_at DESC LIMIT 1`, projectID, t.candidateID).Scan(&prior, &priorError)
+		if priorErr != nil && priorErr != sql.ErrNoRows {
+			return result, priorErr
+		}
+		if prior == "success" {
+			item.Reason = "平台已成功处理，未重复点击"
 			result.Skipped++
+			_, _ = db.Exec(`UPDATE screening_candidate_results SET action_status='completed',action_error='' WHERE id=?`, t.id)
 			result.Items = append(result.Items, item)
 			continue
 		}
-		if priorErr != nil && priorErr != sql.ErrNoRows {
-			return result, priorErr
+		if candidate.PlatformBucket == "not_match" {
+			// 51job keeps disliked candidates in its full 100-person list and moves
+			// them to notMatchList. The old check wrongly required total removal.
+			if prior == "uncertain" && strings.HasPrefix(priorError, "已点击不感兴趣") {
+				item.Status, item.Reason = "rejected", "已核对平台：先前点击的人才现处于未匹配分组"
+				result.Rejected++
+				_, _ = db.Exec(`UPDATE platform_action_ledger SET status='success',receipt=?,error_message='' WHERE project_id=? AND candidate_id=? AND record_id=? AND action_type='reject'`, item.Reason, projectID, t.candidateID, t.recordID)
+				_, _ = db.Exec(`UPDATE screening_candidate_results SET action_status='completed',action_receipt_at=?,action_error='' WHERE id=?`, time.Now().Format("2006-01-02 15:04:05"), t.id)
+			} else {
+				item.Reason = "平台已将该人才归入未匹配分组，当前没有不感兴趣按钮，已跳过点击"
+				result.Skipped++
+				_, _ = db.Exec(`UPDATE platform_action_ledger SET status='skipped',receipt=?,error_message='' WHERE project_id=? AND candidate_id=? AND record_id=? AND action_type='reject'`, item.Reason, projectID, t.candidateID, t.recordID)
+				_, _ = db.Exec(`UPDATE screening_candidate_results SET action_status='verified_on_platform',action_receipt_at=?,action_error='' WHERE id=?`, time.Now().Format("2006-01-02 15:04:05"), t.id)
+			}
+			result.Items = append(result.Items, item)
+			continue
 		}
 		var checks []RuleCheckItem
 		_ = json.Unmarshal([]byte(t.evidence), &checks)
@@ -402,7 +422,7 @@ func (a *App) run51JobTelescopeReject(batchID string, historical bool) (Telescop
 			result.Items = append(result.Items, item)
 			continue
 		}
-		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		ctx, cancel := context.WithTimeout(context.Background(), 65*time.Second)
 		cmd := exec.CommandContext(ctx, "node", script, "--mode", "reject", "--job-id", jobID, "--candidate-id", t.candidateID, "--account-scope", account, "--reason-label", reasonLabel)
 		hideConsoleWindow(cmd)
 		out, runErr := cmd.Output()
@@ -423,6 +443,12 @@ func (a *App) run51JobTelescopeReject(batchID string, historical bool) (Telescop
 			result.Rejected++
 			_, _ = db.Exec(`UPDATE platform_action_ledger SET status='success',receipt=? WHERE project_id=? AND candidate_id=? AND record_id=? AND action_type='reject'`, item.Reason, projectID, t.candidateID, t.recordID)
 			_, _ = db.Exec(`UPDATE screening_candidate_results SET action_status='completed',action_receipt_at=?,action_error='' WHERE id=?`, now, t.id)
+		} else if runErr == nil && parseErr == nil && receipt.Status == "already_excluded" &&
+			receipt.AccountScope == account && receipt.JobID == jobID && receipt.CandidateID == t.candidateID {
+			item.Reason = receipt.Receipt
+			result.Skipped++
+			_, _ = db.Exec(`UPDATE platform_action_ledger SET status='skipped',receipt=?,error_message='' WHERE project_id=? AND candidate_id=? AND record_id=? AND action_type='reject'`, item.Reason, projectID, t.candidateID, t.recordID)
+			_, _ = db.Exec(`UPDATE screening_candidate_results SET action_status='verified_on_platform',action_receipt_at=?,action_error='' WHERE id=?`, now, t.id)
 		} else {
 			item.Status = "uncertain"
 			item.Reason = receipt.Message

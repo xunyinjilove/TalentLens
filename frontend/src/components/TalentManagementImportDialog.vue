@@ -174,7 +174,11 @@
           <p v-if="telescopeActionSummary" class="catalog-status">{{ telescopeActionSummary }}</p>
           <el-table v-if="telescopeActionItems.length" :data="telescopeActionItems" size="small" max-height="240" style="margin-top:10px">
             <el-table-column prop="name" label="候选人" width="120" />
-            <el-table-column prop="status" label="状态" width="110" />
+            <el-table-column label="状态" width="130">
+              <template #default="{ row }">
+                {{ getTelescopeActionItemLabel(row.status) }}
+              </template>
+            </el-table-column>
             <el-table-column label="平台回执或跳过原因" min-width="300">
               <template #default="{ row }">
                 {{ row.reason }}
@@ -756,6 +760,16 @@ function getActionStatusLabel(status: string): string {
   }
 }
 
+function getTelescopeActionItemLabel(status: string): string {
+  switch (status) {
+    case 'rejected': return '已转未匹配'
+    case 'sent': return '已打招呼'
+    case 'uncertain': return '回执待核查'
+    case 'skipped': return '已跳过'
+    default: return status || '待处理'
+  }
+}
+
 function getActionStatusTagType(status: string): any {
   switch (status) {
     case 'completed':
@@ -892,7 +906,7 @@ async function scanTelescopePreview() {
     if (preview.unfitCount > 0) {
       const rejection = await api.Run51JobTelescopeReject(preview.batchId)
       telescopeActionItems.value = rejection.items || []
-      telescopeActionSummary.value = `不感兴趣：已核实 ${rejection.rejected} 人，跳过 ${rejection.skipped} 人，回执待核查 ${rejection.uncertain} 人`
+      telescopeActionSummary.value = `平台处理：已确认转入未匹配 ${rejection.rejected} 人，跳过 ${rejection.skipped} 人，回执待核查 ${rejection.uncertain} 人`
     }
     telescopeProgress.value = `筛选完成：合格 ${preview.qualifiedCount} 人，不合格 ${preview.unfitCount} 人；${telescopeActionSummary.value || '无须执行不感兴趣'}`
     ElMessage.success(telescopeProgress.value)
@@ -928,7 +942,7 @@ async function runTelescopeReject() {
     const api: any = await import('../../wailsjs/go/main/App')
     const result = await api.Run51JobTelescopeReject(telescopePreview.value.batchId)
     telescopeActionItems.value = result.items || []
-    telescopeActionSummary.value = `不感兴趣：已核实 ${result.rejected} 人，跳过 ${result.skipped} 人，回执待核查 ${result.uncertain} 人`
+    telescopeActionSummary.value = `平台处理：已确认转入未匹配 ${result.rejected} 人，跳过 ${result.skipped} 人，回执待核查 ${result.uncertain} 人`
     if (result.uncertain) ElMessage.warning(telescopeActionSummary.value)
     else ElMessage.success(telescopeActionSummary.value)
   } catch (error: any) {
