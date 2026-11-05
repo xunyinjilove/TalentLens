@@ -72,14 +72,13 @@
 
     <!-- 现代表格主体卡片 -->
     <div class="modern-table-card">
-      <div ref="tableResponsiveRef" class="table-responsive">
+      <div ref="tableResponsiveRef" role="region" aria-label="职位管理列表" class="table-responsive">
         <table class="saas-table">
           <thead>
             <tr>
               <th class="col-title">职位名称</th>
               <th class="col-dept">部门</th>
               <th class="col-headcount">招聘人数</th>
-              <th class="col-stats">投递 / 合适</th>
               <th class="col-status">状态</th>
               <th class="col-time">更新时间</th>
               <th class="col-actions">操作</th>
@@ -87,7 +86,7 @@
           </thead>
           <tbody>
             <tr v-if="loading" class="empty-row">
-              <td colspan="7">
+              <td colspan="6">
                 <div class="empty-state">
                   <el-icon class="is-loading" style="font-size: 24px;"><Loading /></el-icon>
                   <p>正在载入职位数据…</p>
@@ -95,7 +94,7 @@
               </td>
             </tr>
             <tr v-else-if="!filteredProjects.length" class="empty-row">
-              <td colspan="7">
+              <td colspan="6">
                 <div class="empty-state">
                   <p>未找到符合条件的职位</p>
                   <el-button size="small" type="primary" plain @click="openCreateModal">立即新建职位</el-button>
@@ -125,19 +124,12 @@
 
               <!-- 部门 -->
               <td class="col-dept">
-                <span class="dept-text">{{ project.department || '未分配' }}</span>
+                <span class="dept-text" :title="project.department || '未分配'">{{ project.department || '未分配' }}</span>
               </td>
 
               <!-- 招聘人数 -->
               <td class="col-headcount">
                 <span class="headcount-text">{{ project.headcount || 1 }}</span>
-              </td>
-
-              <!-- 投递 / 合适 -->
-              <td class="col-stats">
-                <span class="stats-text">
-                  {{ getStats(project.id).totalApplications }} / {{ getStats(project.id).suitableCount }}
-                </span>
               </td>
 
               <!-- 状态胶囊标签 -->
@@ -533,7 +525,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import {
   Search,
@@ -595,19 +587,8 @@ const selectedStatus = ref('')
 const jobStatsMap = ref<Record<string, JobStats>>({})
 const cached51JobJobs = ref<Array<{ title: string; city: string; salary?: string }>>([])
 
-// 表格横向滚轮滚动
+// 表格容器引用
 const tableResponsiveRef = ref<HTMLElement | null>(null)
-
-function handleTableWheel(e: WheelEvent) {
-  const el = tableResponsiveRef.value
-  if (!el) return
-  if (el.scrollWidth > el.clientWidth) {
-    if (Math.abs(e.deltaY) >= Math.abs(e.deltaX)) {
-      el.scrollLeft += e.deltaY
-      e.preventDefault()
-    }
-  }
-}
 
 // 弹窗状态
 const editModalVisible = ref(false)
@@ -1254,21 +1235,12 @@ function handleGlobalSearch() {
 }
 
 onMounted(async () => {
-  if (tableResponsiveRef.value) {
-    tableResponsiveRef.value.addEventListener('wheel', handleTableWheel, { passive: false })
-  }
   await load()
   const editId = String(route.query.edit || '')
   if (!editId) return
   const project = projectStore.projects.find(item => item.id === editId)
   if (project) openEditModal(project)
   else ElMessage.warning('目标职位不存在或已删除')
-})
-
-onUnmounted(() => {
-  if (tableResponsiveRef.value) {
-    tableResponsiveRef.value.removeEventListener('wheel', handleTableWheel)
-  }
 })
 </script>
 
@@ -1288,12 +1260,17 @@ onUnmounted(() => {
 .job-management-view {
   display: flex;
   flex-direction: column;
-  padding: 24px 32px;
-  background-color: #f8fafc;
-  min-height: 100vh;
+  width: 100%;
+  height: 100%;
+  overflow-y: auto;
+  overflow-x: hidden;
+  scrollbar-gutter: stable;
+  overscroll-behavior: contain;
+  padding: 24px 32px 48px;
+  background-color: var(--wb-bg, #f8fafc);
   box-sizing: border-box;
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
-  color: #1e293b;
+  color: var(--wb-text, #1e293b);
 }
 
 /* 顶部导航栏 */
@@ -1464,6 +1441,7 @@ onUnmounted(() => {
 
 /* 现代表格主体 */
 .modern-table-card {
+  flex-shrink: 0;
   background-color: #ffffff;
   border: 1px solid #e2e8f0;
   border-radius: 14px;
@@ -1473,17 +1451,27 @@ onUnmounted(() => {
 
 .table-responsive {
   width: 100%;
-  overflow-x: auto;
+  max-inline-size: 100%;
+  overflow-x: visible;
+  container-type: inline-size;
 }
 
 .saas-table {
   width: 100%;
-  border-collapse: collapse;
+  table-layout: fixed;
+  border-collapse: separate;
+  border-spacing: 0;
   text-align: left;
 }
 
+.saas-table thead {
+  position: sticky;
+  inset-block-start: 0;
+  z-index: 1;
+}
+
 .saas-table th {
-  padding: 16px 20px;
+  padding: 15px 16px;
   font-size: 13px;
   font-weight: 600;
   color: #475569;
@@ -1493,7 +1481,7 @@ onUnmounted(() => {
 }
 
 .saas-table td {
-  padding: 16px 20px;
+  padding: 15px 16px;
   vertical-align: middle;
   border-bottom: 1px solid #f1f5f9;
   transition: background-color 0.15s ease;
@@ -1503,21 +1491,26 @@ onUnmounted(() => {
   background-color: #f8fafc;
 }
 
-/* 列定义与内容排版 */
+/* 列定义与内容排版（6列自适应完整展示，无需横向滚动） */
 .col-title {
-  min-width: 200px;
+  width: auto;
+  min-width: 0;
 }
 
 .job-title-wrapper {
   display: flex;
   flex-direction: column;
   gap: 4px;
+  min-inline-size: 0;
 }
 
 .job-name {
   font-size: 15px;
   font-weight: 700;
   color: #0f172a;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .job-subinfo {
@@ -1526,6 +1519,9 @@ onUnmounted(() => {
   gap: 6px;
   font-size: 13px;
   color: #94a3b8;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .dot-sep {
@@ -1538,16 +1534,20 @@ onUnmounted(() => {
 }
 
 .col-dept {
-  min-width: 100px;
+  width: 130px;
 }
 
 .dept-text {
+  display: block;
   font-size: 14px;
   color: #334155;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .col-headcount {
-  min-width: 80px;
+  width: 96px;
 }
 
 .headcount-text {
@@ -1556,18 +1556,8 @@ onUnmounted(() => {
   color: #334155;
 }
 
-.col-stats {
-  min-width: 110px;
-}
-
-.stats-text {
-  font-size: 14px;
-  font-weight: 600;
-  color: #1e293b;
-}
-
 .col-status {
-  min-width: 120px;
+  width: 112px;
 }
 
 /* 彩色圆点胶囊标签 */
@@ -1579,6 +1569,7 @@ onUnmounted(() => {
   border-radius: 14px;
   font-size: 12px;
   font-weight: 500;
+  white-space: nowrap;
 }
 
 .status-dot {
@@ -1615,17 +1606,19 @@ onUnmounted(() => {
 }
 
 .col-time {
-  min-width: 110px;
+  width: 110px;
 }
 
 .time-text {
   font-size: 13px;
   color: #64748b;
+  white-space: nowrap;
 }
 
 .col-actions {
-  min-width: 110px;
+  width: 180px;
   text-align: right;
+  white-space: nowrap;
 }
 
 .action-btn-group {
