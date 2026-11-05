@@ -256,6 +256,8 @@ async function scanTelescope(jobId, limit = 100) {
 async function readTelescopeDetail(jobId, candidateId) {
   if (!jobId || !candidateId) throw new Error('缺少职位或人才 ID');
   const browser = await puppeteer.connect({ browserURL: 'http://127.0.0.1:9503', defaultViewport: null, protocolTimeout: 12000 });
+  let browserSession = null;
+  let backgroundTargetId = null;
   let openedTarget = null;
   try {
     const targets = await findTelescopeTargets(browser);
@@ -265,17 +267,45 @@ async function readTelescopeDetail(jobId, candidateId) {
       if (!state || state.jobId !== jobId) continue;
       const matches = state.candidates.filter(raw => String(raw.userid || '') === candidateId);
       if (matches.length !== 1) throw new Error('望远镜候选人身份无法唯一核对');
-      const before = new Set(browser.targets());
       const page = await target.page();
-      const opened = await page.evaluate(id => {
+      const platformURL = await page.evaluate(async id => {
         const list = [...document.querySelectorAll('*')].map(el => el.__vue__).find(vm => vm?.$options?.name === 'EhFossicksList');
         const rows = (list?.list || []).flatMap(group => [...(group.matchList || []), ...(group.notMatchList || [])]);
         const index = rows.findIndex(raw => String(raw.userid || '') === id);
-        if (index < 0 || !list?.resumeViewHandler) return false;
-        list.resumeViewHandler([index, id, '', rows[index]], 0);
-        return true;
+        if (index < 0 || !list?.resumeViewHandler) return '';
+        // Let 51job authorize and construct the detail URL, but capture its window.open
+        // so screening does not switch the user's browser to a visible detail tab.
+        if (window.__talentLensDetailCapture) throw new Error('另一项详情读取仍在进行');
+        const originalOpen = window.open;
+        window.__talentLensDetailCapture = true;
+        try {
+          return await new Promise((resolve, reject) => {
+            const timer = setTimeout(() => reject(new Error('平台未返回详情入口')), 9000);
+            window.open = function(url, ...args) {
+              const openedURL = url ? new URL(String(url), location.href) : null;
+              if (openedURL?.hostname === 'ehire.51job.com' &&
+                  openedURL.pathname === '/Revision/talent/resume/detail' &&
+                  openedURL.searchParams.get('resumeId') === id) {
+                clearTimeout(timer);
+                resolve(openedURL.href);
+                return null;
+              }
+              return originalOpen.call(this, url, ...args);
+            };
+            try { list.resumeViewHandler([index, id, '', rows[index]], 0); }
+            catch (error) { clearTimeout(timer); reject(error); }
+          });
+        } finally {
+          window.open = originalOpen;
+          delete window.__talentLensDetailCapture;
+        }
       }, candidateId);
-      if (!opened) throw new Error('平台未提供该人才的详情入口');
+      if (!platformURL) throw new Error('平台未提供该人才的详情入口');
+      const detailURL = validateTelescopeDetailURL(platformURL, page.url(), jobId, candidateId);
+      const before = new Set(browser.targets());
+      browserSession = await page.createCDPSession();
+      const created = await browserSession.send('Target.createTarget', { url: detailURL, background: true });
+      backgroundTargetId = created.targetId;
       const deadline = Date.now() + 18000;
       while (Date.now() < deadline) {
         openedTarget = browser.targets().find(t => !before.has(t) && t.type() === 'page' &&
@@ -283,7 +313,7 @@ async function readTelescopeDetail(jobId, candidateId) {
         if (openedTarget) break;
         await new Promise(resolve => setTimeout(resolve, 250));
       }
-      if (!openedTarget) throw new Error('平台详情页未打开');
+      if (!openedTarget) throw new Error('后台详情页未加载');
       const detailPage = await openedTarget.page();
       while (Date.now() < deadline) {
         const detail = await detailPage.evaluate(() => {
@@ -303,9 +333,25 @@ async function readTelescopeDetail(jobId, candidateId) {
     }
     throw new Error('当前没有与所选职位一致的望远镜页面');
   } finally {
-    if (openedTarget) { const page = await openedTarget.page().catch(() => null); if (page) await page.close().catch(() => {}); }
+    let closed = false;
+    if (backgroundTargetId && browserSession) {
+      closed = await browserSession.send('Target.closeTarget', { targetId: backgroundTargetId })
+        .then(result => Boolean(result.success)).catch(() => false);
+    }
+    if (!closed && openedTarget) { const page = await openedTarget.page().catch(() => null); if (page) await page.close().catch(() => {}); }
+    if (browserSession) await browserSession.detach().catch(() => {});
     await browser.disconnect();
   }
+}
+
+function validateTelescopeDetailURL(rawURL, baseURL, jobId, candidateId) {
+  const url = new URL(rawURL, baseURL);
+  if (url.protocol !== 'https:' || url.hostname !== 'ehire.51job.com' ||
+      url.pathname !== '/Revision/talent/resume/detail' ||
+      url.searchParams.get('jobId') !== jobId || url.searchParams.get('resumeId') !== candidateId) {
+    throw new Error('平台返回的详情地址与职位或人才不一致，未打开页面');
+  }
+  return url.href;
 }
 
 async function rejectTelescopeCandidate(jobId, candidateId, accountScope, reasonLabel) {
@@ -412,4 +458,4 @@ if (require.main === module) {
   }
 }
 
-module.exports = { normalizeTelescopeCandidate, scanTelescope, readTelescopeDetail, readTelescopePage, readTelescopeCatalog, rejectTelescopeCandidate };
+module.exports = { normalizeTelescopeCandidate, scanTelescope, readTelescopeDetail, readTelescopePage, readTelescopeCatalog, rejectTelescopeCandidate, validateTelescopeDetailURL };

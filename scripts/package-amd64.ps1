@@ -1,10 +1,9 @@
 $ErrorActionPreference = "Stop"
-$version = "1.8.106"
+$version = "1.8.107"
+$builtExecutable = "build/bin/TalentLens-$version-amd64.exe"
+if (!(Test-Path -LiteralPath $builtExecutable)) { throw "Built executable missing: $builtExecutable" }
 Write-Host "Syncing runtime assets..."
 node scripts/sync-runtime-assets.js
-
-Write-Host "Copying binary..."
-Copy-Item "build/bin/TalentLens.exe" "build/bin/TalentLens-$version-amd64.exe" -Force
 
 $repoRoot = (Resolve-Path -LiteralPath ".").Path
 $binRoot = [System.IO.Path]::GetFullPath((Join-Path $repoRoot "build/bin"))
@@ -16,7 +15,7 @@ if (Test-Path -LiteralPath $stage) {
     Remove-Item -LiteralPath $stage -Recurse -Force
 }
 New-Item -ItemType Directory -Path $stage -Force | Out-Null
-Copy-Item "build/bin/TalentLens.exe" (Join-Path $stage "TalentLens.exe") -Force
+Copy-Item $builtExecutable (Join-Path $stage "TalentLens.exe") -Force
 Copy-Item "build/bin/scripts" (Join-Path $stage "scripts") -Recurse -Force
 Copy-Item "node_modules" (Join-Path $stage "node_modules") -Recurse -Force
 Copy-Item "WINDOWS_PACKAGE_README.md" (Join-Path $stage "README.md") -Force
