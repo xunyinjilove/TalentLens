@@ -53,6 +53,11 @@
                     <span v-if="item.meetingCode" class="interview-meeting-code">#腾讯会议：{{ formatMeetingCode(item.meetingCode) }}</span>
                     <el-button size="small" type="primary" plain @click="copyMeetingInvite(item)">一键复制链接</el-button>
                   </div>
+                  <div v-if="item.note || item.strengthsNote" class="interview-note-preview">
+                    <span v-if="item.note">备注：{{ item.note }}</span>
+                    <span v-if="item.strengthsNote">优势亮点：{{ item.strengthsNote }}</span>
+                    <el-button size="small" link type="primary" aria-label="复制备注和优势亮点备注" @click="copyInterviewNotes(item)">复制全部备注</el-button>
+                  </div>
                 </div>
                 <div class="interview-agenda-actions">
                   <div class="interview-agenda-pills">
@@ -121,7 +126,15 @@
           </p>
           <el-button v-if="form.id && form.meetingSyncStatus !== 'synced'" size="small" @click="retryMeetingSync">重试同步／对账</el-button>
         </div>
-        <div class="full"><label>备注</label><textarea v-model="form.note" rows="3" /></div>
+        <div class="full">
+          <div class="interview-note-heading"><label for="interview-regular-note">备注</label><el-button size="small" link :disabled="!form.note?.trim()" @click="copyNote(form.note, '备注')">复制备注</el-button></div>
+          <textarea id="interview-regular-note" v-model="form.note" rows="3" />
+        </div>
+        <div class="full">
+          <div class="interview-note-heading"><label for="interview-strengths-note">优势亮点备注</label><div><el-button size="small" link :disabled="!form.projectCandidateId || syncingStrengths" :loading="syncingStrengths" @click="syncAssessmentStrengths">同步测评亮点</el-button><el-button size="small" link :disabled="!form.strengthsNote?.trim()" @click="copyNote(form.strengthsNote, '优势亮点备注')">复制亮点</el-button></div></div>
+          <textarea id="interview-strengths-note" v-model="form.strengthsNote" rows="3" placeholder="选定候选人后可同步测评中的优势亮点，也可手动修改" />
+          <el-button size="small" type="primary" plain :disabled="!form.note?.trim() && !form.strengthsNote?.trim()" @click="copyInterviewNotes(form)">一键复制两项备注</el-button>
+        </div>
       </div>
       <p class="wb-muted" style="font-size:12px">时区：{{ localTimeZone }}。日程保存在本机；保存不会自动通知候选人或面试官。</p>
       <template #footer>
@@ -155,7 +168,8 @@ const dialogOpen = ref(false)
 type PendingPerson = { projectCandidateId: string; projectId: string; candidateName: string; projectName: string; stage: string }
 const pendingCandidates = ref<PendingPerson[]>([])
 const saving = ref(false)
-const form = reactive<RecruitmentInterview>({ id:'', projectCandidateId:'', candidateName:'', projectName:'', startsAt:'', endsAt:'', interviewer:'', method:'', location:'', note:'', status:'scheduled', meetingSubject:'', meetingId:'', meetingCode:'', meetingUrl:'', meetingSyncStatus:'' })
+const form = reactive<RecruitmentInterview>({ id:'', projectCandidateId:'', candidateName:'', projectName:'', startsAt:'', endsAt:'', interviewer:'', method:'', location:'', note:'', strengthsNote:'', status:'scheduled', meetingSubject:'', meetingId:'', meetingCode:'', meetingUrl:'', meetingSyncStatus:'' })
+const syncingStrengths = ref(false)
 const lastAutoSubject = ref('')
 const localTimeZone = Intl.DateTimeFormat().resolvedOptions().timeZone
 const bookingCandidates = computed(() => {
@@ -214,6 +228,7 @@ function onCandidateSelected(val: string) {
     form.id = ''
     form.candidateName = ''
     form.projectName = ''
+    form.strengthsNote = ''
     if (form.meetingSubject === lastAutoSubject.value) {
       form.meetingSubject = ''
       lastAutoSubject.value = ''
@@ -231,7 +246,8 @@ function onCandidateSelected(val: string) {
     if (!form.interviewer && existing.interviewer) form.interviewer = existing.interviewer
     if (existing.method) form.method = existing.method
     if (!form.location && existing.location) form.location = existing.location
-    if (!form.note && existing.note) form.note = existing.note
+    form.note = existing.note || ''
+    form.strengthsNote = existing.strengthsNote || ''
     if (existing.meetingSubject) form.meetingSubject = existing.meetingSubject
     form.meetingId = existing.meetingId || ''
     form.meetingCode = existing.meetingCode || ''
@@ -239,6 +255,9 @@ function onCandidateSelected(val: string) {
     form.meetingSyncStatus = existing.meetingSyncStatus || ''
   } else {
     form.id = ''
+    form.note = ''
+    form.strengthsNote = ''
+    void syncAssessmentStrengths(false)
   }
   if (!form.method) {
     form.method = '腾讯会议自动生成'
@@ -347,7 +366,7 @@ function formatTime(value: string) { return new Date(value).toLocaleTimeString('
 function statusLabel(status: string) { return ({ scheduled:'已安排', cancelled:'已取消', completed:'已完成' } as Record<string,string>)[status] || status }
 function create() {
   lastAutoSubject.value = ''
-  Object.assign(form, { id:'', projectCandidateId:'', candidateName:'', projectName:'', startsAt:'', endsAt:'', interviewer:'', method:'腾讯会议自动生成', location:'', note:'', status:'scheduled', meetingSubject:'', meetingId:'', meetingCode:'', meetingSyncStatus:'', meetingUrl:'', meetingError:'', remoteStartsAt:'', remoteEndsAt:'' })
+  Object.assign(form, { id:'', projectCandidateId:'', candidateName:'', projectName:'', startsAt:'', endsAt:'', interviewer:'', method:'腾讯会议自动生成', location:'', note:'', strengthsNote:'', status:'scheduled', meetingSubject:'', meetingId:'', meetingCode:'', meetingSyncStatus:'', meetingUrl:'', meetingError:'', remoteStartsAt:'', remoteEndsAt:'' })
   const baseDate = selectedDate.value || todayKey
   form.startsAt = `${baseDate}T10:00`
   form.endsAt = `${baseDate}T11:00`
@@ -361,6 +380,7 @@ function bookCandidate(id: string) {
 function edit(item: RecruitmentInterview) {
   lastAutoSubject.value = ''
   Object.assign(form, item, {
+    strengthsNote: item.strengthsNote || '',
     method: item.method || '腾讯会议自动生成',
     startsAt: localInput(item.startsAt),
     endsAt: localInput(item.endsAt)
@@ -520,6 +540,47 @@ async function writeClipboardText(text: string): Promise<void> {
   document.body.removeChild(textarea)
 }
 
+async function syncAssessmentStrengths(showFeedback = true) {
+  const candidateId = form.projectCandidateId
+  if (!candidateId) return
+  syncingStrengths.value = true
+  try {
+    const api: any = await import('../../wailsjs/go/main/App')
+    const strengths = await api.GetRecruitmentAssessmentStrengths(candidateId) || ''
+    if (form.projectCandidateId !== candidateId || (!showFeedback && form.strengthsNote?.trim())) return
+    if (strengths) {
+      form.strengthsNote = strengths
+      if (showFeedback) ElMessage.success('已同步最新测评亮点，请保存日程')
+    } else if (showFeedback) {
+      ElMessage.info('该候选人当前没有已完成测评的优势亮点')
+    }
+  } catch (err: any) {
+    if (showFeedback) ElMessage.error(err?.message || '同步测评亮点失败')
+  } finally {
+    syncingStrengths.value = false
+  }
+}
+
+async function copyNote(value: string | undefined, label: string) {
+  const content = (value || '').trim()
+  if (!content) return
+  try {
+    await writeClipboardText(content)
+    ElMessage.success(`已复制${label}`)
+  } catch (err: any) {
+    ElMessage.error(err?.message || '复制失败，请重试')
+  }
+}
+
+async function copyInterviewNotes(item: RecruitmentInterview) {
+  const sections = [
+    item.note?.trim() ? `备注：\n${item.note.trim()}` : '',
+    item.strengthsNote?.trim() ? `优势亮点备注：\n${item.strengthsNote.trim()}` : ''
+  ].filter(Boolean)
+  if (!sections.length) return
+  await copyNote(sections.join('\n\n'), '全部备注')
+}
+
 async function copyMeetingInvite(item: RecruitmentInterview) {
   const url = (item.meetingUrl || item.location || '').trim()
   if (!url) {
@@ -569,6 +630,9 @@ onMounted(() => { void projects.loadProjects(); void reload() })
 .interview-day-heading .wb-muted { font-size: 12px; }
 .interview-agenda-card { display: grid; grid-template-columns: 78px minmax(0, 1fr) auto; gap: 14px; align-items: center; min-height: 112px; padding: 16px; border: 1px solid var(--wb-border); border-left: 3px solid var(--wb-brand); border-radius: 14px; background: var(--wb-surface); box-shadow: 0 2px 10px rgba(15, 23, 42, .04); }
 .interview-agenda-card.has-conflict { border-color: #fdba74; border-left: 4px solid #ea580c; background: #fffaf5; }
+.interview-note-preview { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; margin-top: 8px; color: var(--wb-muted); font-size: 12px; }
+.interview-note-preview span { max-width: 360px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.interview-note-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .interview-agenda-pills { display: flex; align-items: center; flex-wrap: wrap; justify-content: flex-end; gap: 6px; }
 .conflict-pill { background: #ffedd5; color: #c2410c; border: 1px solid #fdba74; font-weight: 700; }
 .interview-conflict-inline { display: flex; align-items: flex-start; gap: 8px; margin-top: 6px; padding: 7px 10px; border-radius: 8px; background: #fff7ed; border: 1px solid #fed7aa; color: #9a3412; font-size: 12px; line-height: 1.5; }

@@ -64,6 +64,7 @@ type RecruitmentInterview struct {
 	Method             string `json:"method"`
 	Location           string `json:"location"`
 	Note               string `json:"note"`
+	StrengthsNote      string `json:"strengthsNote"`
 	Status             string `json:"status"`
 	MeetingSubject     string `json:"meetingSubject"`
 	MeetingID          string `json:"meetingId"`
@@ -695,9 +696,9 @@ func (a *App) reconcileDuplicateScheduledInterviews(db *sql.DB) {
 
 func (a *App) consolidateCandidateScheduledInterviews(db *sql.DB, projectCandidateID, preferredKeepID string) {
 	type schedRow struct {
-		id, interviewer, method, location, note string
+		id, interviewer, method, location, note, strengthsNote string
 	}
-	rows, err := db.Query(`SELECT id, interviewer, method, location, note FROM interviews
+	rows, err := db.Query(`SELECT id, interviewer, method, location, note, strengths_note FROM interviews
 		WHERE project_candidate_id=? AND status='scheduled'
 		ORDER BY CASE WHEN id=? THEN 0 ELSE 1 END, updated_at DESC, created_at DESC, id DESC`,
 		projectCandidateID, preferredKeepID)
@@ -707,7 +708,7 @@ func (a *App) consolidateCandidateScheduledInterviews(db *sql.DB, projectCandida
 	var list []schedRow
 	for rows.Next() {
 		var r schedRow
-		if err := rows.Scan(&r.id, &r.interviewer, &r.method, &r.location, &r.note); err == nil {
+		if err := rows.Scan(&r.id, &r.interviewer, &r.method, &r.location, &r.note, &r.strengthsNote); err == nil {
 			list = append(list, r)
 		}
 	}
@@ -733,6 +734,9 @@ func (a *App) consolidateCandidateScheduledInterviews(db *sql.DB, projectCandida
 		if strings.TrimSpace(keep.note) == "" && strings.TrimSpace(old.note) != "" {
 			keep.note = old.note
 		}
+		if strings.TrimSpace(keep.strengthsNote) == "" && strings.TrimSpace(old.strengthsNote) != "" {
+			keep.strengthsNote = old.strengthsNote
+		}
 
 		var oldMeetingExists int
 		var oldMeetingID string
@@ -750,8 +754,41 @@ func (a *App) consolidateCandidateScheduledInterviews(db *sql.DB, projectCandida
 		_, _ = db.Exec(`DELETE FROM interviews WHERE id=?`, old.id)
 	}
 
-	_, _ = db.Exec(`UPDATE interviews SET interviewer=?, method=?, location=?, note=? WHERE id=?`,
-		keep.interviewer, keep.method, keep.location, keep.note, keep.id)
+	_, _ = db.Exec(`UPDATE interviews SET interviewer=?, method=?, location=?, note=?, strengths_note=? WHERE id=?`,
+		keep.interviewer, keep.method, keep.location, keep.note, keep.strengthsNote, keep.id)
+}
+
+// GetRecruitmentAssessmentStrengths reads the latest completed assessment for
+// this project candidate. It never borrows another project's evaluation.
+func (a *App) GetRecruitmentAssessmentStrengths(projectCandidateID string) (string, error) {
+	db, err := a.getRecruitmentDB()
+	if err != nil {
+		return "", err
+	}
+	var analysisJSON string
+	err = db.QueryRow(`SELECT analysis_json FROM evaluations
+		WHERE project_candidate_id=? AND status='done'
+		ORDER BY created_at DESC,id DESC LIMIT 1`, projectCandidateID).Scan(&analysisJSON)
+	if err == sql.ErrNoRows {
+		return "", nil
+	}
+	if err != nil {
+		return "", err
+	}
+	if strings.TrimSpace(analysisJSON) == "" {
+		return "", nil
+	}
+	var analysis AnalysisResult
+	if err := json.Unmarshal([]byte(analysisJSON), &analysis); err != nil {
+		return "", fmt.Errorf("测评亮点数据无法读取: %w", err)
+	}
+	lines := make([]string, 0, len(analysis.Strengths))
+	for _, strength := range analysis.Strengths {
+		if value := strings.TrimSpace(strength); value != "" {
+			lines = append(lines, "• "+value)
+		}
+	}
+	return strings.Join(lines, "\n"), nil
 }
 
 func (a *App) ListRecruitmentInterviews(projectID string) ([]RecruitmentInterview, error) {
@@ -761,7 +798,7 @@ func (a *App) ListRecruitmentInterviews(projectID string) ([]RecruitmentIntervie
 	}
 	a.reconcileDuplicateScheduledInterviews(db)
 	rows, err := db.Query(`SELECT i.id,i.project_candidate_id,c.display_name,p.name,i.starts_at,
-		i.ends_at,i.interviewer,i.method,i.location,i.note,i.status,
+		i.ends_at,i.interviewer,i.method,i.location,i.note,i.strengths_note,i.status,
 		COALESCE(m.subject,''),COALESCE(m.meeting_id,''),COALESCE(m.meeting_code,''),
 		COALESCE(m.join_url,''),COALESCE(m.host_account,''),COALESCE(m.sync_status,''),
 		COALESCE(m.last_error,''),COALESCE(m.remote_starts_at,''),COALESCE(m.remote_ends_at,'')
@@ -778,7 +815,7 @@ func (a *App) ListRecruitmentInterviews(projectID string) ([]RecruitmentIntervie
 		var item RecruitmentInterview
 		if err := rows.Scan(&item.ID, &item.ProjectCandidateID, &item.CandidateName,
 			&item.ProjectName, &item.StartsAt, &item.EndsAt, &item.Interviewer,
-			&item.Method, &item.Location, &item.Note, &item.Status,
+			&item.Method, &item.Location, &item.Note, &item.StrengthsNote, &item.Status,
 			&item.MeetingSubject, &item.MeetingID, &item.MeetingCode, &item.MeetingURL,
 			&item.MeetingHost, &item.MeetingSyncStatus, &item.MeetingError,
 			&item.RemoteStartsAt, &item.RemoteEndsAt); err != nil {
@@ -813,11 +850,11 @@ func (a *App) SaveRecruitmentInterview(item RecruitmentInterview) (string, error
 	}
 	if item.ID == "" {
 		// Reuse the candidate's active scheduled interview so rescheduling/re-booking updates in place instead of leaving stale schedules.
-		var oldInterviewer, oldMethod, oldLocation, oldNote string
-		err := db.QueryRow(`SELECT id, interviewer, method, location, note FROM interviews
+		var oldInterviewer, oldMethod, oldLocation, oldNote, oldStrengthsNote string
+		err := db.QueryRow(`SELECT id, interviewer, method, location, note, strengths_note FROM interviews
 			WHERE project_candidate_id=? AND status='scheduled'
 			ORDER BY updated_at DESC, created_at DESC LIMIT 1`,
-			item.ProjectCandidateID).Scan(&item.ID, &oldInterviewer, &oldMethod, &oldLocation, &oldNote)
+			item.ProjectCandidateID).Scan(&item.ID, &oldInterviewer, &oldMethod, &oldLocation, &oldNote, &oldStrengthsNote)
 		if err != nil && err != sql.ErrNoRows {
 			return "", err
 		}
@@ -836,6 +873,9 @@ func (a *App) SaveRecruitmentInterview(item RecruitmentInterview) (string, error
 			if strings.TrimSpace(item.Note) == "" {
 				item.Note = oldNote
 			}
+			if strings.TrimSpace(item.StrengthsNote) == "" {
+				item.StrengthsNote = oldStrengthsNote
+			}
 		}
 	} else {
 		var ownerLink string
@@ -849,20 +889,20 @@ func (a *App) SaveRecruitmentInterview(item RecruitmentInterview) (string, error
 	}
 	now := time.Now().UTC().Format(time.RFC3339Nano)
 	_, err = db.Exec(`INSERT INTO interviews
-		(id,project_candidate_id,starts_at,ends_at,interviewer,method,location,note,status,created_at,updated_at)
-		VALUES(?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET
+		(id,project_candidate_id,starts_at,ends_at,interviewer,method,location,note,strengths_note,status,created_at,updated_at)
+		VALUES(?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET
 		starts_at=excluded.starts_at,ends_at=excluded.ends_at,interviewer=excluded.interviewer,
-		method=excluded.method,location=excluded.location,note=excluded.note,
+		method=excluded.method,location=excluded.location,note=excluded.note,strengths_note=excluded.strengths_note,
 		status=excluded.status,updated_at=excluded.updated_at`,
 		item.ID, item.ProjectCandidateID, item.StartsAt, item.EndsAt, item.Interviewer,
-		item.Method, item.Location, item.Note, item.Status, now, now)
+		item.Method, item.Location, item.Note, item.StrengthsNote, item.Status, now, now)
 	if err != nil {
 		return item.ID, err
 	}
 	if item.Status == "scheduled" {
 		a.consolidateCandidateScheduledInterviews(db, item.ProjectCandidateID, item.ID)
-		_ = db.QueryRow(`SELECT interviewer, method, location, note FROM interviews WHERE id=?`, item.ID).
-			Scan(&item.Interviewer, &item.Method, &item.Location, &item.Note)
+		_ = db.QueryRow(`SELECT interviewer, method, location, note, strengths_note FROM interviews WHERE id=?`, item.ID).
+			Scan(&item.Interviewer, &item.Method, &item.Location, &item.Note, &item.StrengthsNote)
 	}
 	if syncErr := a.syncInterviewMeeting(db, item); syncErr != nil {
 		return item.ID, syncErr

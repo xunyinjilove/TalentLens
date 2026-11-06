@@ -712,6 +712,12 @@
               <label>邀约备注 (考察重点)</label>
               <textarea v-model="interviewForm.note" rows="2" placeholder="填写本次面试重点核实的专业问题或备忘事项..." class="invite-textarea" />
             </div>
+            <div class="full">
+              <label>优势亮点备注</label>
+              <textarea v-model="interviewForm.strengthsNote" rows="3" placeholder="测评优势亮点将在此显示，可补充或修改" class="invite-textarea" />
+              <el-button size="small" link @click="syncInviteStrengths">同步最新测评亮点</el-button>
+              <el-button size="small" link :disabled="!interviewForm.note.trim() && !interviewForm.strengthsNote.trim()" @click="copyInviteNotes">一键复制两项备注</el-button>
+            </div>
           </div>
         </div>
       </div>
@@ -1298,7 +1304,8 @@ const interviewForm = reactive({
   interviewer: '',
   location: '',
   meetingSubject: '',
-  note: ''
+  note: '',
+  strengthsNote: ''
 })
 const localInterviewTimeZone = Intl.DateTimeFormat().resolvedOptions().timeZone || '本机时区'
 
@@ -1359,13 +1366,49 @@ async function openInterviewInvite(candidate: TalentCandidate) {
     interviewer: candidate.owner || 'HRBP',
     location: '',
     meetingSubject: '',
-    note: ''
+    note: inviteExistingInterview.value?.note || '',
+    strengthsNote: inviteExistingInterview.value?.strengthsNote || ''
   })
 
   inviteDialogOpen.value = true
 
+  if (!inviteExistingInterview.value?.strengthsNote) void syncInviteStrengths(false)
+
   // 自动为候选人生成一份 AI 定制打招呼语
   void generateGreeting(candidate)
+}
+
+async function syncInviteStrengths(showFeedback = true) {
+  const candidateId = inviteCandidate.value?.projectCandidateId
+  if (!candidateId) return
+  try {
+    const api: any = await import('../../wailsjs/go/main/App')
+    const strengths = await api.GetRecruitmentAssessmentStrengths(candidateId) || ''
+    if (inviteCandidate.value?.projectCandidateId !== candidateId || (!showFeedback && interviewForm.strengthsNote.trim())) return
+    if (strengths) {
+      interviewForm.strengthsNote = strengths
+      if (showFeedback) ElMessage.success('已同步测评亮点')
+    } else if (showFeedback) ElMessage.info('该候选人当前没有已完成测评的优势亮点')
+  } catch (err: any) {
+    if (showFeedback) ElMessage.error(err?.message || '同步测评亮点失败')
+  }
+}
+
+async function copyInviteNotes() {
+  const sections = [
+    interviewForm.note.trim() ? `备注：\n${interviewForm.note.trim()}` : '',
+    interviewForm.strengthsNote.trim() ? `优势亮点备注：\n${interviewForm.strengthsNote.trim()}` : ''
+  ].filter(Boolean)
+  if (!sections.length) return
+  const content = sections.join('\n\n')
+  try {
+    const runtime: any = await import('../../wailsjs/runtime/runtime')
+    const copied = typeof runtime.ClipboardSetText === 'function' && await runtime.ClipboardSetText(content)
+    if (!copied) await navigator.clipboard.writeText(content)
+    ElMessage.success('已复制两项备注')
+  } catch (err: any) {
+    ElMessage.error(err?.message || '复制失败，请重试')
+  }
 }
 
 async function generateGreeting(candidate: TalentCandidate) {
@@ -1437,7 +1480,8 @@ async function submitInterviewInvite() {
       method: interviewForm.method,
       meetingSubject: interviewForm.meetingSubject.trim(),
       location: interviewForm.location.trim(),
-      note: interviewForm.note.trim() ? `${interviewForm.note.trim()}\n[招呼文案]: ${greetingMessage.value}` : greetingMessage.value,
+      note: interviewForm.note.trim(),
+      strengthsNote: interviewForm.strengthsNote.trim(),
       status: 'scheduled'
     })
     scheduleSaved = true

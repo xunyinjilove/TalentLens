@@ -183,7 +183,7 @@ CREATE TABLE IF NOT EXISTS interviews (
   id TEXT PRIMARY KEY, project_candidate_id TEXT NOT NULL REFERENCES project_candidates(id),
   starts_at TEXT NOT NULL, ends_at TEXT NOT NULL, interviewer TEXT NOT NULL DEFAULT '',
   method TEXT NOT NULL DEFAULT '', location TEXT NOT NULL DEFAULT '',
-  note TEXT NOT NULL DEFAULT '', status TEXT NOT NULL DEFAULT 'scheduled',
+  note TEXT NOT NULL DEFAULT '', strengths_note TEXT NOT NULL DEFAULT '', status TEXT NOT NULL DEFAULT 'scheduled',
   created_at TEXT NOT NULL, updated_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS interviews_candidate_schedule
@@ -382,6 +382,9 @@ func (a *App) getRecruitmentDB() (*sql.DB, error) {
 		err = ensureTalentArchiveColumn(db)
 	}
 	if err == nil {
+		err = ensureInterviewStrengthsNoteColumn(db)
+	}
+	if err == nil {
 		err = ensureStrictCriteriaColumns(db)
 	}
 	if err == nil {
@@ -428,6 +431,31 @@ func (a *App) getRecruitmentDB() (*sql.DB, error) {
 	a.recruitmentDB = db
 	a.recruitmentDir = dir
 	return db, nil
+}
+
+func ensureInterviewStrengthsNoteColumn(db *sql.DB) error {
+	rows, err := db.Query("PRAGMA table_info(interviews)")
+	if err != nil {
+		return err
+	}
+	found := false
+	for rows.Next() {
+		var id, notNull, primaryKey int
+		var name, columnType string
+		var defaultValue sql.NullString
+		if err = rows.Scan(&id, &name, &columnType, &notNull, &defaultValue, &primaryKey); err != nil {
+			rows.Close()
+			return err
+		}
+		found = found || name == "strengths_note"
+	}
+	err = rows.Err()
+	rows.Close()
+	if err != nil || found {
+		return err
+	}
+	_, err = db.Exec("ALTER TABLE interviews ADD COLUMN strengths_note TEXT NOT NULL DEFAULT ''")
+	return err
 }
 
 func ensureTalentArchiveColumn(db *sql.DB) error {

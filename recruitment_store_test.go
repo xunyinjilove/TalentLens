@@ -1,12 +1,34 @@
 package main
 
 import (
+	"database/sql"
 	"encoding/json"
 	"os"
 	"path/filepath"
 	"testing"
 	"time"
 )
+
+func TestInterviewStrengthsNoteColumnUpgradesExistingDatabase(t *testing.T) {
+	db, err := sql.Open("sqlite", filepath.Join(t.TempDir(), "legacy.sqlite"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	if _, err := db.Exec(`CREATE TABLE interviews (id TEXT PRIMARY KEY, note TEXT NOT NULL DEFAULT ''); INSERT INTO interviews(id,note) VALUES('old','保留旧备注')`); err != nil {
+		t.Fatal(err)
+	}
+	if err := ensureInterviewStrengthsNoteColumn(db); err != nil {
+		t.Fatal(err)
+	}
+	if err := ensureInterviewStrengthsNoteColumn(db); err != nil {
+		t.Fatal(err)
+	}
+	var note, strengthsNote string
+	if err := db.QueryRow(`SELECT note,strengths_note FROM interviews WHERE id='old'`).Scan(&note, &strengthsNote); err != nil || note != "保留旧备注" || strengthsNote != "" {
+		t.Fatalf("migrated notes = %q, %q, err = %v", note, strengthsNote, err)
+	}
+}
 
 func writeLegacyJSON(t *testing.T, dir, group, name string, value interface{}) string {
 	t.Helper()
@@ -76,6 +98,43 @@ func TestRecruitmentMigrationPreservesLegacyData(t *testing.T) {
 	backups, err := filepath.Glob(filepath.Join(dir, "legacy-backup-*", "resumes", "resume_1.json"))
 	if err != nil || len(backups) != 1 {
 		t.Fatalf("expected one resume backup, got %v, %v", backups, err)
+	}
+}
+
+func TestInterviewStrengthsNotePersistsAndUsesSameProjectAssessment(t *testing.T) {
+	dir := t.TempDir()
+	now := time.Now().UTC()
+	project := &Project{ID: "proj_strengths", Name: "区域销售", JobConfig: JobConfig{Title: "区域销售"}, ResumeIDs: []string{"resume_strengths"}, CreatedAt: now, UpdatedAt: now}
+	resume := &Resume{ID: "resume_strengths", ProjectID: project.ID, FileName: "候选人甲.pdf", Content: "销售经历", Status: "done", Analysis: &AnalysisResult{CandidateName: "候选人甲", Strengths: []string{"渠道开发经验", "  团队带教  "}}, CreatedAt: now}
+	writeLegacyJSON(t, dir, "projects", project.ID, project)
+	writeLegacyJSON(t, dir, "resumes", resume.ID, resume)
+	app := NewApp()
+	app.dataDirOverride = dir
+	defer app.closeRecruitmentDB()
+	db, err := app.getRecruitmentDB()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var projectCandidateID string
+	if err := db.QueryRow(`SELECT id FROM project_candidates WHERE project_id=?`, project.ID).Scan(&projectCandidateID); err != nil {
+		t.Fatal(err)
+	}
+	strengths, err := app.GetRecruitmentAssessmentStrengths(projectCandidateID)
+	if err != nil || strengths != "• 渠道开发经验\n• 团队带教" {
+		t.Fatalf("strengths = %q, err = %v", strengths, err)
+	}
+	item := RecruitmentInterview{ProjectCandidateID: projectCandidateID, StartsAt: now.Add(time.Hour).Format(time.RFC3339), EndsAt: now.Add(2 * time.Hour).Format(time.RFC3339), Method: "现场面试", Note: "确认到场", StrengthsNote: strengths}
+	id, err := app.SaveRecruitmentInterview(item)
+	if err != nil {
+		t.Fatal(err)
+	}
+	app.closeRecruitmentDB()
+	list, err := app.ListRecruitmentInterviews(project.ID)
+	if err != nil || len(list) != 1 {
+		t.Fatalf("interviews = %v, err = %v", list, err)
+	}
+	if list[0].ID != id || list[0].Note != "确认到场" || list[0].StrengthsNote != strengths {
+		t.Fatalf("notes were not persisted: %+v", list[0])
 	}
 }
 
