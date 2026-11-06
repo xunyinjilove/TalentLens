@@ -77,6 +77,7 @@ export interface RecruitmentInterview {
   method: string
   location: string
   note: string
+  strengthsNote?: string
   status: string
   meetingSubject?: string
   meetingId?: string
