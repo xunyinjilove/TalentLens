@@ -116,7 +116,7 @@
             <p v-if="meetingConnection.account">当前主持账号：{{ meetingConnection.account }}</p>
             <div class="form-item actions">
               <el-button :loading="meetingBusy" @click="refreshMeetingConnection">刷新状态</el-button>
-              <el-button type="primary" :loading="meetingBusy" :disabled="!meetingConnection.installed" @click="loginMeeting">连接腾讯会议</el-button>
+              <el-button type="primary" :loading="meetingBusy" :disabled="!meetingConnection.installed || meetingConnection.loggedIn" @click="loginMeeting">{{ meetingConnection.loggedIn ? '已连接' : '连接腾讯会议' }}</el-button>
               <el-button :loading="meetingBusy" :disabled="!meetingConnection.loggedIn" @click="logoutMeeting">断开连接</el-button>
             </div>
             <p v-if="!meetingConnection.installed">共享安装包需包含官方 tmeet.exe；连接前请确认程序已安装。</p>
@@ -341,7 +341,7 @@ const activeTab = ref('ai')
 const meetingBusy = ref(false)
 const meetingConnection = ref<{ installed: boolean; loggedIn: boolean; account: string; message: string }>({ installed: false, loggedIn: false, account: '', message: '' })
 async function refreshMeetingConnection() { try { const api: any = await import('../../wailsjs/go/main/App'); meetingConnection.value = await api.GetTencentMeetingConnection() } catch (e: any) { meetingConnection.value.message = e?.message || String(e) } }
-async function loginMeeting() { meetingBusy.value = true; try { const api: any = await import('../../wailsjs/go/main/App'); meetingConnection.value = await api.LoginTencentMeeting(); ElMessage.success('腾讯会议已连接') } catch (e: any) { ElMessage.error(e?.message || String(e)); await refreshMeetingConnection() } finally { meetingBusy.value = false } }
+async function loginMeeting() { if (meetingConnection.value.loggedIn) return; meetingBusy.value = true; try { const api: any = await import('../../wailsjs/go/main/App'); meetingConnection.value = await api.LoginTencentMeeting(); if (meetingConnection.value.loggedIn) ElMessage.success('腾讯会议已连接') } catch (e: any) { ElMessage.error(e?.message || String(e)); await refreshMeetingConnection() } finally { meetingBusy.value = false } }
 async function logoutMeeting() { meetingBusy.value = true; try { const api: any = await import('../../wailsjs/go/main/App'); meetingConnection.value = await api.LogoutTencentMeeting(); ElMessage.success('已断开腾讯会议') } catch (e: any) { ElMessage.error(e?.message || String(e)) } finally { meetingBusy.value = false } }
 const testing = ref(false)
 const selectedPresetId = ref<string>('')

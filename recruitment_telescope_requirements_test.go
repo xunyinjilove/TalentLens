@@ -1,9 +1,44 @@
 package main
 
 import (
+	"errors"
 	"testing"
 	"time"
 )
+
+func TestConnectTencentMeetingDoesNotReloginAuthorizedAccount(t *testing.T) {
+	loginCalls := 0
+	current := func() TencentMeetingConnection {
+		return TencentMeetingConnection{Installed: true, LoggedIn: true, Message: "已授权"}
+	}
+	result, err := connectTencentMeeting(current, func() error {
+		loginCalls++
+		return errors.New("user has been login")
+	})
+	if err != nil || !result.LoggedIn || loginCalls != 0 {
+		t.Fatalf("authorized account was relogged: state=%+v, calls=%d, err=%v", result, loginCalls, err)
+	}
+}
+
+func TestConnectTencentMeetingChecksAuthorizationAfterLogin(t *testing.T) {
+	checks := 0
+	status := func() TencentMeetingConnection {
+		checks++
+		return TencentMeetingConnection{Installed: true, LoggedIn: checks > 1}
+	}
+	result, err := connectTencentMeeting(status, func() error { return errors.New("login process exited after authorization") })
+	if err != nil || !result.LoggedIn || checks != 2 {
+		t.Fatalf("completed authorization was reported as failure: state=%+v, checks=%d, err=%v", result, checks, err)
+	}
+}
+
+func TestConnectTencentMeetingReportsUnfinishedAuthorization(t *testing.T) {
+	status := func() TencentMeetingConnection { return TencentMeetingConnection{Installed: true} }
+	_, err := connectTencentMeeting(status, func() error { return nil })
+	if err == nil {
+		t.Fatal("login without an authorized status must not be reported as connected")
+	}
+}
 
 func TestTelescopeMissingMustSkillNeverBecomesUnfit(t *testing.T) {
 	checks := []RuleCheckItem{{Rule: "TELESCOPE_MUST_test", Status: "unknown"}}

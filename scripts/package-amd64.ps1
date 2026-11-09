@@ -1,5 +1,5 @@
 $ErrorActionPreference = "Stop"
-$version = "1.8.109"
+$version = "1.8.110"
 $builtExecutable = "build/bin/TalentLens-$version-amd64.exe"
 if (!(Test-Path -LiteralPath $builtExecutable)) { throw "Built executable missing: $builtExecutable" }
 Write-Host "Syncing runtime assets..."

@@ -133,8 +133,26 @@ func (a *App) GetTencentMeetingConnection() TencentMeetingConnection {
 	return state
 }
 func (a *App) LoginTencentMeeting() (TencentMeetingConnection, error) {
-	_, e := runTMeet(6*time.Minute, "auth", "login")
-	return a.GetTencentMeetingConnection(), e
+	return connectTencentMeeting(a.GetTencentMeetingConnection, func() error {
+		_, err := runTMeet(6*time.Minute, "auth", "login")
+		return err
+	})
+}
+
+func connectTencentMeeting(status func() TencentMeetingConnection, login func() error) (TencentMeetingConnection, error) {
+	current := status()
+	if current.LoggedIn {
+		return current, nil
+	}
+	err := login()
+	current = status()
+	if current.LoggedIn {
+		return current, nil
+	}
+	if err != nil {
+		return current, err
+	}
+	return current, fmt.Errorf("腾讯会议授权尚未完成，请检查浏览器授权结果")
 }
 func (a *App) LogoutTencentMeeting() (TencentMeetingConnection, error) {
 	_, e := runTMeet(20*time.Second, "auth", "logout")
