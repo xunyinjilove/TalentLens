@@ -39,6 +39,12 @@ if (!(Test-Path -LiteralPath $tmeetBinary) -or !(Test-Path -LiteralPath $tmeetLi
     Copy-Item -LiteralPath (Join-Path $extractDir "package/dist/tmeet-Windows-x86_64.exe") -Destination $tmeetBinary -Force
     Copy-Item -LiteralPath (Join-Path $extractDir "package/LICENSE") -Destination $tmeetLicense -Force
 }
+# Keep the locally built executable runnable as well as the shareable package.
+$localBin = Join-Path $binRoot "bin"
+New-Item -ItemType Directory -Path $localBin -Force | Out-Null
+Copy-Item -LiteralPath $tmeetBinary -Destination (Join-Path $localBin "tmeet.exe") -Force
+Copy-Item -LiteralPath $tmeetLicense -Destination (Join-Path $localBin "TMEET-LICENSE.txt") -Force
+
 New-Item -ItemType Directory -Path (Join-Path $stage "bin") -Force | Out-Null
 Copy-Item -LiteralPath $tmeetBinary -Destination (Join-Path $stage "bin/tmeet.exe") -Force
 Copy-Item -LiteralPath $tmeetLicense -Destination (Join-Path $stage "bin/TMEET-LICENSE.txt") -Force
