@@ -121,7 +121,7 @@ async function recruitmentAPI(): Promise<any> {
   if (!(window as any).go?.main?.App) {
     throw new Error('当前为浏览器界面预览；请在 TalentLens 桌面客户端查看本地招聘数据')
   }
-  return await import('../../wailsjs/go/main/App')
+  return await import('../../wailsjs/go/backend/App')
 }
 
 export const useRecruitmentStore = defineStore('recruitment', () => {

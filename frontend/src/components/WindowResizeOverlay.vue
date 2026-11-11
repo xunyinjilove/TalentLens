@@ -54,7 +54,7 @@ async function startResize(edge: string, event: MouseEvent) {
 
   // 2. 双重保障：通知 Go 后端通过 Win32 API 追溯顶层主窗口句柄并发送 WM_NCLBUTTONDOWN
   try {
-    const WailsApp = await import('../../wailsjs/go/main/App')
+    const WailsApp = await import('../../wailsjs/go/backend/App')
     if (WailsApp && typeof WailsApp.StartWindowResize === 'function') {
       await WailsApp.StartWindowResize(edge)
     }
@@ -69,7 +69,7 @@ function onWindowResize() {
   }
   saveTimer = window.setTimeout(async () => {
     try {
-      const WailsApp = await import('../../wailsjs/go/main/App')
+      const WailsApp = await import('../../wailsjs/go/backend/App')
       if (WailsApp && typeof WailsApp.SaveWindowSettings === 'function') {
         const curW = window.innerWidth
         const curH = window.innerHeight

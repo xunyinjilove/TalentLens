@@ -182,7 +182,11 @@ Windows 本地构建后，请将仓库的 `scripts` 和根目录 `node_modules` 
 
 ```
 TalentLens/
-├── app.go                 # Go 后端 (AI 客户端、文件处理、API)
+├── go.mod                 # Go 模块与依赖
+├── main.go                # Wails 启动入口，嵌入前端构建资源
+├── backend/               # Go 业务代码及同包测试
+│   ├── app.go             # 应用生命周期与前后端绑定
+│   └── *_test.go          # 后端测试
 ├── wails.json             # Wails 项目配置
 ├── frontend/
 │   ├── src/
@@ -199,6 +203,8 @@ TalentLens/
 ├── CHANGELOG.md           # 版本变更日志
 └── CONTRIBUTING.md        # 贡献指南
 ```
+
+Wails 构建仍从仓库根目录执行。根目录的 `main.go` 负责嵌入 `frontend/dist` 并启动 `backend.Run`；Go 业务实现和测试统一放在 `backend/`，前端调用由 Wails 生成到 `frontend/wailsjs/go/backend/`。
 
 ---
 

@@ -1175,7 +1175,7 @@ async function triggerAnalyzeAll() {
     return
   }
   try {
-    const api: any = await import('../../wailsjs/go/main/App')
+    const api: any = await import('../../wailsjs/go/backend/App')
     const result = await api.StartProjectBatchReanalysis(selectedProjectId.value)
     analyzingAll.value = true
     activeReanalysisRunId.value = result.runId
@@ -1203,7 +1203,7 @@ async function pollProjectReanalysis() {
   const runId = activeReanalysisRunId.value
   if (!runId) return
   try {
-    const api: any = await import('../../wailsjs/go/main/App')
+    const api: any = await import('../../wailsjs/go/backend/App')
     const status = await api.GetProjectReanalysisStatus(runId)
     if (activeReanalysisRunId.value !== runId) return
     const prevCount = analyzedCount.value
@@ -1240,7 +1240,7 @@ async function checkActiveProjectReanalysis(projectId: string) {
     return
   }
   try {
-    const api: any = await import('../../wailsjs/go/main/App')
+    const api: any = await import('../../wailsjs/go/backend/App')
     if (typeof api.GetActiveProjectReanalysis === 'function') {
       const active = await api.GetActiveProjectReanalysis(projectId)
       if (active && active.status === 'running' && active.runId) {
@@ -1382,7 +1382,7 @@ async function syncInviteStrengths(showFeedback = true) {
   const candidateId = inviteCandidate.value?.projectCandidateId
   if (!candidateId) return
   try {
-    const api: any = await import('../../wailsjs/go/main/App')
+    const api: any = await import('../../wailsjs/go/backend/App')
     const strengths = await api.GetRecruitmentAssessmentStrengths(candidateId) || ''
     if (inviteCandidate.value?.projectCandidateId !== candidateId || (!showFeedback && interviewForm.strengthsNote.trim())) return
     if (strengths) {
@@ -1415,7 +1415,7 @@ async function generateGreeting(candidate: TalentCandidate) {
   if (generatingGreeting.value) return
   generatingGreeting.value = true
   try {
-    const api: any = await import('../../wailsjs/go/main/App')
+    const api: any = await import('../../wailsjs/go/backend/App')
     const msg = await api.GenerateCandidateGreetingMessage(candidate.projectId, candidate.resumeId)
     if (msg) {
       greetingMessage.value = msg
@@ -1821,7 +1821,7 @@ async function refresh() {
 
 async function loadInbox(interactive = false) {
   try {
-    const api: any = await import('../../wailsjs/go/main/App')
+    const api: any = await import('../../wailsjs/go/backend/App')
     pendingApplications.value = (await api.ListImportedApplications('unassigned')) || []
   } catch (err: any) {
     console.warn('loadInbox error:', err)
@@ -1836,7 +1836,7 @@ function showInbox() {
 
 async function assign(id: string) {
   try {
-    const api: any = await import('../../wailsjs/go/main/App')
+    const api: any = await import('../../wailsjs/go/backend/App')
     await api.AssignApplication(id, assignment.value[id])
     ElMessage.success('投递已分配')
     await Promise.all([refresh(), loadInbox()])
@@ -1847,7 +1847,7 @@ async function assign(id: string) {
 
 async function loadDuplicates(interactive = false) {
   try {
-    const api: any = await import('../../wailsjs/go/main/App')
+    const api: any = await import('../../wailsjs/go/backend/App')
     duplicates.value = (await api.ListSuspectedDuplicates()) || []
   } catch (err: any) {
     console.warn('loadDuplicates error:', err)
@@ -1862,7 +1862,7 @@ function showDuplicates() {
 
 async function merge(pair: DuplicatePair) {
   try {
-    const api: any = await import('../../wailsjs/go/main/App')
+    const api: any = await import('../../wailsjs/go/backend/App')
     await api.MergeCandidates(pair.candidateId, pair.otherCandidateId, 'HR', mergeReasons.value[pair.candidateId + pair.otherCandidateId])
     ElMessage.success('档案已合并')
     await Promise.all([loadDuplicates(), refresh()])
@@ -1873,7 +1873,7 @@ async function merge(pair: DuplicatePair) {
 
 async function dismissDuplicateHint(pair: DuplicatePair) {
   try {
-    const api: any = await import('../../wailsjs/go/main/App')
+    const api: any = await import('../../wailsjs/go/backend/App')
     await api.DismissSuspectedDuplicate(pair.candidateId, pair.otherCandidateId)
     await loadDuplicates()
     ElMessage.success('已删除这条核对提示，档案和简历仍保留')
@@ -1889,7 +1889,7 @@ async function clearDuplicateHints() {
       '清空疑似重复提示', { confirmButtonText: '确认清空', cancelButtonText: '取消', type: 'warning' })
   } catch { return }
   try {
-    const api: any = await import('../../wailsjs/go/main/App')
+    const api: any = await import('../../wailsjs/go/backend/App')
     const removed: number = await api.ClearSuspectedDuplicates()
     await loadDuplicates()
     ElMessage.success(`已清理 ${removed} 条核对提示`)
@@ -1906,7 +1906,7 @@ async function retryAnalysis(resumeId: string) {
     return
   }
   try {
-    const api: any = await import('../../wailsjs/go/main/App')
+    const api: any = await import('../../wailsjs/go/backend/App')
     await api.RetryCandidateAnalysis(resumeId)
     ElMessage.success('已重新加入分析队列')
     await refresh()

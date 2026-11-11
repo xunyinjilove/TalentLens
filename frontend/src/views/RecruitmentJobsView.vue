@@ -709,7 +709,7 @@ async function generateSkillSuggestions(explicitDirection?: string) {
   skillDraft.value = []
   skillDirectionPromptVisible.value = false
   try {
-    const api: any = await import('../../wailsjs/go/main/App')
+    const api: any = await import('../../wailsjs/go/backend/App')
     const result = await api.SuggestJobSkills({ title, direction: explicitDirection || jobForm.direction, department: jobForm.department.trim(), jobDescription: jobForm.job_description.trim(), existingSkills: splitTags(skillsInput.value) })
     if (requestId !== activeSkillRequestSeq || formId !== currentFormInstanceId.value || title !== jobForm.title.trim() || !editModalVisible.value) return
     if (result.status === 'needs_direction') {
@@ -829,7 +829,7 @@ function goToTalentPool(projectId: string) {
 async function ensure51JobJobsCache() {
   if (cached51JobJobs.value.length > 0) return
   try {
-    const api: any = await import('../../wailsjs/go/main/App')
+    const api: any = await import('../../wailsjs/go/backend/App')
     const res = await api.Fetch51JobManagementJobs()
     if (res.status === 'success' && res.jobs) {
       cached51JobJobs.value = res.jobs
@@ -991,7 +991,7 @@ async function generateJobDescription(mode: 'fresh' | 'refine' = 'fresh', explic
   directionPromptVisible.value = false
 
   try {
-    const api: any = await import('../../wailsjs/go/main/App')
+    const api: any = await import('../../wailsjs/go/backend/App')
     const dir = explicitDirection !== undefined ? explicitDirection : jobForm.direction
     const res = await api.GenerateJobDescriptionDraft({
       formInstanceId: thisInstanceId,
@@ -1184,7 +1184,7 @@ async function handleActionCommand(cmd: string, project: Project) {
 async function saveMapping() {
   if (!mapProject.value || !platformJobId.value.trim()) return
   try {
-    const api: any = await import('../../wailsjs/go/main/App')
+    const api: any = await import('../../wailsjs/go/backend/App')
     await api.SetPlatformJobMapping('51job', '', platformJobId.value.trim(), mapProject.value.id)
     ElMessage.success('平台职位 ID 已关联到项目')
     await loadMappings()
@@ -1197,7 +1197,7 @@ async function saveMapping() {
 
 async function loadMappings() {
   try {
-    const api: any = await import('../../wailsjs/go/main/App')
+    const api: any = await import('../../wailsjs/go/backend/App')
     mappings.value = (await api.ListPlatformJobMappings()) || []
   } catch {
     mappings.value = []
@@ -1206,7 +1206,7 @@ async function loadMappings() {
 
 async function loadJobStats() {
   try {
-    const api: any = await import('../../wailsjs/go/main/App')
+    const api: any = await import('../../wailsjs/go/backend/App')
     if (api && typeof api.GetJobStatistics === 'function') {
       const stats = await api.GetJobStatistics()
       if (stats) jobStatsMap.value = stats

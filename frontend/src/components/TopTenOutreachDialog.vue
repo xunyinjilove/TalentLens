@@ -263,7 +263,7 @@ async function saveEditedMessage(item: Item, val: string) {
   const clean = String(val || '').trim()
   if (!clean || !props.projectId) return
   try {
-    const api: any = await import('../../wailsjs/go/main/App')
+    const api: any = await import('../../wailsjs/go/backend/App')
     if (api.SaveOutreachItemMessage) {
       await api.SaveOutreachItemMessage(props.projectId, item.id, clean)
       item.aiCustomized = true
@@ -274,7 +274,7 @@ async function preview(forceNew=false, explicitMode?: string){
   if(!props.projectId)return
   loading.value=true;error.value='';batch.value=null
   try{
-    const api:any=await import('../../wailsjs/go/main/App')
+    const api:any=await import('../../wailsjs/go/backend/App')
     const ids = props.candidateIds && props.candidateIds.length > 0 ? props.candidateIds : []
     const storageKey=`talentlens-outreach-batch:${props.projectId}`
     const savedID=localStorage.getItem(storageKey)
@@ -309,7 +309,7 @@ async function preview(forceNew=false, explicitMode?: string){
 async function regenerateSingle(item: Item) {
   regenerating.value[item.id] = true
   try {
-    const api: any = await import('../../wailsjs/go/main/App')
+    const api: any = await import('../../wailsjs/go/backend/App')
     const newMsg = await api.GenerateCandidateAIOutreachMessage(props.projectId, item.id)
     if (newMsg) {
       messages.value[item.id] = newMsg
@@ -326,7 +326,7 @@ async function regenerateAll() {
   if (!batch.value) return
   regeneratingAll.value = true
   try {
-    const api: any = await import('../../wailsjs/go/main/App')
+    const api: any = await import('../../wailsjs/go/backend/App')
     let successCount = 0
     for (const item of batch.value.items) {
       if (!selected.value[item.id]) continue
@@ -349,7 +349,7 @@ async function regenerateAll() {
 }
 async function open51JobBrowser() {
   try {
-    const api: any = await import('../../wailsjs/go/main/App')
+    const api: any = await import('../../wailsjs/go/backend/App')
     if (api.EnsurePlatformBrowser) {
       await api.EnsurePlatformBrowser('51job')
     } else {
@@ -373,7 +373,7 @@ async function loadJobs(){
   if(!batch.value || jobsLoading.value)return
   jobsLoading.value=true; jobsError.value=''
   try{
-    const api:any=await import('../../wailsjs/go/main/App')
+    const api:any=await import('../../wailsjs/go/backend/App')
     // 优先秒级读取本地已缓存职位（不启动浏览器，不依赖在线网页）
     if (api.GetCommunicationJobs) {
       const q = await api.GetCommunicationJobs(props.projectId, '51job')
@@ -435,7 +435,7 @@ async function syncJobs(manual = true) {
   syncingJobs.value = true
   if (manual) jobsError.value = ''
   try {
-    const api: any = await import('../../wailsjs/go/main/App')
+    const api: any = await import('../../wailsjs/go/backend/App')
     if (api.EnsurePlatformBrowser && manual) {
       await api.EnsurePlatformBrowser('51job')
     }
@@ -496,7 +496,7 @@ async function confirm(){
   if(!job)return
   confirming.value=true
   try{
-    const api:any=await import('../../wailsjs/go/main/App')
+    const api:any=await import('../../wailsjs/go/backend/App')
     if(batch.value.status==='draft'){
       batch.value=await api.ConfirmOutreachBatch(batch.value.id,batch.value.items.map(item=>({itemId:item.id,message:messages.value[item.id],include:!!selected.value[item.id],confirmPending:!!pendingConfirmed.value[item.id]})))
     }
@@ -513,7 +513,7 @@ async function runQueuedOutreach(){
   if(!batch.value || sendingBatch.value)return
   sendingBatch.value=true;stopRequested.value=false
   try{
-    const api:any=await import('../../wailsjs/go/main/App')
+    const api:any=await import('../../wailsjs/go/backend/App')
     const pending=batch.value.items.filter(item=>item.status==='queued'||item.status==='awaiting_confirmation')
     for(const item of pending){
       if(stopRequested.value)break
@@ -541,7 +541,7 @@ async function runQueuedOutreach(){
 async function retryRead(item:Item){
   if(!batch.value)return
   try{
-    const api:any=await import('../../wailsjs/go/main/App')
+    const api:any=await import('../../wailsjs/go/backend/App')
     await api.RequeueOutreachReadFailure(item.id)
     batch.value=await api.GetOutreachBatch(batch.value.id)
     await openBudget()
@@ -554,7 +554,7 @@ async function verifyIdentity(item:Item){
       '核验候选人详情链接',
       { confirmButtonText:'核验并加入发送队列', cancelButtonText:'取消', inputPlaceholder:'https://ehire.51job.com/Revision/talent/resume/detail?resumeId=…' }
     )
-    const api:any=await import('../../wailsjs/go/main/App')
+    const api:any=await import('../../wailsjs/go/backend/App')
     await api.VerifyOutreachCandidateDetail(item.id,response.value.trim())
     batch.value=await api.GetOutreachBatch(batch.value!.id)
     ElMessage.success('已核对平台页面与候选人姓名；请点击“继续处理待发送”核对职位和点数')
@@ -569,7 +569,7 @@ function openProfile(url:string){window.open(url,'_blank','noopener,noreferrer')
 async function saveReceipt(){
   if(!receiptItem.value||!batch.value)return
   try{
-    const api:any=await import('../../wailsjs/go/main/App')
+    const api:any=await import('../../wailsjs/go/backend/App')
     await api.RecordOutreachResult(receiptItem.value.id,receiptStatus.value,receiptText.value,receiptActor.value)
     batch.value=await api.GetOutreachBatch(batch.value.id)
     receiptOpen.value=false

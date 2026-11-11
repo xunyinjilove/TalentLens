@@ -9,7 +9,7 @@
 <script setup lang="ts">
 async function invoke(method: string) {
   try {
-    const api: any = await import('../../wailsjs/go/main/App')
+    const api: any = await import('../../wailsjs/go/backend/App')
     await api[method]()
   } catch { /* Browser preview has no desktop window. */ }
 }

@@ -390,7 +390,7 @@ function edit(item: RecruitmentInterview) {
 async function reload() {
   await Promise.all([recruitment.loadInterviews(), recruitment.loadCandidates()])
   try {
-    const api: any = await import('../../wailsjs/go/main/App')
+    const api: any = await import('../../wailsjs/go/backend/App')
     pendingCandidates.value = await api.ListPendingInterviewCandidates(projectId.value) || []
   } catch (err: any) { recruitment.error = err?.message || String(err) }
 }
@@ -545,7 +545,7 @@ async function syncAssessmentStrengths(showFeedback = true) {
   if (!candidateId) return
   syncingStrengths.value = true
   try {
-    const api: any = await import('../../wailsjs/go/main/App')
+    const api: any = await import('../../wailsjs/go/backend/App')
     const strengths = await api.GetRecruitmentAssessmentStrengths(candidateId) || ''
     if (form.projectCandidateId !== candidateId || (!showFeedback && form.strengthsNote?.trim())) return
     if (strengths) {
@@ -609,7 +609,7 @@ async function openMeetingUrl(url?: string) {
   window.open(target, '_blank', 'noopener,noreferrer')
 }
 
-async function retryMeetingSync() { if (!form.id) return; try { const api: any = await import('../../wailsjs/go/main/App'); await api.RetryTencentMeetingSync(form.id); await reload(); const latest = recruitment.interviews.find(item => item.id === form.id); if (latest) edit(latest) } catch (err: any) { ElMessage.error(err?.message || String(err)) } }
+async function retryMeetingSync() { if (!form.id) return; try { const api: any = await import('../../wailsjs/go/backend/App'); await api.RetryTencentMeetingSync(form.id); await reload(); const latest = recruitment.interviews.find(item => item.id === form.id); if (latest) edit(latest) } catch (err: any) { ElMessage.error(err?.message || String(err)) } }
 onMounted(() => { void projects.loadProjects(); void reload() })
 </script>
 

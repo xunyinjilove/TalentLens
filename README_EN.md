@@ -161,7 +161,11 @@ wails build -platform windows/amd64  # Windows
 
 ```
 TalentLens/
-├── app.go                 # Go backend (AI client, file processing, API)
+├── go.mod                 # Go module and dependencies
+├── main.go                # Wails entry point and embedded frontend assets
+├── backend/               # Go application code and colocated tests
+│   ├── app.go             # App lifecycle and frontend bindings
+│   └── *_test.go          # Backend tests
 ├── wails.json             # Wails configuration
 ├── frontend/
 │   ├── src/
@@ -178,6 +182,8 @@ TalentLens/
 ├── CHANGELOG.md           # Version changelog
 └── CONTRIBUTING.md        # Contribution guide
 ```
+
+Run Wails builds from the repository root. The small root `main.go` embeds `frontend/dist` and calls `backend.Run`; Go application code and tests live in `backend/`. Wails generates frontend bindings under `frontend/wailsjs/go/backend/`.
 
 ---
 

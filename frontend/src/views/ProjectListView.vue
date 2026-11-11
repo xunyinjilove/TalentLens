@@ -660,7 +660,7 @@ function openCreateDialogWithCurrentJob() {
 // 加载项目统计
 async function loadStats() {
   let WailsApp: any = null
-  try { WailsApp = await import('../../wailsjs/go/main/App') } catch { return }
+  try { WailsApp = await import('../../wailsjs/go/backend/App') } catch { return }
   if (!WailsApp) return
   for (const p of projectStore.projects) {
     try {

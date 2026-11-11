@@ -1234,7 +1234,7 @@ async function runLibraryHi() {
   if (!projectId.value || hiBusy.value) return
   hiBusy.value = true
   try {
-    const api: any = await import('../../wailsjs/go/main/App')
+    const api: any = await import('../../wailsjs/go/backend/App')
     hiResult.value = await runWith51JobBrowser(api, () => api.Run51JobOneClickHi(projectId.value, '', [], hiPointsLimit.value))
     hiResultVisible.value = true
     await resumeStore.loadProjectResumes(projectId.value)
@@ -1247,7 +1247,7 @@ async function runLibraryHi() {
 
 async function retryLibraryProjectMessage(row: any) {
   try {
-    const api: any = await import('../../wailsjs/go/main/App')
+    const api: any = await import('../../wailsjs/go/backend/App')
     const result = await runWith51JobBrowser(api, () => api.Retry51JobProjectMessage(projectId.value, row.candidateId))
     row.reason = result.message || row.reason
     if (result.status === 'sent') ElMessage.success(result.message)
@@ -1277,7 +1277,7 @@ async function openRadarDraft() {
   if (!projectId.value || isGeneratingMetrics.value) return
   isGeneratingMetrics.value = true
   try {
-    const api: any = await import('../../wailsjs/go/main/App')
+    const api: any = await import('../../wailsjs/go/backend/App')
     const draft = await api.PreviewProjectJobRadar(projectId.value)
     radarDraftText.value = (draft.metrics || []).join('\n')
     radarDraftOrigin.value = draft.origin || ''
@@ -1293,7 +1293,7 @@ async function applyRadarDraft() {
   if (metrics.length < 1 || metrics.length > 8) { ElMessage.warning('请确认 1 至 8 项相关指标'); return }
   isApplyingRadar.value = true
   try {
-    const api: any = await import('../../wailsjs/go/main/App')
+    const api: any = await import('../../wailsjs/go/backend/App')
     await api.ApplyProjectJobRadar({ projectId: projectId.value, sourceHash: radarDraftSourceHash.value, metrics, origin: radarDraftOrigin.value, note: radarDraftNote.value })
     await projectStore.refreshProject(projectId.value)
     await resumeStore.loadProjectResumes(projectId.value)
@@ -1483,7 +1483,7 @@ async function loadHROutline() {
   }
   hrOutlineLoading.value = true
   try {
-    const api: any = await import('../../wailsjs/go/main/App')
+    const api: any = await import('../../wailsjs/go/backend/App')
     currentHROutline.value = await api.GetHROutline(resumeId)
   } catch (e) {
     console.warn('获取初试提纲失败:', e)
@@ -2292,7 +2292,7 @@ async function handleTranslateToChinese(force: boolean) {
   translationBusy.value = true
   translationError.value = ''
   try {
-    const api: any = await import('../../wailsjs/go/main/App')
+    const api: any = await import('../../wailsjs/go/backend/App')
     const sections = translationSourceSections()
     const result: string[] = await api.TranslateResumeSections(resumeID, 'zh', force, sections)
     if (request !== translationRequest || resumeStore.selectedId !== resumeID) return
@@ -2355,7 +2355,7 @@ async function handleReviewRedLine(criterion: string, status: 'met' | 'violated'
     } catch { return }
   }
   try {
-    const App = await import('../../wailsjs/go/main/App')
+    const App = await import('../../wailsjs/go/backend/App')
     await App.SetReviewedRedLine(resume.id, criterion, status, evidence)
     if (projectId.value) await resumeStore.loadProjectResumes(projectId.value)
     ElMessage.success('红线核实结果已保存')
@@ -2373,7 +2373,7 @@ async function handleReviewBonus(criterion: string, status: 'met' | 'violated' |
     } catch { return }
   }
   try {
-    const App = await import('../../wailsjs/go/main/App')
+    const App = await import('../../wailsjs/go/backend/App')
     await App.SetReviewedBonus(resume.id, criterion, status, evidence)
     if (projectId.value) await resumeStore.loadProjectResumes(projectId.value)
     ElMessage.success('加分项人工核实结果已保存')
@@ -2392,7 +2392,7 @@ async function handleAddProjectReviewCriterion(kind: 'redline' | 'bonus') {
     criterion = result.value.trim()
   } catch { return }
   try {
-    const App = await import('../../wailsjs/go/main/App')
+    const App = await import('../../wailsjs/go/backend/App')
     await App.AddProjectReviewCriterion(projectId.value, kind, criterion)
     await projectStore.refreshProject(projectId.value)
     await resumeStore.loadProjectResumes(projectId.value)
@@ -2435,7 +2435,7 @@ function getConsistencyStatusText(status?: string): string {
 
 async function handleAttachResume(resumeId: string) {
   let WailsApp: any = null
-  try { WailsApp = await import('../../wailsjs/go/main/App') } catch {}
+  try { WailsApp = await import('../../wailsjs/go/backend/App') } catch {}
 
   if (WailsApp && WailsApp.SelectAndAttachResumeFile) {
     try {
@@ -2462,7 +2462,7 @@ async function handleOpenCandidateUrl() {
   }
 
   let WailsApp: any = null
-  try { WailsApp = await import('../../wailsjs/go/main/App') } catch {}
+  try { WailsApp = await import('../../wailsjs/go/backend/App') } catch {}
 
   if (WailsApp && WailsApp.OpenURL) {
     try {
@@ -2487,7 +2487,7 @@ async function handle51JobGreeting() {
   const boundProjectID = resume.project_id || projectId.value
   if (boundProjectID) {
     try {
-      const App: any = await import('../../wailsjs/go/main/App')
+      const App: any = await import('../../wailsjs/go/backend/App')
       const bound = await App.Get51JobProjectJob(boundProjectID)
       await greet51JobWithJob(resume.id, { id: bound.jobId, title: bound.title })
       return
@@ -2517,7 +2517,7 @@ async function ensure51JobCandidateDetail(): Promise<boolean> {
   if (!resume || !is51JobSource.value || contactBusy.value) return false
   try {
     contactBusy.value = true
-    const api: any = await import('../../wailsjs/go/main/App')
+    const api: any = await import('../../wailsjs/go/backend/App')
     const result = await runWith51JobBrowser(api, () => api.AutoLink51JobCandidateDetail(resume.id), { isActive: () => resumeStore.selectedResume?.id === resume.id })
     if (result.status !== 'verified') { ElMessage.warning(result.message || '未能自动定位候选人网页，已跳过'); return false }
     await resumeStore.loadProjectResumes(projectId.value)
@@ -2533,7 +2533,7 @@ async function showSnapshotHistory() {
   const id = resumeStore.selectedResume?.id
   if (!id) return
   try {
-    const api: any = await import('../../wailsjs/go/main/App')
+    const api: any = await import('../../wailsjs/go/backend/App')
     snapshotHistory.value = await api.GetResumeSnapshotHistory(id)
     snapshotHistoryOpen.value = true
   } catch (err: any) { ElMessage.error(err?.message || String(err)) }
@@ -2549,7 +2549,7 @@ async function load51JobOptions() {
   const requestedKeyword = jobPickerKeyword.value
   const requestedResumeID = jobPickerResumeID.value
   try {
-    const App = await import('../../wailsjs/go/main/App')
+    const App = await import('../../wailsjs/go/backend/App')
     const result = await runWith51JobBrowser(App,
       () => App.List51JobCommunicationJobs(requestedResumeID, requestedKeyword),
       { isActive: () => jobPickerVisible.value && jobPickerResumeID.value === requestedResumeID,
@@ -2576,7 +2576,7 @@ async function confirm51JobSelectedJob() {
     return
   }
   try {
-    const App: any = await import('../../wailsjs/go/main/App')
+    const App: any = await import('../../wailsjs/go/backend/App')
     const catalog = await App.Get51JobTalentManagementCatalog()
     await ElMessageBox.confirm(`将当前分库固定绑定到 51job 职位「${job.title}」（ID ${job.id}）？以后同步与打招呼自动使用此职位。`, '确认项目职位绑定', { type: 'warning' })
     await App.Bind51JobTalentManagementJob(catalog.accountScope, job.id, resume.project_id || projectId.value)
@@ -2593,7 +2593,7 @@ async function greet51JobWithJob(resumeID: string, job: { id: string; title: str
   if (!resume || resume.id !== resumeID || contactBusy.value) return
   contactBusy.value = true
   try {
-    const App = await import('../../wailsjs/go/main/App')
+    const App = await import('../../wailsjs/go/backend/App')
     const preview = await runWith51JobBrowser(App,
       () => App.Prepare51JobHiChatForJob(resume.id, job.id, job.title),
       { isActive: () => resumeStore.selectedResume?.id === resume.id,
@@ -2621,7 +2621,7 @@ async function check51JobReply(resumeId: string) {
   if (contactBusy.value) return
   contactBusy.value = true
   try {
-    const App = await import('../../wailsjs/go/main/App')
+    const App = await import('../../wailsjs/go/backend/App')
     const result = await runWith51JobBrowser(App, () => App.Check51JobResumeReply(resumeId),
       { onWaiting: message => { ElMessage.info(message) } })
     if (result.status === 'downloaded' || result.status === 'already_current') {
@@ -2827,7 +2827,7 @@ async function handleCopyError(resume: any) {
 
 async function handleOpenLogDir() {
   try {
-    const WailsApp = await import('../../wailsjs/go/main/App')
+    const WailsApp = await import('../../wailsjs/go/backend/App')
     if (WailsApp && WailsApp.ExportErrorReportFile) {
       await WailsApp.ExportErrorReportFile()
       ElMessage.success('已打开日志文件夹')
@@ -2912,7 +2912,7 @@ async function handleExport() {
       ElMessage.success(t('project.exportSuccess') + '：' + filePath)
       // 自动打开导出目录
       try {
-        const WailsApp = await import('../../wailsjs/go/main/App')
+        const WailsApp = await import('../../wailsjs/go/backend/App')
         await WailsApp.OpenExportDir()
       } catch {}
     } else {
@@ -2959,7 +2959,7 @@ function handlePanelDrop(e: DragEvent) {
 // 点击选择文件 → 调用 Wails 原生文件对话框
 async function handleSelectFiles() {
   try {
-    const WailsApp = await import('../../wailsjs/go/main/App')
+    const WailsApp = await import('../../wailsjs/go/backend/App')
     const count = await WailsApp.SelectResumeFiles(projectId.value || '')
     if (count > 0) {
       ElMessage.success(t('guide.analysisStarted').replace('...', `: ${count} 份`))
@@ -3002,7 +3002,7 @@ async function loadParsedContent() {
       // Reopen saved Chinese text without issuing a translation model call.
       const request = translationRequest
       try {
-        const api: any = await import('../../wailsjs/go/main/App')
+        const api: any = await import('../../wailsjs/go/backend/App')
         const cached: string[] | null = await api.GetCachedResumeTranslation(requestedId, 'zh', translationSourceSections())
         if (request === translationRequest && resumeStore.selectedId === requestedId && parsedContent.value === content && cached && cached.length > 0) {
           translatedSections.value = cached
@@ -3104,7 +3104,7 @@ onMounted(async () => {
   
   // 通知后端当前活跃项目（用于原生拖拽时关联项目）
   try {
-    const WailsApp = await import('../../wailsjs/go/main/App')
+    const WailsApp = await import('../../wailsjs/go/backend/App')
     await WailsApp.SetActiveProject(projectId.value || '')
   } catch {}
 

@@ -11,7 +11,7 @@ let isWailsEnv = false
 async function loadWailsBindings() {
   try {
     WailsRuntime = await import('../../wailsjs/runtime/runtime')
-    WailsApp = await import('../../wailsjs/go/main/App')
+    WailsApp = await import('../../wailsjs/go/backend/App')
     isWailsEnv = true
     console.log('✅ Wails 环境已检测到')
   } catch (e) {
@@ -443,7 +443,7 @@ export const useResumeStore = defineStore('resume', () => {
     const local = getAIConfig()
     if (local && local.api_key) return local
     try {
-      const WailsApp = await import('../../wailsjs/go/main/App')
+      const WailsApp = await import('../../wailsjs/go/backend/App')
       if (WailsApp) {
         const backendCfg = await WailsApp.GetConfig()
         if (backendCfg?.ai?.api_key) {

@@ -340,9 +340,9 @@ const { t } = useI18n()
 const activeTab = ref('ai')
 const meetingBusy = ref(false)
 const meetingConnection = ref<{ installed: boolean; loggedIn: boolean; account: string; message: string }>({ installed: false, loggedIn: false, account: '', message: '' })
-async function refreshMeetingConnection() { try { const api: any = await import('../../wailsjs/go/main/App'); meetingConnection.value = await api.GetTencentMeetingConnection() } catch (e: any) { meetingConnection.value.message = e?.message || String(e) } }
-async function loginMeeting() { if (meetingConnection.value.loggedIn) return; meetingBusy.value = true; try { const api: any = await import('../../wailsjs/go/main/App'); meetingConnection.value = await api.LoginTencentMeeting(); if (meetingConnection.value.loggedIn) ElMessage.success('腾讯会议已连接') } catch (e: any) { ElMessage.error(e?.message || String(e)); await refreshMeetingConnection() } finally { meetingBusy.value = false } }
-async function logoutMeeting() { meetingBusy.value = true; try { const api: any = await import('../../wailsjs/go/main/App'); meetingConnection.value = await api.LogoutTencentMeeting(); ElMessage.success('已断开腾讯会议') } catch (e: any) { ElMessage.error(e?.message || String(e)) } finally { meetingBusy.value = false } }
+async function refreshMeetingConnection() { try { const api: any = await import('../../wailsjs/go/backend/App'); meetingConnection.value = await api.GetTencentMeetingConnection() } catch (e: any) { meetingConnection.value.message = e?.message || String(e) } }
+async function loginMeeting() { if (meetingConnection.value.loggedIn) return; meetingBusy.value = true; try { const api: any = await import('../../wailsjs/go/backend/App'); meetingConnection.value = await api.LoginTencentMeeting(); if (meetingConnection.value.loggedIn) ElMessage.success('腾讯会议已连接') } catch (e: any) { ElMessage.error(e?.message || String(e)); await refreshMeetingConnection() } finally { meetingBusy.value = false } }
+async function logoutMeeting() { meetingBusy.value = true; try { const api: any = await import('../../wailsjs/go/backend/App'); meetingConnection.value = await api.LogoutTencentMeeting(); ElMessage.success('已断开腾讯会议') } catch (e: any) { ElMessage.error(e?.message || String(e)) } finally { meetingBusy.value = false } }
 const testing = ref(false)
 const selectedPresetId = ref<string>('')
 const dataDir = ref('')
@@ -478,7 +478,7 @@ async function testConnection() {
   testing.value = true
   try {
     let WailsApp: any = null
-    try { WailsApp = await import('../../wailsjs/go/main/App') } catch {}
+    try { WailsApp = await import('../../wailsjs/go/backend/App') } catch {}
     if (WailsApp) {
       const config = { provider: aiForm.provider, base_url: aiForm.baseURL, api_key: aiForm.apiKey, model: aiForm.model, max_retries: 3, timeout: 30 }
       const result = await WailsApp.TestAIConnection(config)
@@ -537,7 +537,7 @@ async function saveSettings() {
 
     // 同步到后端 Go 服务持久化配置 (config.json 与 a.config.AI)
     try {
-      const WailsApp = await import('../../wailsjs/go/main/App')
+      const WailsApp = await import('../../wailsjs/go/backend/App')
       if (WailsApp) {
         const aiConfig = {
           provider: aiForm.provider || 'deepseek',
@@ -590,7 +590,7 @@ function resetSettings() {
 
 async function openDataDir() {
   try {
-    const WailsApp = await import('../../wailsjs/go/main/App')
+    const WailsApp = await import('../../wailsjs/go/backend/App')
     await WailsApp.OpenDataDir()
   } catch {}
 }
@@ -599,7 +599,7 @@ async function checkForUpdate() {
   updateChecking.value = true
   updateResult.value = null
   try {
-    const WailsApp = await import('../../wailsjs/go/main/App')
+    const WailsApp = await import('../../wailsjs/go/backend/App')
     const result = await WailsApp.CheckForUpdate()
     updateResult.value = result as any
     if (result.error || (!result.hasUpdate && !result.latestVersion)) {
@@ -612,7 +612,7 @@ async function checkForUpdate() {
     }
   } catch {
     try {
-      const WailsApp = await import('../../wailsjs/go/main/App')
+      const WailsApp = await import('../../wailsjs/go/backend/App')
       await WailsApp.OpenURL('https://github.com/1186258278/TalentLens/releases')
     } catch {}
   } finally {
@@ -622,7 +622,7 @@ async function checkForUpdate() {
 
 async function openLink(url: string) {
   try {
-    const WailsApp = await import('../../wailsjs/go/main/App')
+    const WailsApp = await import('../../wailsjs/go/backend/App')
     await WailsApp.OpenURL(url)
   } catch {
     window.open(url, '_blank')
@@ -633,7 +633,7 @@ onMounted(async () => {
   void refreshMeetingConnection()
   // 加载数据目录路径和版本号
   try {
-    const WailsApp = await import('../../wailsjs/go/main/App')
+    const WailsApp = await import('../../wailsjs/go/backend/App')
     dataDir.value = await WailsApp.GetDataDir()
     appVersion.value = await WailsApp.GetAppVersion()
 
@@ -662,7 +662,7 @@ onMounted(async () => {
         // 若本地已有配置，向 Go 后端静默对齐同步一次
         if (aiForm.apiKey) {
           try {
-            const WailsApp = await import('../../wailsjs/go/main/App')
+            const WailsApp = await import('../../wailsjs/go/backend/App')
             if (WailsApp && typeof WailsApp.SaveAIConfig === 'function') {
               await WailsApp.SaveAIConfig({
                 provider: aiForm.provider || 'deepseek',

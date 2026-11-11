@@ -240,7 +240,7 @@ async function setVerdict(item: HROutlineQuestion, verdict: string) {
   }
   if (props.resumeId && item.question_id) {
     try {
-      const api: any = await import('../../wailsjs/go/main/App')
+      const api: any = await import('../../wailsjs/go/backend/App')
       await api.SaveHROutlineQuestion(props.resumeId, item.question_id, item.hr_verdict, item.hr_notes || '')
     } catch {}
   }
@@ -254,7 +254,7 @@ async function saveQuestion(item: HROutlineQuestion, idx: number) {
   const key = item.question_id || idx
   savingMap[key] = true
   try {
-    const api: any = await import('../../wailsjs/go/main/App')
+    const api: any = await import('../../wailsjs/go/backend/App')
     const updated = await api.SaveHROutlineQuestion(
       props.resumeId,
       item.question_id,

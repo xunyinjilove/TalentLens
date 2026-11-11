@@ -52,7 +52,7 @@ const saving = ref(false)
 const form = reactive<OfferCard>({ projectCandidateId:'',projectId:'',candidateName:'',projectName:'',jobTitle:'',salaryPackage:'',workLocation:'',plannedStartDate:'',validUntil:'',note:'',owner:'',status:'draft',createdAt:'',updatedAt:'' })
 const statusText = (status:string) => ({ draft:'草稿',confirmed:'已确认',accepted:'候选人已接受',declined:'候选人已拒绝',withdrawn:'已撤回' } as Record<string,string>)[status] || status
 const historyText = (action:string) => action === 'saved' ? '保存修改' : `状态变更：${statusText(action.slice(7))}`
-async function api():Promise<any> { return await import('../../wailsjs/go/main/App') }
+async function api():Promise<any> { return await import('../../wailsjs/go/backend/App') }
 async function load() { try { cards.value = await (await api()).ListOfferCards(projectId.value) || [] } catch (err:any) { ElMessage.error(err?.message || String(err)) } }
 async function open(card:OfferCard) { Object.assign(form,card); dialogOpen.value=true; try { history.value = await (await api()).ListOfferHistory(card.projectCandidateId) || [] } catch { history.value=[] } }
 async function save() { saving.value=true; try { await (await api()).SaveOfferCard({ ...form },'HR'); await load(); history.value=await (await api()).ListOfferHistory(form.projectCandidateId) || []; ElMessage.success('Offer 卡已保存') } catch(err:any) { ElMessage.error(err?.message || String(err)) } finally { saving.value=false } }

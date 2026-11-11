@@ -207,7 +207,7 @@ watch(() => props.modelValue, async (val) => {
 async function loadCriteria() {
   loading.value = true
   try {
-    const api: any = await import('../../wailsjs/go/main/App')
+    const api: any = await import('../../wailsjs/go/backend/App')
     const res = await api.GetTalentManagementStrictCriteria(props.projectId)
     if (res) {
       criteria.value = {
@@ -242,7 +242,7 @@ async function executeFilter() {
 
   filtering.value = true
   try {
-    const api: any = await import('../../wailsjs/go/main/App')
+    const api: any = await import('../../wailsjs/go/backend/App')
     criteria.value.projectId = props.projectId
     criteria.value.complianceConfirmed = true
 

@@ -45,7 +45,7 @@ const legacyRules = computed(() => rules.value.filter(rule => rule.status === 's
 function kindLabel(kind: string) { return ({ redline: '红线待核实', core: '核心能力', bonus: '加分项' } as Record<string,string>)[kind] || kind }
 async function load() {
   if (!props.project) return
-  const api: any = await import('../../wailsjs/go/main/App')
+  const api: any = await import('../../wailsjs/go/backend/App')
   rules.value = await api.ListJobRules(props.project.id) || []
   for (const rule of rules.value) {
     if (!(rule.id in edits.value)) edits.value[rule.id] = rule.criterion
@@ -57,7 +57,7 @@ async function suggest(withAI: boolean) {
   busy.value = true; error.value = ''
   try {
     const previous = new Set(rules.value.map(rule => rule.id))
-    const api: any = await import('../../wailsjs/go/main/App')
+    const api: any = await import('../../wailsjs/go/backend/App')
     await api.SuggestJobRules(props.project.id, withAI)
     await load()
     if (withAI && !rules.value.some(rule => rule.source === 'ai' && !previous.has(rule.id))) {
@@ -70,7 +70,7 @@ async function approve() {
   if (!props.project) return
   busy.value = true; error.value = ''
   try {
-    const api: any = await import('../../wailsjs/go/main/App')
+    const api: any = await import('../../wailsjs/go/backend/App')
     const version = await api.ApproveJobRules(props.project.id, actor.value, drafts.value.map(rule => ({ id: rule.id, criterion: edits.value[rule.id], approved: !!approved.value[rule.id] })))
     ElMessage.success(`岗位规则 V${version} 已生效`)
     await Promise.all([load(), projects.loadProjects()])

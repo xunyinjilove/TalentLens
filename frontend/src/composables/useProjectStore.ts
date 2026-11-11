@@ -45,7 +45,7 @@ let isWailsEnv = false
 async function loadWails() {
   if (WailsApp) return
   try {
-    WailsApp = await import('../../wailsjs/go/main/App')
+    WailsApp = await import('../../wailsjs/go/backend/App')
     isWailsEnv = true
   } catch {
     isWailsEnv = false

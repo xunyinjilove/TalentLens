@@ -51,7 +51,7 @@ onMounted(async () => {
     if (saved) {
       const s = JSON.parse(saved)
       if (s.ai && (s.ai.apiKey || s.ai.api_key)) {
-        const WailsApp = await import('../wailsjs/go/main/App')
+        const WailsApp = await import('../wailsjs/go/backend/App')
         if (WailsApp && typeof WailsApp.SaveAIConfig === 'function') {
           await WailsApp.SaveAIConfig({
             provider: s.ai.provider || 'deepseek',
@@ -84,7 +84,7 @@ function initGlobalWindowDrag() {
     const dragContainer = target.closest('[data-wails-drag], .title-bar, .wb-header, .sidebar-brand, .wails-draggable')
     if (dragContainer) {
       try {
-        const WailsApp = await import('../wailsjs/go/main/App')
+        const WailsApp = await import('../wailsjs/go/backend/App')
         if (WailsApp && typeof WailsApp.StartWindowDrag === 'function') {
           await WailsApp.StartWindowDrag()
           return
@@ -107,7 +107,7 @@ function initGlobalWindowDrag() {
     const dragContainer = target.closest('[data-wails-drag], .title-bar, .wb-header, .wails-draggable')
     if (dragContainer) {
       try {
-        const WailsApp = await import('../wailsjs/go/main/App')
+        const WailsApp = await import('../wailsjs/go/backend/App')
         if (WailsApp && typeof WailsApp.WindowMaximize === 'function') {
           await WailsApp.WindowMaximize()
         }

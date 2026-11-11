@@ -99,7 +99,7 @@ let WailsApp: any = null
 
 onMounted(async () => {
   try {
-    WailsApp = await import('../../wailsjs/go/main/App')
+    WailsApp = await import('../../wailsjs/go/backend/App')
   } catch {
     // 非 Wails 环境下静默降级
   }

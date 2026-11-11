@@ -475,7 +475,7 @@ async function handleExecuteAction(action: ActionCommand) {
     ElMessage.success('已为您打开新建项目对话框')
   } else if (action.type === 'OPEN_DATA_DIR') {
     try {
-      const WailsApp = await import('../../wailsjs/go/main/App')
+      const WailsApp = await import('../../wailsjs/go/backend/App')
       if (WailsApp && typeof WailsApp.OpenDataDir === 'function') {
         await WailsApp.OpenDataDir()
         ElMessage.success('已在文件管理器中打开本地数据目录')

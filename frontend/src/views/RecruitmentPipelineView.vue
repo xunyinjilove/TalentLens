@@ -503,7 +503,7 @@ async function edit(item: TalentCandidate) {
   events.value = []
   dialogOpen.value = true
   try {
-    const api: any = await import('../../wailsjs/go/main/App')
+    const api: any = await import('../../wailsjs/go/backend/App')
     events.value = (await api.ListFollowUpEvents(item.projectCandidateId)) || []
   } catch {
     /* Existing card remains editable if history cannot load. */
@@ -535,7 +535,7 @@ async function save() {
 async function saveCommunication() {
   if (!editing.value || !communicationText.value.trim()) return
   try {
-    const api: any = await import('../../wailsjs/go/main/App')
+    const api: any = await import('../../wailsjs/go/backend/App')
     await api.AddCandidateCommunication(
       editing.value.projectCandidateId,
       communicationChannel.value,

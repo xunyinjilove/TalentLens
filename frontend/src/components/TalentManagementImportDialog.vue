@@ -439,21 +439,21 @@ const telescopeConditions = ref<TelescopeCondition[]>([])
 const telescopeConditionConfig = ref<any>(null)
 async function loadTelescopeConditions() {
   if (!projectId.value) { telescopeConditions.value = []; telescopeConditionConfig.value = null; return }
-  try { const api: any = await import('../../wailsjs/go/main/App'); const config = await api.GetTelescopeConditionConfig(projectId.value); telescopeConditionConfig.value = config; telescopeConditions.value = (config.conditions || []).map((item: TelescopeCondition) => ({ ...item })) }
+  try { const api: any = await import('../../wailsjs/go/backend/App'); const config = await api.GetTelescopeConditionConfig(projectId.value); telescopeConditionConfig.value = config; telescopeConditions.value = (config.conditions || []).map((item: TelescopeCondition) => ({ ...item })) }
   catch (error: any) { ElMessage.error(error?.message || String(error)) }
 }
 async function saveTelescopeConditions() {
   if (!projectId.value) return
-  const api: any = await import('../../wailsjs/go/main/App')
+  const api: any = await import('../../wailsjs/go/backend/App')
   const config = await api.SaveTelescopeConditionConfig({ projectId: projectId.value, conditions: telescopeConditions.value, version: '', jobSkillsChanged: false, jobSkills: [] })
   telescopeConditionConfig.value = config
   telescopeConditions.value = (config.conditions || []).map((item: TelescopeCondition) => ({ ...item }))
   ElMessage.success('望远镜条件已保存')
 }
-async function syncTelescopeJobSkills() { const api: any = await import('../../wailsjs/go/main/App'); const config = await api.SyncTelescopeJobSkills(projectId.value); telescopeConditionConfig.value = config; telescopeConditions.value = (config.conditions || []).map((item: TelescopeCondition) => ({ ...item })); ElMessage.success('岗位技能已同步，自定义条件已保留') }
+async function syncTelescopeJobSkills() { const api: any = await import('../../wailsjs/go/backend/App'); const config = await api.SyncTelescopeJobSkills(projectId.value); telescopeConditionConfig.value = config; telescopeConditions.value = (config.conditions || []).map((item: TelescopeCondition) => ({ ...item })); ElMessage.success('岗位技能已同步，自定义条件已保留') }
 async function confirmTelescopeCondition(candidateId: string, rule: string, status: string) {
   if (!telescopePreview.value?.batchId) return
-  try { const api: any = await import('../../wailsjs/go/main/App'); telescopePreview.value = await api.ConfirmTelescopeCondition(telescopePreview.value.batchId, candidateId, rule, status); ElMessage.success('人工结论已保存；明确不符者已按平台回执处理') }
+  try { const api: any = await import('../../wailsjs/go/backend/App'); telescopePreview.value = await api.ConfirmTelescopeCondition(telescopePreview.value.batchId, candidateId, rule, status); ElMessage.success('人工结论已保存；明确不符者已按平台回执处理') }
   catch (error: any) { ElMessage.error(error?.message || String(error)) }
 }
 const telescopeProgress = ref('')
@@ -518,7 +518,7 @@ async function load() {
   catalogStale.value = true
   catalogStatus.value = '正在核验 51job 登录账号和职位…'
   try {
-    const api: any = await import('../../wailsjs/go/main/App')
+    const api: any = await import('../../wailsjs/go/backend/App')
     const fresh = await withTimeout((async () => {
       const catalog = await api.Get51JobTalentManagementCatalog()
       const nextMappings = await api.ListPlatformJobMappings() || []
@@ -564,7 +564,7 @@ async function loadTelescopeCatalog() {
   telescopeLoading.value = true
   telescopeCatalogStale.value = true
   try {
-    const api: any = await import('../../wailsjs/go/main/App')
+    const api: any = await import('../../wailsjs/go/backend/App')
     const catalog = await api.Get51JobTelescopeCatalog()
     if (catalog && catalog.jobs && catalog.jobs.length > 0) {
       telescopeJobs.value = catalog.jobs
@@ -638,7 +638,7 @@ function formatJobOptionLabel(job: any) {
 
 async function openBrowser() {
   try {
-    const api: any = await import('../../wailsjs/go/main/App')
+    const api: any = await import('../../wailsjs/go/backend/App')
     await api.Open51JobManagementBrowser()
     ElMessage.info('已呼出 51job 专用浏览器；若当前不是人才管理页，请从企业首页菜单进入「人才管理」后重新读取')
   } catch (error: any) {
@@ -649,7 +649,7 @@ async function openBrowser() {
 async function loadSyncTask() {
   if (!accountScope.value || !jobId.value) return
   try {
-    const api: any = await import('../../wailsjs/go/main/App')
+    const api: any = await import('../../wailsjs/go/backend/App')
     const task = await api.GetTalentManagementSyncTask('51job', accountScope.value, jobId.value)
     syncTask.value = task
     autoSyncEnabled.value = Boolean(task?.autoSyncEnabled)
@@ -662,7 +662,7 @@ async function loadAttachmentTask() {
   if (!projectId.value) { attachmentTask.value = null; return }
   const requestedProject = projectId.value
   try {
-    const api: any = await import('../../wailsjs/go/main/App')
+    const api: any = await import('../../wailsjs/go/backend/App')
     const task = await api.Get51JobAttachmentSyncTask(requestedProject)
     if (projectId.value === requestedProject) attachmentTask.value = task
   } catch { if (projectId.value === requestedProject) attachmentTask.value = null }
@@ -670,7 +670,7 @@ async function loadAttachmentTask() {
 
 async function stopAttachmentSync() {
   if (!projectId.value) return
-  const api: any = await import('../../wailsjs/go/main/App')
+  const api: any = await import('../../wailsjs/go/backend/App')
   await api.Stop51JobAttachmentSync(projectId.value)
   ElMessage.info('正在中止附件检查，已保存的文件会保留')
 }
@@ -678,7 +678,7 @@ async function stopAttachmentSync() {
 async function resumeAttachmentSync() {
   if (!projectId.value) return
   try {
-    const api: any = await import('../../wailsjs/go/main/App')
+    const api: any = await import('../../wailsjs/go/backend/App')
     attachmentTask.value = await api.Start51JobAttachmentSync(projectId.value)
   } catch (error: any) { ElMessage.error(error?.message || String(error)) }
 }
@@ -686,7 +686,7 @@ async function resumeAttachmentSync() {
 async function toggleAutoSync(val: boolean) {
   if (!accountScope.value || !jobId.value) return
   try {
-    const api: any = await import('../../wailsjs/go/main/App')
+    const api: any = await import('../../wailsjs/go/backend/App')
     await api.SetTalentManagementAutoSync('51job', accountScope.value, jobId.value, val)
     ElMessage.success(val ? '已开启每小时自动检查' : '已关闭自动检查')
   } catch (e: any) {
@@ -698,7 +698,7 @@ async function toggleAutoSync(val: boolean) {
 async function resetTask() {
   if (!accountScope.value || !jobId.value) return
   try {
-    const api: any = await import('../../wailsjs/go/main/App')
+    const api: any = await import('../../wailsjs/go/backend/App')
     await api.ResetTalentManagementSyncTask('51job', accountScope.value, jobId.value)
     await loadSyncTask()
     ElMessage.success('断点已重置至第 1 状态第 1 页')
@@ -710,7 +710,7 @@ async function resetTask() {
 async function loadCriteria() {
   if (!projectId.value) return
   try {
-    const api: any = await import('../../wailsjs/go/main/App')
+    const api: any = await import('../../wailsjs/go/backend/App')
     const c = await api.GetTalentManagementStrictCriteria(projectId.value)
     if (c) applyCriteria(c, projectId.value)
   } catch (e) {}
@@ -794,7 +794,7 @@ async function checkAndResumeProject() {
   scanning.value = true
   progress.value = '正在核对任务检查点并进行平台状态对账…'
   try {
-    const api: any = await import('../../wailsjs/go/main/App')
+    const api: any = await import('../../wailsjs/go/backend/App')
     const preview = await api.CheckAndResumeProjectScreening(projectId.value)
     batchPreview.value = preview
     selectedUnfitCandidates.value = (preview.unfitList || []).filter((c: any) => c.actionStatus !== 'completed' && c.actionStatus !== 'verified_on_platform').map((c: any) => c.candidateId)
@@ -813,7 +813,7 @@ async function scanBatchPreview() {
   summary.value = ''
   progress.value = '正在扫描平台待处理人选并执行三态合规核验...'
   try {
-    const api: any = await import('../../wailsjs/go/main/App')
+    const api: any = await import('../../wailsjs/go/backend/App')
     await bindSelectedJob(api)
     await api.BeginProjectScreening(projectId.value)
     const preview = await api.Scan51JobTalentManagementBatch(accountScope.value, jobId.value, projectId.value, 0)
@@ -878,7 +878,7 @@ watch(telescopeJobId, () => {
 
 async function openTelescope() {
   try {
-    const api: any = await import('../../wailsjs/go/main/App')
+    const api: any = await import('../../wailsjs/go/backend/App')
     await api.Open51JobTelescopeBrowser()
     ElMessage.success('已自动通过 51job 菜单进入人才望远镜')
     await loadTelescopeCatalog()
@@ -899,7 +899,7 @@ async function scanTelescopePreview() {
   telescopeProgress.value = '正在读取人才望远镜当前职位并使用项目条件筛选…'
   try {
     await saveTelescopeConditions()
-    const api: any = await import('../../wailsjs/go/main/App')
+    const api: any = await import('../../wailsjs/go/backend/App')
     const preview = await api.Scan51JobTelescopeBatch(telescopeAccountScope.value, telescopeJobId.value, projectId.value)
     telescopePreview.value = preview
 		telescopeProgress.value = `筛选完成：合格 ${preview.qualifiedCount} 人，不合格 ${preview.unfitCount} 人；正在自动处理明确不符者…`
@@ -922,7 +922,7 @@ async function runTelescopeHi() {
   if (!telescopePreview.value || telescopeActionBusy.value) return
   telescopeActionBusy.value = true
   try {
-    const api: any = await import('../../wailsjs/go/main/App')
+    const api: any = await import('../../wailsjs/go/backend/App')
     const ids = telescopePreview.value.qualifiedList.map((item: any) => item.candidateId)
     const result = await api.Run51JobOneClickHi(projectId.value, telescopeJobId.value, ids, telescopePointsLimit.value)
     telescopeActionItems.value = result.items || []
@@ -939,7 +939,7 @@ async function runTelescopeReject() {
   if (!telescopePreview.value || telescopeActionBusy.value) return
   telescopeActionBusy.value = true
   try {
-    const api: any = await import('../../wailsjs/go/main/App')
+    const api: any = await import('../../wailsjs/go/backend/App')
     const result = await api.Run51JobTelescopeReject(telescopePreview.value.batchId)
     telescopeActionItems.value = result.items || []
     telescopeActionSummary.value = `平台处理：已确认转入未匹配 ${result.rejected} 人，跳过 ${result.skipped} 人，回执待核查 ${result.uncertain} 人`
@@ -952,7 +952,7 @@ async function runTelescopeReject() {
 
 async function retryTelescopeProjectMessage(row: any) {
   try {
-    const api: any = await import('../../wailsjs/go/main/App')
+    const api: any = await import('../../wailsjs/go/backend/App')
     const result = await api.Retry51JobProjectMessage(projectId.value, row.candidateId)
     row.reason = result.message || row.reason
     if (result.status === 'sent') ElMessage.success(result.message)
@@ -969,7 +969,7 @@ async function confirmRejectUnfit() {
       type: 'warning'
     })
     executingAction.value = true
-    const api: any = await import('../../wailsjs/go/main/App')
+    const api: any = await import('../../wailsjs/go/backend/App')
     const ledgers = await api.ConfirmScreeningRejectUnfit(batchPreview.value.batchId, selectedUnfitCandidates.value)
     const successCount = (ledgers || []).filter((l: any) => l.status === 'success').length
     ElMessage.success(`已完成平台标记：成功 ${successCount} 人`)
@@ -991,7 +991,7 @@ async function rescreenCurrentProject() {
       type: 'warning'
     })
     rescreening.value = true
-    const api: any = await import('../../wailsjs/go/main/App')
+    const api: any = await import('../../wailsjs/go/backend/App')
     const res = await api.RescreenProjectRepository(projectId.value)
     ElMessage.success(`旧库重筛完成：共核验 ${res.totalChecked} 人，排除不合规 ${res.unfitCount} 人，保留合格 ${res.activeRemainingCount} 人`)
     emit('completed')
@@ -1018,7 +1018,7 @@ async function saveCriteria() {
   saveStatus.value = '正在保存…'
   const requested = { ...strictCriteria.value, projectId: projectId.value }
   try {
-    const api: any = await import('../../wailsjs/go/main/App')
+    const api: any = await import('../../wailsjs/go/backend/App')
     await withTimeout(api.SetTalentManagementStrictCriteria(requested), 10000, '保存硬性条件')
     const saved = await withTimeout(api.GetTalentManagementStrictCriteria(projectId.value), 5000, '回读硬性条件')
     if (saved) {
@@ -1053,7 +1053,7 @@ watch(projectId, () => {
 async function loadPendingReviews() {
   if (!projectId.value) { pendingReviews.value = []; return }
   try {
-    const api: any = await import('../../wailsjs/go/main/App')
+    const api: any = await import('../../wailsjs/go/backend/App')
     pendingReviews.value = await api.ListTalentManagementPendingReviews(projectId.value) || []
   } catch { pendingReviews.value = [] }
 }
@@ -1062,7 +1062,7 @@ async function requestStopImport() {
   stopRequested.value = true
   progress.value = '正在中止人才管理同步，已抓取结果会保留…'
   try {
-    const api: any = await import('../../wailsjs/go/main/App')
+    const api: any = await import('../../wailsjs/go/backend/App')
     await api.Stop51JobManagementImport()
   } catch (error: any) {
     ElMessage.warning(error?.message || '中止信号未送达，当前页完成后仍会停止')
@@ -1072,7 +1072,7 @@ async function requestStopImport() {
 async function requestStopScreening() {
   progress.value = '正在中止扫描并保留分页断点…'
   try {
-    const api: any = await import('../../wailsjs/go/main/App')
+    const api: any = await import('../../wailsjs/go/backend/App')
     await api.StopProjectScreening(projectId.value)
   } catch (error: any) {
     ElMessage.error(error?.message || '中止扫描失败')
@@ -1098,7 +1098,7 @@ async function runSingleBatch() {
   summary.value = ''
   progress.value = '正在执行单批断点导入...'
   try {
-    const api: any = await import('../../wailsjs/go/main/App')
+    const api: any = await import('../../wailsjs/go/backend/App')
     await bindSelectedJob(api)
     const result = await api.RunTalentManagementNextBatch(accountScope.value, jobId.value)
     await loadSyncTask()
@@ -1127,7 +1127,7 @@ async function start() {
   summary.value = ''
   const totals = { added: 0, duplicate: 0, pending: 0, failed: 0, intercepted: 0, rejected: 0, rejectPending: 0 }
   try {
-    const api: any = await import('../../wailsjs/go/main/App')
+    const api: any = await import('../../wailsjs/go/backend/App')
     await api.Begin51JobManagementImport()
     await bindSelectedJob(api)
     for (const status of [...statuses.value]) {
@@ -1175,7 +1175,7 @@ async function start() {
     if (!stopRequested.value) ElMessage.error(error?.message || String(error))
   } finally {
     try {
-      const api: any = await import('../../wailsjs/go/main/App')
+      const api: any = await import('../../wailsjs/go/backend/App')
       await api.End51JobManagementImport()
       await loadPendingReviews()
     } catch { /* 显示已有扫描结果，不能让清理失败锁住按钮。 */ }

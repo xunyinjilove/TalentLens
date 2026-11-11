@@ -461,7 +461,7 @@ async function showActiveSearch(): Promise<boolean> {
   if (checkingActiveSearch.value) return true
   checkingActiveSearch.value = true
   try {
-    const api: any = await import('../../wailsjs/go/main/App')
+    const api: any = await import('../../wailsjs/go/backend/App')
     if (!api.GetActiveSourcingSearch) return false
     const state = await api.GetActiveSourcingSearch()
     if (!visible.value) return true
@@ -542,7 +542,7 @@ async function handleGenerateSynonyms() {
   isQuotaMatrixActive.value = true
   try {
     let WailsApp: any = null
-    try { WailsApp = await import('../../wailsjs/go/main/App') } catch {}
+    try { WailsApp = await import('../../wailsjs/go/backend/App') } catch {}
     if (WailsApp && WailsApp.GenerateJobSynonyms) {
       const items = await WailsApp.GenerateJobSynonyms(kw, props.jobDescription || '')
       if (Array.isArray(items) && items.length > 0) {
@@ -732,7 +732,7 @@ function playChimeAlert() {
 // 唤起指定平台 Edge 浏览器窗口至 Windows 前台（解决滑块或查看详情）
 async function handleActivateBrowser(platformCode: string) {
   let WailsApp: any = null
-  try { WailsApp = await import('../../wailsjs/go/main/App') } catch {}
+  try { WailsApp = await import('../../wailsjs/go/backend/App') } catch {}
   if (WailsApp && WailsApp.ActivatePlatformBrowser) {
     try {
       const ok = await WailsApp.ActivatePlatformBrowser(platformCode)
@@ -949,7 +949,7 @@ function addLog(type: SearchLog['type'], message: string) {
 // 独立测试某平台登录
 async function handleTestPlatform(platformCode: string, platformName: string) {
   let WailsApp: any = null
-  try { WailsApp = await import('../../wailsjs/go/main/App') } catch {}
+  try { WailsApp = await import('../../wailsjs/go/backend/App') } catch {}
 
   searching.value = true
   isFinished.value = false
@@ -985,7 +985,7 @@ async function handleTestPlatform(platformCode: string, platformName: string) {
 async function handleStartSearch() {
   if (await showActiveSearch()) return
   let WailsApp: any = null
-  try { WailsApp = await import('../../wailsjs/go/main/App') } catch {
+  try { WailsApp = await import('../../wailsjs/go/backend/App') } catch {
     ElMessage.warning('当前运行在开发预览模式')
   }
 
@@ -1118,7 +1118,7 @@ async function handleStartSearch() {
 async function handleStop() {
   if (stopPending.value) return
   let WailsApp: any = null
-  try { WailsApp = await import('../../wailsjs/go/main/App') } catch {}
+  try { WailsApp = await import('../../wailsjs/go/backend/App') } catch {}
   if (WailsApp && WailsApp.StopBossSearch) {
     try {
       const accepted = await WailsApp.StopBossSearch()

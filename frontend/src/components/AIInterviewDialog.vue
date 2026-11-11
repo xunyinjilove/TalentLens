@@ -124,7 +124,7 @@
 import { computed, ref, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Loading } from '@element-plus/icons-vue'
-import * as App from '../../wailsjs/go/main/App'
+import * as App from '../../wailsjs/go/backend/App'
 
 const props = defineProps<{ modelValue: boolean; resumeId: string }>()
 defineEmits<{ (e: 'update:modelValue', value: boolean): void }>()

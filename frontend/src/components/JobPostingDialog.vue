@@ -246,7 +246,7 @@ async function loadPostingOptions(kind: 'address') {
   postingOptionsMessage.value = ''
   postingOptionsError.value = false
   try {
-    const app: any = await import('../../wailsjs/go/main/App')
+    const app: any = await import('../../wailsjs/go/backend/App')
     const response = await runWith51JobBrowser(app, () => app.Get51JobPostingOptions(kind, addressQuery.value.trim(), ''), {
       isActive: () => opened.value,
       onWaiting: message => { postingOptionsMessage.value = message }
@@ -302,7 +302,7 @@ async function fetchFunctionOptions(path: string[], requestID: number, recoverOn
   // 2. 本地字典未命中时，优雅降级走后台实时抓取
   functionMessage.value = `正在读取 51job ${path.length + 1} 级职能，请稍候…`
   try {
-    const app: any = await import('../../wailsjs/go/main/App')
+    const app: any = await import('../../wailsjs/go/backend/App')
     const response = await app.Get51JobFunctionOptions(path)
     if (requestID !== functionRequestID) return
     if (response.status !== 'ready') {
@@ -354,7 +354,7 @@ async function recoverFunctionLogin(path: string[], requestID: number) {
       functionMessage.value = '无法打开 51job 企业浏览器，请点击“打开并登录 51job”重试'
       return
     }
-    const app: any = await import('../../wailsjs/go/main/App')
+    const app: any = await import('../../wailsjs/go/backend/App')
     const deadline = Date.now() + 180_000
     while (Date.now() < deadline) {
       if (requestID !== functionRequestID || !opened.value) return
@@ -434,7 +434,7 @@ async function loadKeywordSuggestions() {
   loadingKeywords.value = true
   keywordMessage.value = ''
   try {
-    const app: any = await import('../../wailsjs/go/main/App')
+    const app: any = await import('../../wailsjs/go/backend/App')
     const response = await runWith51JobBrowser(app, () => app.Get51JobKeywordSuggestions(path), {
       isActive: () => opened.value && path === form.functionPath.trim(),
       onWaiting: message => { keywordMessage.value = message }
@@ -470,7 +470,7 @@ async function submit(action: 'draft' | 'publish') {
   result.value = null
   absenceConfirmed.value = false
   try {
-    const app: any = await import('../../wailsjs/go/main/App')
+    const app: any = await import('../../wailsjs/go/backend/App')
     const request = {
       projectId: props.project.id,
       jobType: form.jobType, employmentType: form.jobType === '校园招聘' ? form.employmentType : '全职', majors: form.jobType === '校园招聘' ? form.majors : [],
@@ -498,7 +498,7 @@ async function openLogin(): Promise<boolean> {
   if (openingPage.value) return false
   openingPage.value = true
   try {
-    const app: any = await import('../../wailsjs/go/main/App')
+    const app: any = await import('../../wailsjs/go/backend/App')
     const response = await app.Show51JobPage()
     if (response.status === 'ready') { ElMessage.success(response.message); return true }
     ElMessage.error(response.message || '无法打开 51job 页面')
