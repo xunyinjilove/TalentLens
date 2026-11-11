@@ -41,7 +41,7 @@ async function seedProject(page: Page, configured = true) {
   await page.goto('/');
   await expect(page.getByRole('button', { name: /以(此|当前)岗位新建项目/ })).toBeVisible();
   const project = await page.evaluate(async ({ baseURL, configured }) => {
-    const api = (window as any).go.main.App;
+    const api = (window as any).go.backend.App;
     const dir = await api.GetDataDir();
     if (!dir.replaceAll('\\', '/').includes('/.e2e-data/run-')) throw new Error('Not isolated');
     localStorage.setItem('goresume_settings', JSON.stringify({
@@ -67,7 +67,7 @@ test('真实DOCX导入 → 模拟AI分析 → 界面完成 → 刷新持久化�
   await page.getByRole('button', { name: '开始分析', exact: true }).click();
   await expect(page.locator('.resume-card')).toHaveClass(/is-done/);
   await expect(page.locator('.resume-card')).toContainText('红线待核实');
-  const resumes = await page.evaluate(id => (window as any).go.main.App.GetProjectResumes(id), id);
+  const resumes = await page.evaluate(id => (window as any).go.backend.App.GetProjectResumes(id), id);
   expect(resumes[0].content).toContain('E2E虚构候选人');
   expect(resumes[0].score).toBe(75);
   expect(resumes[0].analysis.red_line_status).toBe('pending');

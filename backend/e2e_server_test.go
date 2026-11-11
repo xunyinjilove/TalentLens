@@ -26,6 +26,10 @@ func TestMain(m *testing.M) {
 	if !filepath.IsAbs(dir) {
 		log.Fatal("TALENTLENS_E2E_DATA_DIR must be an absolute isolated directory")
 	}
+	assetsDir := os.Getenv("assetdir")
+	if assetsDir == "" {
+		assetsDir = filepath.Join("..", "frontend", "dist")
+	}
 	app := NewApp()
 	app.dataDirOverride = dir
 	// Synthetic resume: exercise the real DOCX extraction and import path.
@@ -56,7 +60,7 @@ func TestMain(m *testing.M) {
 		Title:    "TalentLens isolated E2E",
 		LogLevel: logger.WARNING,
 		Width:    1200, Height: 800, StartHidden: true,
-		AssetServer: &assetserver.Options{Assets: os.DirFS(filepath.Join("..", "frontend", "dist"))},
+		AssetServer: &assetserver.Options{Assets: os.DirFS(assetsDir)},
 		OnStartup:   app.startup,
 		Bind:        []interface{}{app},
 		Windows:     &windows.Options{WebviewUserDataPath: filepath.Join(dir, "webview")},

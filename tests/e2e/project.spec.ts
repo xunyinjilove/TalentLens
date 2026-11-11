@@ -3,7 +3,7 @@ import { test, expect, Page } from '@playwright/test';
 async function openApp(page: Page) {
   await page.goto('/');
   await expect(page.getByRole('button', { name: /以(此|当前)岗位新建项目/ })).toBeVisible();
-  const dataDir = await page.evaluate(() => (window as any).go.main.App.GetDataDir());
+  const dataDir = await page.evaluate(() => (window as any).go.backend.App.GetDataDir());
   expect(dataDir.replaceAll('\\', '/')).toContain('/.e2e-data/run-');
 }
 
@@ -30,7 +30,7 @@ test('真实后端：新建项目继承岗位，刷新后仍存在，删除后�
   await page.locator('.project-card').filter({ hasText: name }).click();
   await expect(page).toHaveURL(/\/project\//);
   const id = page.url().split('/').pop()!;
-  const project = await page.evaluate(id => (window as any).go.main.App.GetProject(id), id);
+  const project = await page.evaluate(id => (window as any).go.backend.App.GetProject(id), id);
   expect(project.name).toBe(name);
   expect(project.job_config.title).toBe('E2E 测试工程师');
   await page.reload();

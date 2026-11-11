@@ -451,7 +451,7 @@ async function handleDryRun() {
   liveLastItem.value = null
   filterTab.value = 'ALL'
   try {
-    const res = await window.go.main.App.Preview51JobTalentManagementFilter(props.projectId, { ...form.value })
+    const res = await window.go.backend.App.Preview51JobTalentManagementFilter(props.projectId, { ...form.value })
     currentRun.value = res
     ElMessage.success(res.message || '只读试算完成')
   } catch (err) {
@@ -484,7 +484,7 @@ async function handleExecute() {
   liveProgressCount.value = 0
   liveLastItem.value = null
   try {
-    const res = await window.go.main.App.Run51JobTalentManagementFilter(props.projectId, { ...form.value })
+    const res = await window.go.backend.App.Run51JobTalentManagementFilter(props.projectId, { ...form.value })
     currentRun.value = res
     ElMessage.success(res.message || '全自动筛选执行完成')
     emit('completed', res)
@@ -497,7 +497,7 @@ async function handleExecute() {
 
 async function handleStop() {
   try {
-    const [, msg] = await window.go.main.App.Stop51JobTalentManagementFilter()
+    const [, msg] = await window.go.backend.App.Stop51JobTalentManagementFilter()
     ElMessage.info(msg || '正在安全停止…')
   } catch (err) {
     ElMessage.error('发送停止指令失败')
@@ -508,7 +508,7 @@ async function loadHistoryRuns() {
   showHistory.value = !showHistory.value
   if (!showHistory.value) return
   try {
-    historyRuns.value = (await window.go.main.App.List51JobTalentFilterRuns(props.projectId || '')) || []
+    historyRuns.value = (await window.go.backend.App.List51JobTalentFilterRuns(props.projectId || '')) || []
   } catch {
     historyRuns.value = []
   }
@@ -516,7 +516,7 @@ async function loadHistoryRuns() {
 
 async function viewRunDetail(runId) {
   try {
-    const detail = await window.go.main.App.Get51JobTalentFilterRunDetail(runId)
+    const detail = await window.go.backend.App.Get51JobTalentFilterRunDetail(runId)
     currentRun.value = detail
     showHistory.value = false
   } catch (err) {
@@ -526,7 +526,7 @@ async function viewRunDetail(runId) {
 
 async function exportRunExcel(runId) {
   try {
-    const path = await window.go.main.App.Export51JobTalentFilterReport(runId)
+    const path = await window.go.backend.App.Export51JobTalentFilterReport(runId)
     if (path) {
       ElMessage.success(`审计报告已导出至：${path}`)
     }

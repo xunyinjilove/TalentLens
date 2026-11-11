@@ -12,4 +12,4 @@ function run(command, args) {
 }
 if (!process.env.npm_execpath) throw new Error('Run this command through npm run test:e2e:prepare');
 run(process.execPath, [process.env.npm_execpath, '--prefix', 'frontend', 'run', 'build']);
-run('go', ['test', '-c', '-tags', 'dev,e2e', '-o', 'bin/talentlens-e2e.exe', '.']);
+run('go', ['test', '-c', '-tags', 'dev,e2e', '-o', 'bin/talentlens-e2e.exe', './backend']);
